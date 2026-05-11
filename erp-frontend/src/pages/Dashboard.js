@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import Icon from '../components/Icon';
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -54,23 +55,28 @@ export default function Dashboard() {
       </div>
       {error && <div className="alert alert-error">{error}</div>}
       <div className="stats-grid">
-        <StatCard label="Items" value={stats.items} />
-        <StatCard label="Customers" value={stats.customers} />
-        <StatCard label="Suppliers" value={stats.suppliers} />
-        <StatCard label="Sales" value={stats.sales} />
-        <StatCard label="Purchases" value={stats.purchases} />
-        <StatCard label="Total Stock On Hand" value={stats.stockOnHand} />
-        <StatCard label="Low-Stock Items" value={stats.lowStockCount} />
+        <StatCard icon="box"             color="var(--tile-items)"     label="Items"               value={stats.items} />
+        <StatCard icon="users"           color="var(--tile-customers)" label="Customers"           value={stats.customers} />
+        <StatCard icon="truck"           color="var(--tile-suppliers)" label="Suppliers"           value={stats.suppliers} />
+        <StatCard icon="cart"            color="var(--primary)"        label="Sales"               value={stats.sales} />
+        <StatCard icon="package"         color="var(--tile-categories)" label="Purchases"          value={stats.purchases} />
+        <StatCard icon="boxes"           color="var(--tile-accounts)"  label="Total Stock On Hand" value={stats.stockOnHand} />
+        <StatCard icon="bolt"            color="var(--danger)"         label="Low-Stock Items"     value={stats.lowStockCount} />
       </div>
     </>
   );
 }
 
-function StatCard({ label, value }) {
+function StatCard({ icon, color, label, value }) {
   return (
     <div className="stat-card">
-      <div className="label">{label}</div>
-      <div className="value">{value}</div>
+      <span className="stat-icon" style={{ background: color }}>
+        <Icon name={icon} size={22} />
+      </span>
+      <div className="stat-body">
+        <div className="label">{label}</div>
+        <div className="value">{value}</div>
+      </div>
     </div>
   );
 }

@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import CrudPage from '../components/CrudPage';
+import Icon from '../components/Icon';
 import ItemsPanel from '../components/master/ItemsPanel';
 import CategoriesPanel from '../components/master/CategoriesPanel';
 
 const tiles = [
-  { key: 'items', label: 'Items', icon: '📦', accent: '#2563eb' },
-  { key: 'categories', label: 'Categories', icon: '🗂️', accent: '#7c3aed' },
-  { key: 'brands', label: 'Brands', icon: '🏷️', accent: '#0891b2' },
-  { key: 'customers', label: 'Customers', icon: '👥', accent: '#16a34a' },
-  { key: 'suppliers', label: 'Suppliers', icon: '🚚', accent: '#d97706' },
-  { key: 'stores', label: 'Stores', icon: '🏬', accent: '#dc2626' },
-  { key: 'accounts', label: 'Bank/Wallet', icon: '💳', accent: '#0d9488' },
+  { key: 'items',      label: 'Items',       icon: 'box',        color: 'var(--tile-items)' },
+  { key: 'categories', label: 'Categories',  icon: 'folderTree', color: 'var(--tile-categories)' },
+  { key: 'brands',     label: 'Brands',      icon: 'tag',        color: 'var(--tile-brands)' },
+  { key: 'customers',  label: 'Customers',   icon: 'users',      color: 'var(--tile-customers)' },
+  { key: 'suppliers',  label: 'Suppliers',   icon: 'truck',      color: 'var(--tile-suppliers)' },
+  { key: 'stores',     label: 'Stores',      icon: 'store',      color: 'var(--tile-stores)' },
+  { key: 'accounts',   label: 'Bank/Wallet', icon: 'card',       color: 'var(--tile-accounts)' },
 ];
 
 export default function MasterData() {
@@ -27,10 +28,11 @@ export default function MasterData() {
           <button
             key={t.key}
             className={`tile ${active === t.key ? 'tile-active' : ''}`}
-            style={active === t.key ? { borderColor: t.accent, color: t.accent } : undefined}
             onClick={() => setActive(t.key)}
           >
-            <span className="tile-icon" aria-hidden>{t.icon}</span>
+            <span className="tile-icon" style={{ background: t.color }} aria-hidden>
+              <Icon name={t.icon} size={22} />
+            </span>
             <span className="tile-label">{t.label}</span>
           </button>
         ))}
