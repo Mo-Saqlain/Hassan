@@ -19,6 +19,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { PosModule } from './modules/pos/pos.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -58,6 +59,7 @@ function buildDbOptions(): TypeOrmModuleOptions {
     OutboxModule,
     SyncModule,
     PosModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

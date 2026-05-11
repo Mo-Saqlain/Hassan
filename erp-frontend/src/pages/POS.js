@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
+import Icon from '../components/Icon';
 
 export default function POS() {
   const [session, setSession] = useState(null);
@@ -18,6 +19,17 @@ export default function POS() {
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastSale, setLastSale] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  // New Customer modal
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+  });
+  const [newCustomerError, setNewCustomerError] = useState(null);
+  const [newCustomerBusy, setNewCustomerBusy] = useState(false);
 
   const scanInputRef = useRef(null);
 
@@ -165,6 +177,31 @@ export default function POS() {
       setCheckoutError(err.uiMessage ?? 'Checkout failed');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitNewCustomer = async (e) => {
+    e.preventDefault();
+    setNewCustomerError(null);
+    setNewCustomerBusy(true);
+    try {
+      const payload = {
+        name: newCustomer.name.trim(),
+        phone: newCustomer.phone.trim() || undefined,
+        email: newCustomer.email.trim() || undefined,
+        address: newCustomer.address.trim() || undefined,
+      };
+      const r = await api.post('/customers', payload);
+      // Refresh and auto-select the new customer.
+      const list = await api.get('/customers');
+      setCustomers(list.data);
+      setCustomerId(r.data.id);
+      setShowCustomerModal(false);
+      setNewCustomer({ name: '', phone: '', email: '', address: '' });
+    } catch (err) {
+      setNewCustomerError(err.uiMessage ?? 'Could not create customer');
+    } finally {
+      setNewCustomerBusy(false);
     }
   };
 
@@ -359,12 +396,27 @@ export default function POS() {
           </div>
 
           <label>Customer</label>
-          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-            <option value="">— Walk-in —</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <select
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              style={{ flex: 1 }}
+            >
+              <option value="">— Walk-in —</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn"
+              title="Add new customer"
+              onClick={() => setShowCustomerModal(true)}
+              style={{ padding: '8px 10px' }}
+            >
+              <Icon name="plus" size={16} />
+            </button>
+          </div>
 
           <label style={{ marginTop: 10 }}>Payment method</label>
           <div className="pay-buttons">
@@ -397,6 +449,77 @@ export default function POS() {
           </div>
         </aside>
       </div>
+
+      {showCustomerModal && (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowCustomerModal(false);
+          }}
+        >
+          <form className="modal" onSubmit={submitNewCustomer}>
+            <h3 style={{ marginTop: 0 }}>New Customer</h3>
+            {newCustomerError && (
+              <div className="alert alert-error">{newCustomerError}</div>
+            )}
+            <div className="form-row">
+              <div>
+                <label>Name *</label>
+                <input
+                  autoFocus
+                  required
+                  value={newCustomer.name}
+                  onChange={(e) =>
+                    setNewCustomer({ ...newCustomer, name: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label>Phone</label>
+                <input
+                  value={newCustomer.phone}
+                  onChange={(e) =>
+                    setNewCustomer({ ...newCustomer, phone: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div className="form-row">
+              <div>
+                <label>Email</label>
+                <input
+                  type="email"
+                  value={newCustomer.email}
+                  onChange={(e) =>
+                    setNewCustomer({ ...newCustomer, email: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div>
+              <label>Address</label>
+              <textarea
+                value={newCustomer.address}
+                onChange={(e) =>
+                  setNewCustomer({ ...newCustomer, address: e.target.value })
+                }
+              />
+            </div>
+            <div style={{ marginTop: 12, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowCustomerModal(false)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={newCustomerBusy}>
+                {newCustomerBusy ? 'Saving…' : 'Create'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </>
   );
 }

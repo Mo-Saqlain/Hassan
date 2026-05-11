@@ -1,7 +1,7 @@
-/** Brand mark + name for Hassan Electronics. */
-export default function Brand() {
+/** Brand mark + name for Hassan Electronics. In collapsed mode shows only the mark. */
+export default function Brand({ collapsed }) {
   return (
-    <div className="brand">
+    <div className={`brand ${collapsed ? 'brand-collapsed' : ''}`}>
       <div className="brand-mark" aria-hidden>
         <svg viewBox="0 0 32 32" width="34" height="34">
           <defs>
@@ -20,10 +20,12 @@ export default function Brand() {
           />
         </svg>
       </div>
-      <div className="brand-text">
-        <div className="brand-name">Hassan Electronics</div>
-        <div className="brand-tag">Home Appliances</div>
-      </div>
+      {!collapsed && (
+        <div className="brand-text">
+          <div className="brand-name">Hassan Electronics</div>
+          <div className="brand-tag">Home Appliances</div>
+        </div>
+      )}
     </div>
   );
 }

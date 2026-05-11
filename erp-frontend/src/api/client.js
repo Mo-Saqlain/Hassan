@@ -1,7 +1,14 @@
 import axios from 'axios';
 
+// Resolve the API base URL from (in order):
+// 1. Build-time env var REACT_APP_API_BASE_URL (use this for production builds)
+// 2. The hostname the page was loaded from, on port 3001 (so visiting from a
+//    phone at http://192.168.x.x:3000 talks to http://192.168.x.x:3001 instead
+//    of the phone's own localhost).
+const fallbackHost =
+  typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 const baseURL =
-  process.env.REACT_APP_API_BASE_URL ?? 'http://localhost:3001/api';
+  process.env.REACT_APP_API_BASE_URL ?? `http://${fallbackHost}:3001/api`;
 
 export const api = axios.create({
   baseURL,

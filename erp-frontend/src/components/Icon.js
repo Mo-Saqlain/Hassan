@@ -151,6 +151,35 @@ const ICONS = {
     </>
   ),
   bolt: <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />,
+  book: (
+    <>
+      <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v18H6.5A2.5 2.5 0 0 1 4 17.5v-13z" />
+      <path d="M4 17.5A2.5 2.5 0 0 1 6.5 15H20" />
+    </>
+  ),
+  chartBar: (
+    <>
+      <path d="M3 3v18h18" />
+      <rect x="7" y="13" width="3" height="5" rx="0.5" />
+      <rect x="12" y="9" width="3" height="9" rx="0.5" />
+      <rect x="17" y="5" width="3" height="13" rx="0.5" />
+    </>
+  ),
+  warehouse: (
+    <>
+      <path d="M3 21V9l9-5 9 5v12" />
+      <path d="M7 21v-7h10v7" />
+      <path d="M9 14h6M9 17h6" />
+    </>
+  ),
+  menu: (
+    <>
+      <path d="M3 6h18M3 12h18M3 18h18" />
+    </>
+  ),
+  x: <path d="M18 6 6 18M6 6l12 12" />,
+  chevronLeft: <path d="m15 18-6-6 6-6" />,
+  chevronRight: <path d="m9 18 6-6-6-6" />,
 };
 
 export default function Icon({ name, size = 20, className, ...rest }) {

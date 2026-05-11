@@ -5,13 +5,18 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import MasterData from './pages/MasterData';
 import Stock from './pages/Stock';
+import StockLedger from './pages/StockLedger';
 import POS from './pages/POS';
+import Transactions from './pages/Transactions';
 import Sales from './pages/Sales';
 import SaleReturns from './pages/SaleReturns';
 import Purchases from './pages/Purchases';
 import PurchaseReturns from './pages/PurchaseReturns';
 import Receipts from './pages/Receipts';
 import Payments from './pages/Payments';
+import CustomerLedger from './pages/CustomerLedger';
+import SupplierLedger from './pages/SupplierLedger';
+import Financials from './pages/Financials';
 import InvoicePrint from './pages/InvoicePrint';
 
 export default function App() {
@@ -24,12 +29,19 @@ export default function App() {
             <Route path="master" element={<MasterData />} />
             <Route path="pos" element={<POS />} />
             <Route path="stock" element={<Stock />} />
+            <Route path="stock-ledger" element={<StockLedger />} />
+            <Route path="transactions" element={<Transactions />} />
             <Route path="sales" element={<Sales />} />
             <Route path="sale-returns" element={<SaleReturns />} />
             <Route path="purchases" element={<Purchases />} />
             <Route path="purchase-returns" element={<PurchaseReturns />} />
             <Route path="receipts" element={<Receipts />} />
             <Route path="payments" element={<Payments />} />
+            <Route path="customer-ledger" element={<CustomerLedger />} />
+            <Route path="customer-ledger/:id" element={<CustomerLedger />} />
+            <Route path="supplier-ledger" element={<SupplierLedger />} />
+            <Route path="supplier-ledger/:id" element={<SupplierLedger />} />
+            <Route path="financials" element={<Financials />} />
           </Route>
           <Route path="print/sale/:id" element={<InvoicePrint type="sale" />} />
           <Route path="print/purchase/:id" element={<InvoicePrint type="purchase" />} />

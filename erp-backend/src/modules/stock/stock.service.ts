@@ -116,7 +116,8 @@ export class StockService {
       .createQueryBuilder('m')
       .leftJoinAndSelect('m.item', 'item')
       .leftJoinAndSelect('m.store', 'store')
-      .orderBy('m.created_at', 'DESC')
+      .orderBy('m.createdAt', 'DESC')
+      .addOrderBy('m.id', 'DESC')
       .limit(500);
     if (itemId) qb.andWhere('m.item_id = :itemId', { itemId });
     if (storeId) qb.andWhere('m.store_id = :storeId', { storeId });
