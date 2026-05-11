@@ -1,0 +1,15 @@
+{
+  "name": "erp-desktop",
+  "version": "1.0.0",
+  "description": "ERP Phase 1 desktop wrapper (Electron) - bundles the local NestJS backend and React frontend.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "set ERP_DESKTOP_DEV=1&& electron ."
+  },
+  "private": true,
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^42.0.1"
+  }
+}

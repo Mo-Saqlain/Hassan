@@ -1,0 +1,53 @@
+# ───────── Node ─────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ───────── Env / Secrets ─────────
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# ───────── Build output ─────────
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# ───────── ERP local databases ─────────
+erp-backend/erp.sqlite
+erp-backend/erp.sqlite-journal
+erp-backend/erp.sqlite-shm
+erp-backend/erp.sqlite-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+# ───────── Electron ─────────
+erp-desktop/dist/
+erp-desktop/out/
+erp-desktop/release/
+
+# ───────── Editor / OS ─────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ───────── Logs / coverage ─────────
+*.log
+coverage/
+.nyc_output/
+
+# ───────── Misc ─────────
+.cache/
+*.local
