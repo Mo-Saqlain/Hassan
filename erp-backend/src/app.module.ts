@@ -20,6 +20,9 @@ import { OutboxModule } from './modules/outbox/outbox.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { PosModule } from './modules/pos/pos.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { CashRegisterModule } from './modules/cash-register/cash-register.module';
+import { IncentivesModule } from './modules/incentives/incentives.module';
+import { FundTransfersModule } from './modules/fund-transfers/fund-transfers.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -60,6 +63,9 @@ function buildDbOptions(): TypeOrmModuleOptions {
     SyncModule,
     PosModule,
     ReportsModule,
+    FundTransfersModule,
+    CashRegisterModule,
+    IncentivesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 
-const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0 });
+const emptyLine = () => ({ itemId: '', storeId: '', quantity: 1, unitPrice: 0 });
 
 export default function Purchases() {
   const { data: purchases, loading, error, reload } = useResource('/purchases');
@@ -74,6 +74,7 @@ export default function Purchases() {
         .filter((ln) => ln.itemId)
         .map((ln) => ({
           itemId: ln.itemId,
+          storeId: ln.storeId || undefined,
           quantity: Number(ln.quantity),
           unitPrice: Number(ln.unitPrice),
         })),
@@ -131,7 +132,7 @@ export default function Purchases() {
               </select>
             </div>
             <div>
-              <label>Store</label>
+              <label>Default Store (per-line below can override)</label>
               <select
                 value={form.storeId}
                 onChange={(e) => setForm({ ...form, storeId: e.target.value })}
@@ -163,6 +164,7 @@ export default function Purchases() {
             <thead>
               <tr>
                 <th>Item</th>
+                <th>Store</th>
                 <th className="right">Qty</th>
                 <th className="right">Unit Price</th>
                 <th className="right">Line Total</th>
@@ -181,6 +183,25 @@ export default function Purchases() {
                       {items.map((i) => (
                         <option key={i.id} value={i.id}>
                           {i.name} ({i.sku})
+                          {i.modelNo ? ` — ${i.modelNo}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      value={ln.storeId}
+                      onChange={(e) =>
+                        updateLine(idx, { storeId: e.target.value })
+                      }
+                      title="Which store these go to"
+                    >
+                      <option value="">
+                        {form.storeId ? '— Default —' : '— None —'}
+                      </option>
+                      {stores.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
                         </option>
                       ))}
                     </select>

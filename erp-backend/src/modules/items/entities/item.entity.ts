@@ -21,6 +21,9 @@ export class Item extends BaseEntity {
   @Column({ unique: true, nullable: true })
   barcode?: string;
 
+  @Column({ name: 'model_no', nullable: true })
+  modelNo?: string;
+
   @Column({ name: 'brand_id', nullable: true })
   brandId?: string;
 

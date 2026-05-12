@@ -13,6 +13,8 @@ import { Payment } from '../payments/entities/payment.entity';
 import { Account } from '../accounts/entities/account.entity';
 import { Item } from '../items/entities/item.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
+import { IncentivesService } from '../incentives/incentives.service';
+import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
 
 type LedgerEntry = {
   date: Date;
@@ -40,6 +42,8 @@ export class ReportsService {
     @InjectRepository(Account) private readonly accounts: Repository<Account>,
     @InjectRepository(Item) private readonly items: Repository<Item>,
     @InjectRepository(StockMovement) private readonly movements: Repository<StockMovement>,
+    private readonly incentives: IncentivesService,
+    private readonly transfers: FundTransfersService,
   ) {}
 
   // ──────────────────────────────────────────────────────────
@@ -421,7 +425,14 @@ export class ReportsService {
 
     const grossProfit = netRevenue - returnsValue - (cogs - returnsCogs);
     const expenses = 0; // no expense module yet
+
+    // Incentives are a separate margin bucket: we sometimes book per-unit
+    // losses to clear a target that unlocks a larger incentive, so net income
+    // must include both gross margin AND incentive awards in the period.
+    const incentivesEarned = await this.incentives.awardsTotal(from, to);
+
     const netIncome = grossProfit - expenses;
+    const adjustedNetIncome = netIncome + incentivesEarned;
 
     return {
       period: { from: from ?? null, to: to ?? null },
@@ -440,6 +451,8 @@ export class ReportsService {
       grossProfit,
       expenses,
       netIncome,
+      incentives: incentivesEarned,
+      adjustedNetIncome,
     };
   }
 
@@ -455,8 +468,10 @@ export class ReportsService {
     const cashAccountIds = accounts.filter((a) => a.type === 'CASH').map((a) => a.id);
     const bankAccountIds = accounts.filter((a) => a.type === 'BANK').map((a) => a.id);
     const walletAccountIds = accounts.filter((a) => a.type === 'WALLET').map((a) => a.id);
+    const capitalAccountIds = accounts.filter((a) => a.type === 'CAPITAL').map((a) => a.id);
+    const creditAccountIds = accounts.filter((a) => a.type === 'CREDIT').map((a) => a.id);
 
-    const accountBalance = async (ids: string[], openingType: string) => {
+    const accountBalance = async (ids: string[]) => {
       const opening = accounts
         .filter((a) => ids.includes(a.id))
         .reduce((s, a) => s + Number(a.openingBalance ?? 0), 0);
@@ -475,12 +490,20 @@ export class ReportsService {
         .andWhere('p.created_at <= :asOf', { asOf: asOfDate })
         .select('COALESCE(SUM(p.amount), 0)', 'sum')
         .getRawOne();
-      return opening + Number(inSum?.sum ?? 0) - Number(outSum?.sum ?? 0);
+      const transferDelta = await this.transfers.groupDeltaAt(ids, asOfDate);
+      return (
+        opening +
+        Number(inSum?.sum ?? 0) -
+        Number(outSum?.sum ?? 0) +
+        transferDelta
+      );
     };
 
-    const cash = await accountBalance(cashAccountIds, 'CASH');
-    const bank = await accountBalance(bankAccountIds, 'BANK');
-    const wallet = await accountBalance(walletAccountIds, 'WALLET');
+    const cash = await accountBalance(cashAccountIds);
+    const bank = await accountBalance(bankAccountIds);
+    const wallet = await accountBalance(walletAccountIds);
+    const capital = await accountBalance(capitalAccountIds);
+    const credit = await accountBalance(creditAccountIds);
 
     // Inventory at cost = sum on-hand * purchasePrice
     const items = await this.items.find();
@@ -515,8 +538,16 @@ export class ReportsService {
       accountsPayable += Number(l.closingBalance);
     }
 
+    // Treasury assets (excluding capital — capital sits as Owner's contribution
+    // in equity, and its balance flows out via transfers into Cash/Bank/etc.).
+    // CREDIT is a liability: balance represents outstanding credit-card / loan
+    // amount, so we show it on the liability side as `creditPayable`.
     const totalAssets = cash + bank + wallet + inventory + accountsReceivable;
-    const totalLiabilities = accountsPayable;
+    const creditPayable = -credit; // CREDIT balance is negative when money owed
+    const totalLiabilities = accountsPayable + Math.max(0, creditPayable);
+    // Equity bucket = computed equity (assets − liabilities) which already
+    // reflects owner contributions; capital_contributed is reported alongside
+    // for transparency.
     const equity = totalAssets - totalLiabilities;
 
     return {
@@ -531,9 +562,14 @@ export class ReportsService {
       },
       liabilities: {
         accountsPayable,
+        creditPayable: Math.max(0, creditPayable),
         total: totalLiabilities,
       },
-      equity,
+      equity: {
+        capitalContributed: capital,
+        retainedEarnings: equity - capital,
+        total: equity,
+      },
     };
   }
 
@@ -603,16 +639,26 @@ export class ReportsService {
     const closingBS = await this.balanceSheet(end.toISOString());
     const period = await this.incomeStatement(from, to);
 
+    const periodIncome = period.adjustedNetIncome ?? period.netIncome;
+
+    const openingEquity = openingBS.equity.total;
+    const closingEquity = closingBS.equity.total;
+
     return {
       period: { from: from ?? null, to: to ?? null },
-      openingEquity: openingBS.equity,
+      openingEquity,
       netIncome: period.netIncome,
+      incentives: period.incentives ?? 0,
+      adjustedNetIncome: periodIncome,
+      capitalContributedDelta:
+        closingBS.equity.capitalContributed -
+        openingBS.equity.capitalContributed,
       drawings: 0,
-      closingEquity: closingBS.equity,
+      closingEquity,
       balanceCheck: {
-        expected: openingBS.equity + period.netIncome,
-        actual: closingBS.equity,
-        difference: closingBS.equity - (openingBS.equity + period.netIncome),
+        expected: openingEquity + periodIncome,
+        actual: closingEquity,
+        difference: closingEquity - (openingEquity + periodIncome),
       },
     };
   }
@@ -648,6 +694,9 @@ export class ReportsService {
       .andWhere('p.created_at <= :asOf', { asOf })
       .select('COALESCE(SUM(p.amount), 0)', 'sum')
       .getRawOne();
-    return opening + Number(inSum?.sum ?? 0) - Number(outSum?.sum ?? 0);
+    const transferDelta = await this.transfers.groupDeltaAt(ids, asOf);
+    return (
+      opening + Number(inSum?.sum ?? 0) - Number(outSum?.sum ?? 0) + transferDelta
+    );
   }
 }

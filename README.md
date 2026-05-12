@@ -1,9 +1,9 @@
 # Hassan Electronics — Home-Appliances ERP & POS
 
-Offline-first ERP with an integrated Point-of-Sale terminal for a small home-appliances retail shop. Inventory, master data, vouchers, customer/supplier ledgers, and a four-statement financials report — all backed by Supabase Postgres in the cloud, with a desktop Electron build that bundles a local SQLite for true offline cashier operation.
+Offline-first ERP with an integrated Point-of-Sale terminal for a small home-appliances retail shop. Inventory, master data, vouchers, customer/supplier ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Credit), an incentive-tracking system that feeds adjusted-net-income, and a four-statement financials report — all backed by Supabase Postgres in the cloud, with a desktop Electron build that bundles a local SQLite for true offline cashier operation.
 
-![Status](https://img.shields.io/badge/status-Phase%201%20%2B%202%20complete-brightgreen)
-![Tests](https://img.shields.io/badge/tests-74%2F74%20passing-success)
+![Status](https://img.shields.io/badge/status-Phase%201%20%2B%202%20%2B%203%20complete-brightgreen)
+![Tests](https://img.shields.io/badge/tests-77%2F77%20passing-success)
 ![Backend](https://img.shields.io/badge/backend-NestJS%20%2B%20TypeORM-e0234e)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20HashRouter-61dafb)
 ![Theme](https://img.shields.io/badge/themes-light%20%2B%20dark-6366f1)
@@ -60,19 +60,20 @@ One sidebar entry, seven tiles:
 | Customers | `customers` | name + contact + opening balance + **live computed balance** |
 | Suppliers | `suppliers` | same shape as customers, A/P side |
 | Stores | `stores` | multi-branch ready (single store works fine) |
-| Bank/Wallet | `accounts` | Cash / Bank / Wallet accounts for receipts and payments |
+| Accounts | `accounts` | Five types — **Cash**, **Bank**, **Wallet**, **Capital** (owner's equity contributions), **Credit** (credit card / credit line). All can take part in fund transfers. |
 
-### 3. Transactions (consolidated)
-One sidebar entry, six tiles:
+### 3. Transactions (consolidated, grouped)
+One sidebar entry. Tiles are now grouped into four labeled sections:
 
-| Tile | Effect |
-|---|---|
-| Sales History | Read-only list of POS-generated invoices, payment-status badges, reprint |
-| Sale Returns | Goods back from customers → stock IN |
-| Purchases | Stock from suppliers → stock IN |
-| Purchase Returns | Goods returned to suppliers → stock OUT |
-| Receipts | Money in from customers (RCT-…) |
-| Payments | Money out to suppliers (PMT-…) |
+| Group | Tile | Effect |
+|---|---|---|
+| **Sales** | Sales History | Read-only list of POS-generated invoices, payment-status badges, reprint |
+| **Sales** | Sale Returns | Goods back from customers → stock IN |
+| **Purchases** | Purchases | Stock from suppliers → stock IN |
+| **Purchases** | Purchase Returns | Goods returned to suppliers → stock OUT |
+| **Money** | Receipts | Money in from customers (RCT-…) |
+| **Money** | Payments | Money out to suppliers (PMT-…) |
+| **Treasury** | Fund Transfers | Move money between your own accounts (Capital → Cash, Cash → Bank, Bank → Credit, …). Auto-numbered TRF-NNNNNN. |
 
 ### 4. Inventory
 - **Stock Summary** — every item's current on-hand quantity vs minimum, with Low/OK status
@@ -83,19 +84,35 @@ One sidebar entry, six tiles:
 - **Customer Ledger** — chronological list of every sale, sale return, payment-at-sale, and receipt voucher for one customer, with Debit / Credit / running Balance columns. A positive balance means the customer owes you.
 - **Supplier Ledger** — same, liability-side. A positive balance means you owe the supplier.
 
-### 6. Financial Statements
-Single page with four tabs:
-- **Income Statement** — Revenue → Discounts → Returns → COGS (item-cost approximation) → Gross Profit → Net Income
-- **Balance Sheet** — Cash / Bank / Wallet / Inventory at cost / Accounts Receivable | Accounts Payable | Equity (point-in-time, with `asOf` filter)
-- **Cash Flow** — Operating receipts + cash sales − payments − cash purchases; bridges beginning to ending cash
-- **Statement of Changes in Equity** — Opening + Net Income − Drawings = Closing, with a reconciliation row that shows the diff between expected and actual
+### 6. Daily Cash Register (sidebar entry)
+A real cashier's day book. Sidebar → **Cash Book**.
 
-### 7. Cloud sync (Phase 2)
+- **Session-based opening flow** — each shop-day starts with a session. System computes the expected opening cash (carry-over from prior day's closing), cashier counts the till and enters the **Actual Cash Counted**. Any difference is highlighted, and if there's a shortfall the cashier can **book a Fund Transfer in the same atomic open-session POST** (e.g. Capital → Cash) to balance the till before opening.
+- **Closing flow** — at end of day, cashier counts again, system records expected vs actual closing and the closing difference. CLOSED sessions block further entries on the frontend.
+- **Day book table** — every cash movement of the day in one chronological view: explicit cash-book entries (EXPENSE / MISC / OPENING / CLOSING_ADJUSTMENT / OTHER) plus cash-tagged Sales, Purchases, Receipts, Payments, and transfers in/out of cash accounts. Running balance per row.
+- **MISC warning** — if Miscellaneous entries exceed **10% of daily throughput** AND are ≥ Rs.1000 absolute, a banner appears asking the cashier to recategorise. Thresholds at the top of `cash-register.service.ts`.
+
+### 7. Incentives (sidebar entry under Reports)
+Track manufacturer / supplier incentive targets and bookings.
+
+- **Targets** — define on an **Item** or whole **Brand**, with target quantity, period window, and the incentive amount unlocked when the target is hit. Optionally linked to a supplier.
+- **Progress tab** — real-time bar chart of net sold (sold − returned) vs target qty inside the period, with achievement status.
+- **Awards** — book actual payouts received (optionally tied to a target — pre-fills label / amount / period).
+- **Profit reporting** — the Income Statement always shows an `Incentives` section and computes `Adjusted Net Income = Net Income + Incentive Awards`. The Statement of Changes in Equity uses the adjusted figure for its reconciliation. Designed for the "sell at Rs.5000 loss to clear a target that unlocks Rs.8000 incentive" pattern.
+
+### 8. Financial Statements
+Single page with four tabs:
+- **Income Statement** — Revenue → Discounts → Returns → COGS (item-cost approximation) → Gross Profit → Net Income → **(+) Incentive Awards** → **Adjusted Net Income**
+- **Balance Sheet** — Cash / Bank / Wallet / Inventory at cost / Accounts Receivable | Accounts Payable + **Credit Payable** | Equity broken down into **Owner Capital Contributed** + **Retained Earnings** (point-in-time, with `asOf` filter)
+- **Cash Flow** — Operating receipts + cash sales − payments − cash purchases; bridges beginning to ending cash (includes fund-transfer deltas into/out of cash+bank+wallet)
+- **Statement of Changes in Equity** — Opening + Adjusted Net Income − Drawings = Closing, with a reconciliation row that shows the diff between expected and actual
+
+### 9. Cloud sync (Phase 2)
 - Local node enqueues `SALE_CREATED`, `PURCHASE_CREATED`, `POS_SALE_CREATED` events to a local outbox table
 - A background cron pushes the outbox to a configured `CLOUD_SYNC_URL` every 30 seconds when set
 - Cloud receiver is idempotent — duplicate event IDs return `DUPLICATE` with the previous result_id, not a re-applied transaction
 
-### 8. UX / UI
+### 10. UX / UI
 - **Branded** — "Hassan Electronics · Home Appliances" with custom logo mark (gradient + lightning bolt)
 - **Light & Dark theme** — toggle in the sidebar footer; preference persisted in `localStorage`, initial theme honours `prefers-color-scheme`. No flash on load (theme bootstrap script in `index.html` runs before React)
 - **Responsive** — sidebar collapses to a 72px icon-only rail on desktop; turns into an off-canvas drawer with hamburger on mobile (≤ 768px)
@@ -165,16 +182,19 @@ src/
    ├─ customers/          # CRUD + opening balance
    ├─ suppliers/          # CRUD + opening balance
    ├─ stores/             # CRUD
-   ├─ accounts/           # Cash / Bank / Wallet
+   ├─ accounts/           # Cash / Bank / Wallet / Capital / Credit
    ├─ stock/              # movement ledger, on-hand, OUT validation
    ├─ sales/              # voucher + lines + stock OUT (transactional)
    ├─ purchases/          # voucher + lines + stock IN  (transactional)
    ├─ returns/            # sale-return + purchase-return
    ├─ payments/           # IN (receipt) + OUT (payment), filterable
+   ├─ fund-transfers/     # Treasury moves between own accounts (Capital/Cash/Bank/…)
+   ├─ cash-register/      # cash_entries day book + cash_register_sessions (open/close)
+   ├─ incentives/         # incentive_targets + incentive_awards; feeds Adjusted Net Income
    ├─ pos/                # session + cart + checkout
    ├─ outbox/             # local sync queue (decouples sales/purchases from sync)
    ├─ sync/               # receiver (POST /sync/push) + cron worker
-   └─ reports/            # read-only: ledgers, stock ledger, 4 financial statements
+   └─ reports/            # read-only: ledgers, stock ledger, 4 financial statements (consumes IncentivesService + FundTransfersService)
 ```
 
 ### Frontend page map
@@ -198,12 +218,15 @@ src/
    ├─ Dashboard.js        # stat cards
    ├─ MasterData.js       # tile selector + 7 panels
    ├─ POS.js              # POS terminal
-   ├─ Transactions.js     # tile selector linking to the 6 transaction pages
+   ├─ Transactions.js     # grouped tile sections: Sales / Purchases / Money / Treasury
    ├─ Sales.js            # read-only sales history
    ├─ SaleReturns.js
    ├─ Purchases.js
    ├─ PurchaseReturns.js
    ├─ Receipts.js, Payments.js
+   ├─ FundTransfers.js    # Treasury transfers between own accounts
+   ├─ CashRegister.js     # daily cash book with session open/close flow
+   ├─ Incentives.js       # Targets / Progress / Awards tabs
    ├─ Stock.js            # on-hand summary
    ├─ StockLedger.js      # filterable movement ledger
    ├─ CustomerLedger.js
@@ -211,6 +234,15 @@ src/
    ├─ Financials.js       # 4-tab financial statements
    └─ InvoicePrint.js     # auto-print invoice route
 ```
+
+### Sidebar layout
+
+Single-item sections render without a header; multi-item sections keep their label:
+
+- **(no header)** Dashboard, POS Terminal, Master Data, Transactions, Cash Book
+- **Inventory** — Stock Summary, Stock Ledger
+- **Ledgers** — Customer Ledger, Supplier Ledger
+- **Reports** — Financial Statements, Incentives
 
 ---
 
@@ -336,6 +368,32 @@ GET    /purchases           GET    /purchases/:id   POST /purchases
 GET    /sale-returns        GET    /sale-returns/:id      POST /sale-returns
 GET    /purchase-returns    GET    /purchase-returns/:id  POST /purchase-returns
 GET    /payments?direction=IN|OUT    POST  /payments
+GET    /fund-transfers?from=&to=     POST  /fund-transfers
+GET    /fund-transfers/:id           DELETE /fund-transfers/:id
+```
+
+### Cash Register
+```
+POST   /cash-register                       # new day-book entry
+GET    /cash-register?from=&to=             # list raw entries
+GET    /cash-register/day?date=YYYY-MM-DD   # daily book (entries + cash-tagged sales/purchases/vouchers/transfers)
+GET    /cash-register/summary?from=&to=     # per-day opening/in/out/closing
+GET    /cash-register/sessions?from=&to=    # list sessions
+GET    /cash-register/sessions/status?date= # is session open/closed/missing; what's the expected opening
+POST   /cash-register/sessions/open         # open today (actualOpening + optional inline FundTransfer)
+POST   /cash-register/sessions/:date/close  # close a day (actualClosing → records difference)
+DELETE /cash-register/:id                   # remove a cash entry
+```
+
+### Incentives
+```
+POST   /incentives/targets                  GET    /incentives/targets
+GET    /incentives/targets/progress         # progress for ALL targets
+GET    /incentives/targets/:id              GET    /incentives/targets/:id/progress
+PATCH  /incentives/targets/:id              DELETE /incentives/targets/:id
+POST   /incentives/awards                   GET    /incentives/awards?from=&to=
+GET    /incentives/awards/total?from=&to=   # sum used by Income Statement
+DELETE /incentives/awards/:id
 ```
 
 ### Stock
@@ -398,18 +456,21 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 | `/` | Dashboard (stat cards) |
 | `/pos` | POS terminal |
 | `/master` | Master Data hub (7 tiles) |
-| `/transactions` | Transactions hub (6 tiles) |
+| `/transactions` | Transactions hub (grouped: Sales / Purchases / Money / Treasury) |
 | `/sales` | Sales history (read-only) |
 | `/sale-returns` | Sale returns |
 | `/purchases` | Purchases |
 | `/purchase-returns` | Purchase returns |
 | `/receipts` | Receipts (cash/bank in) |
 | `/payments` | Payments (cash/bank out) |
+| `/fund-transfers` | Treasury transfers between own accounts |
+| `/cash-register` | Daily cash book with session open/close |
 | `/stock` | Stock summary + manual adjust |
 | `/stock-ledger` | Stock movement ledger with filters |
 | `/customer-ledger`, `/customer-ledger/:id` | Customer ledger |
 | `/supplier-ledger`, `/supplier-ledger/:id` | Supplier ledger |
 | `/financials` | 4-tab financial statements |
+| `/incentives` | Incentives — Targets / Progress / Awards tabs |
 | `/print/sale/:id`, `/print/purchase/:id` | Print-friendly invoice/bill |
 
 ---
@@ -417,7 +478,7 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 ## Testing
 
 ```bash
-cd erp-backend && npm test           # 74 tests, ~6 seconds
+cd erp-backend && npm test           # 77 tests, ~8 seconds
 cd erp-backend && npx jest --coverage
 ```
 
@@ -459,11 +520,14 @@ Untested (intentional): thin CRUD services for `accounts`, `brands`, `customers`
 
 ## Project conventions
 
-- **No auth** in Phase 1 or 2 — `userId` on `pos_sessions` is nullable and unwired
-- **Sidebar discipline** — new master-data entities → tile in `/master`, new transaction types → tile in `/transactions`. Don't add new sidebar entries for either category.
+- **No auth** in any phase — `userId` on `pos_sessions` is nullable and unwired
+- **Sidebar discipline** — new master-data entities → tile in `/master`, new transaction types → tile in one of the four `/transactions` groups (Sales / Purchases / Money / Treasury). Cash Book and Incentives are sidebar-level because they're cross-cutting tools, not single transaction types. Singleton sidebar sections render without a category header.
 - **Idempotent sync** — every outbound event has a client-generated UUID; the cloud receiver returns `DUPLICATE` (with the prior result id) if the same ID arrives twice
-- **Voucher numbers** — auto-generated, not gap-free (`count + 1`). Replace with a sequences table if strict sequencing matters
-- **TypeORM columns** — snake_case in DB via `name: 'foo_bar'`, camelCase in entity. `.orderBy()` must use the camelCase property name.
+- **Voucher numbers** — auto-generated, not gap-free (`count + 1`). Prefixes: `INV-` sales, `BILL-` purchases, `SR-`/`PR-` returns, `RCT-` receipts, `PMT-` payments, **`TRF-` fund transfers**. Replace with a sequences table if strict sequencing matters
+- **TypeORM columns** — snake_case in DB via `name: 'foo_bar'`, camelCase in entity. `.orderBy()` must use the camelCase property name. Use `type: 'timestamp'` for datetime columns — Postgres rejects `'datetime'`.
+- **Account types** — five flavours: **CASH** (physical till), **BANK** (current/savings), **WALLET** (Easypaisa/JazzCash), **CAPITAL** (owner's contributed equity), **CREDIT** (credit card or credit line — surfaces on the balance sheet as a liability when balance is negative).
+- **Cash register sessions** — open one per shop-day. Opening flow optionally books a FundTransfer atomically (Capital → Cash to cover shortfall). New cash-book entries are blocked client-side once a session is CLOSED.
+- **Profit accounting** — `netIncome` is the trading result; `adjustedNetIncome = netIncome + incentive awards in period`. The Statement of Changes in Equity reconciles against `adjustedNetIncome`.
 - **No migrations yet** — `synchronize: true`. Replace with TypeORM migrations before treating Supabase as production
 
 See [CLAUDE.md](./CLAUDE.md) for the AI-assistant guide with deeper conventions and "don'ts".

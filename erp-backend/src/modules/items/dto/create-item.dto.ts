@@ -24,6 +24,10 @@ export class CreateItemDto {
   @IsOptional()
   barcode?: string;
 
+  @IsString()
+  @IsOptional()
+  modelNo?: string;
+
   @IsUUID()
   @IsOptional()
   brandId?: string;

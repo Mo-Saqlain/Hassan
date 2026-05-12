@@ -180,6 +180,25 @@ const ICONS = {
   x: <path d="M18 6 6 18M6 6l12 12" />,
   chevronLeft: <path d="m15 18-6-6 6-6" />,
   chevronRight: <path d="m9 18 6-6-6-6" />,
+  cash: (
+    <>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M6 10v.01M18 14v.01" />
+    </>
+  ),
+  trophy: (
+    <>
+      <path d="M7 4h10v4a5 5 0 0 1-10 0V4z" />
+      <path d="M5 4H3v2a3 3 0 0 0 3 3M19 4h2v2a3 3 0 0 1-3 3" />
+      <path d="M10 14h4v3h-4zM8 21h8" />
+    </>
+  ),
+  swap: (
+    <>
+      <path d="M3 7h14l-3-3M21 17H7l3 3" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, className, ...rest }) {

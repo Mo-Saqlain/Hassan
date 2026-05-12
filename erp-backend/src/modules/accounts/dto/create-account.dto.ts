@@ -10,9 +10,10 @@ import {
 
 export class CreateAccountDto {
   @IsString() @MinLength(1) name: string;
-  @IsIn(['CASH', 'BANK', 'WALLET']) type: 'CASH' | 'BANK' | 'WALLET';
+  @IsIn(['CASH', 'BANK', 'WALLET', 'CAPITAL', 'CREDIT'])
+  type: 'CASH' | 'BANK' | 'WALLET' | 'CAPITAL' | 'CREDIT';
   @IsString() @IsOptional() accountNumber?: string;
   @IsString() @IsOptional() bank?: string;
-  @IsNumber() @Min(0) @IsOptional() openingBalance?: number;
+  @IsNumber() @IsOptional() openingBalance?: number;
   @IsBoolean() @IsOptional() isActive?: boolean;
 }

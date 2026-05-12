@@ -21,6 +21,9 @@ import { PurchaseReturn } from '../returns/entities/purchase-return.entity';
 import { PurchaseReturnItem } from '../returns/entities/purchase-return-item.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { SyncQueueEntry } from '../outbox/entities/sync-queue.entity';
+import { IncentiveTarget } from '../incentives/entities/incentive-target.entity';
+import { IncentiveAward } from '../incentives/entities/incentive-award.entity';
+import { FundTransfer } from '../fund-transfers/entities/fund-transfer.entity';
 
 import { ItemsService } from '../items/items.service';
 import { StockService } from '../stock/stock.service';
@@ -28,6 +31,8 @@ import { OutboxService } from '../outbox/outbox.service';
 import { SalesService } from '../sales/sales.service';
 import { PurchasesService } from '../purchases/purchases.service';
 import { ReportsService } from './reports.service';
+import { IncentivesService } from '../incentives/incentives.service';
+import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
 
 describe('ReportsService', () => {
   let reports: ReportsService;
@@ -49,19 +54,22 @@ describe('ReportsService', () => {
             Item, Brand, Category, Customer, Supplier, Store, Account,
             StockMovement, Sale, SaleItem, Purchase, PurchaseItem,
             SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
-            Payment, SyncQueueEntry,
+            Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
+            FundTransfer,
           ]),
         ),
         TypeOrmModule.forFeature([
           Item, Category, Customer, Supplier, Account,
           StockMovement, Sale, SaleItem, Purchase, PurchaseItem,
           SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
-          Payment, SyncQueueEntry,
+          Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
+          FundTransfer,
         ]),
       ],
       providers: [
         ReportsService, ItemsService, StockService, OutboxService,
-        SalesService, PurchasesService,
+        SalesService, PurchasesService, IncentivesService,
+        FundTransfersService,
       ],
     }).compile();
 
@@ -185,7 +193,7 @@ describe('ReportsService', () => {
   it('balance sheet: assets = liabilities + equity', async () => {
     const bs = await reports.balanceSheet();
     expect(bs.assets.total).toBeCloseTo(
-      bs.liabilities.total + bs.equity,
+      bs.liabilities.total + bs.equity.total,
       6,
     );
   });

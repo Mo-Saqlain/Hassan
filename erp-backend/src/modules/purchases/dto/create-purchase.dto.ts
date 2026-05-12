@@ -15,6 +15,14 @@ export class CreatePurchaseLineDto {
   @IsUUID()
   itemId: string;
 
+  /**
+   * Optional per-line store. If omitted, the purchase header's storeId is used.
+   * Allowing per-line stores lets a single bill split goods across branches.
+   */
+  @IsUUID()
+  @IsOptional()
+  storeId?: string;
+
   @IsInt()
   @Min(1)
   quantity: number;

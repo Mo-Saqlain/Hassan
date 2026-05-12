@@ -13,7 +13,7 @@ const tiles = [
   { key: 'customers',  label: 'Customers',   icon: 'users',      color: 'var(--tile-customers)' },
   { key: 'suppliers',  label: 'Suppliers',   icon: 'truck',      color: 'var(--tile-suppliers)' },
   { key: 'stores',     label: 'Stores',      icon: 'store',      color: 'var(--tile-stores)' },
-  { key: 'accounts',   label: 'Bank/Wallet', icon: 'card',       color: 'var(--tile-accounts)' },
+  { key: 'accounts',   label: 'Accounts',    icon: 'card',       color: 'var(--tile-accounts)' },
 ];
 
 export default function MasterData() {
@@ -138,7 +138,7 @@ function StoresPanel() {
 function AccountsPanel() {
   return (
     <CrudPage
-      title="Bank / Wallet Accounts"
+      title="Accounts (Cash / Bank / Wallet / Capital / Credit)"
       path="/accounts"
       columns={[
         { key: 'name', label: 'Name' },
@@ -154,9 +154,11 @@ function AccountsPanel() {
           label: 'Type',
           type: 'select',
           options: [
-            { value: 'CASH', label: 'Cash' },
-            { value: 'BANK', label: 'Bank' },
-            { value: 'WALLET', label: 'Wallet' },
+            { value: 'CASH', label: 'Cash (physical till)' },
+            { value: 'BANK', label: 'Bank account' },
+            { value: 'WALLET', label: 'Mobile wallet (Easypaisa, JazzCash…)' },
+            { value: 'CAPITAL', label: 'Owner Capital / Equity' },
+            { value: 'CREDIT', label: 'Credit card / Credit line' },
           ],
           defaultValue: 'CASH',
           required: true,

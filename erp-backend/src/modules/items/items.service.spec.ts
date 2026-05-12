@@ -107,4 +107,13 @@ describe('ItemsService', () => {
       service.update(b.id, { sku: 'A-1' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('stores and returns modelNo on item', async () => {
+    const it = await service.create({
+      name: 'Refrigerator', sku: 'FRDG-1', modelNo: 'RT34K3753S8',
+    });
+    expect(it.modelNo).toBe('RT34K3753S8');
+    const reloaded = await service.findOne(it.id);
+    expect(reloaded.modelNo).toBe('RT34K3753S8');
+  });
 });

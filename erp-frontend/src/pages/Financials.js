@@ -144,7 +144,15 @@ function IncomeStatement({ data }) {
 
       <div className="section-head">Operating Expenses</div>
       <Line label="Expenses" value={data.expenses} indent />
-      <Line label="Net Income" value={data.netIncome} total />
+      <Line label="Net Income (from trading)" value={data.netIncome} total />
+
+      <div className="section-head">Incentives</div>
+      <Line label="(+) Incentive Awards" value={data.incentives ?? 0} indent />
+      <Line
+        label="Adjusted Net Income"
+        value={data.adjustedNetIncome ?? data.netIncome}
+        total
+      />
     </div>
   );
 }
@@ -153,6 +161,11 @@ function BalanceSheet({ data }) {
   if (!data?.assets || !data?.liabilities) return null;
   const a = data.assets;
   const l = data.liabilities;
+  // Backwards-compat: equity used to be a number; now it's an object.
+  const eq =
+    typeof data.equity === 'object' && data.equity !== null
+      ? data.equity
+      : { total: data.equity ?? 0, capitalContributed: 0, retainedEarnings: 0 };
   return (
     <div className="statement">
       <h3>Balance Sheet — as of {new Date(data.asOf).toLocaleDateString()}</h3>
@@ -167,10 +180,13 @@ function BalanceSheet({ data }) {
 
       <div className="section-head">Liabilities</div>
       <Line label="Accounts Payable" value={l.accountsPayable} indent />
+      <Line label="Credit Card / Credit Line" value={l.creditPayable ?? 0} indent />
       <Line label="Total Liabilities" value={l.total} total />
 
       <div className="section-head">Equity</div>
-      <Line label="Owner's Equity" value={data.equity} total />
+      <Line label="Owner Capital Contributed" value={eq.capitalContributed} indent />
+      <Line label="Retained Earnings" value={eq.retainedEarnings} indent />
+      <Line label="Total Equity" value={eq.total} total />
     </div>
   );
 }
@@ -206,6 +222,9 @@ function EquityChanges({ data }) {
       <h3>Statement of Changes in Equity</h3>
       <Line label="Opening Equity" value={data.openingEquity} indent />
       <Line label="(+) Net Income for Period" value={data.netIncome} indent />
+      {(data.incentives ?? 0) > 0 && (
+        <Line label="(+) Incentive Awards" value={data.incentives} indent />
+      )}
       <Line label="(–) Drawings" value={data.drawings} indent />
       <Line label="Closing Equity" value={data.closingEquity} total />
 

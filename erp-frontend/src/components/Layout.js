@@ -4,22 +4,21 @@ import Brand from './Brand';
 import Icon from './Icon';
 import ThemeToggle from './ThemeToggle';
 
+/**
+ * `label: null` renders the items without a category heading — used for
+ * lone entries so we don't slap a one-item section header above them.
+ * Multi-item groups keep their headings.
+ */
 const sections = [
   {
-    label: 'Overview',
-    items: [{ to: '/', label: 'Dashboard', end: true, icon: 'dashboard' }],
-  },
-  {
-    label: 'Point of Sale',
-    items: [{ to: '/pos', label: 'POS Terminal', icon: 'pos' }],
-  },
-  {
-    label: 'Setup',
-    items: [{ to: '/master', label: 'Master Data', icon: 'master' }],
-  },
-  {
-    label: 'Transactions',
-    items: [{ to: '/transactions', label: 'All Transactions', icon: 'cart' }],
+    label: null,
+    items: [
+      { to: '/', label: 'Dashboard', end: true, icon: 'dashboard' },
+      { to: '/pos', label: 'POS Terminal', icon: 'pos' },
+      { to: '/master', label: 'Master Data', icon: 'master' },
+      { to: '/transactions', label: 'Transactions', icon: 'cart' },
+      { to: '/cash-register', label: 'Cash Book', icon: 'cash' },
+    ],
   },
   {
     label: 'Inventory',
@@ -37,7 +36,10 @@ const sections = [
   },
   {
     label: 'Reports',
-    items: [{ to: '/financials', label: 'Financial Statements', icon: 'chartBar' }],
+    items: [
+      { to: '/financials', label: 'Financial Statements', icon: 'chartBar' },
+      { to: '/incentives', label: 'Incentives', icon: 'trophy' },
+    ],
   },
 ];
 
@@ -111,9 +113,9 @@ export default function Layout() {
         </div>
 
         <nav>
-          {sections.map((s) => (
-            <div key={s.label} className="nav-section">
-              {!collapsed && (
+          {sections.map((s, i) => (
+            <div key={s.label ?? `_${i}`} className="nav-section">
+              {!collapsed && s.label && (
                 <div className="nav-section-label">{s.label}</div>
               )}
               {s.items.map((n) => (

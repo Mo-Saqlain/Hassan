@@ -322,6 +322,11 @@ export default function POS() {
                     <td>{ln.item?.name ?? ln.itemId}</td>
                     <td>
                       {ln.item?.sku}
+                      {ln.item?.modelNo && (
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          Model: {ln.item.modelNo}
+                        </div>
+                      )}
                       {ln.item?.barcode && (
                         <div className="muted" style={{ fontSize: 11 }}>
                           {ln.item.barcode}

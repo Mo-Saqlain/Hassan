@@ -14,6 +14,9 @@ import Purchases from './pages/Purchases';
 import PurchaseReturns from './pages/PurchaseReturns';
 import Receipts from './pages/Receipts';
 import Payments from './pages/Payments';
+import CashRegister from './pages/CashRegister';
+import FundTransfers from './pages/FundTransfers';
+import Incentives from './pages/Incentives';
 import CustomerLedger from './pages/CustomerLedger';
 import SupplierLedger from './pages/SupplierLedger';
 import Financials from './pages/Financials';
@@ -37,6 +40,9 @@ export default function App() {
             <Route path="purchase-returns" element={<PurchaseReturns />} />
             <Route path="receipts" element={<Receipts />} />
             <Route path="payments" element={<Payments />} />
+            <Route path="cash-register" element={<CashRegister />} />
+            <Route path="fund-transfers" element={<FundTransfers />} />
+            <Route path="incentives" element={<Incentives />} />
             <Route path="customer-ledger" element={<CustomerLedger />} />
             <Route path="customer-ledger/:id" element={<CustomerLedger />} />
             <Route path="supplier-ledger" element={<SupplierLedger />} />

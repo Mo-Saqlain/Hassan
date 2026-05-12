@@ -6,6 +6,7 @@ const empty = {
   name: '',
   sku: '',
   barcode: '',
+  modelNo: '',
   brandId: '',
   categoryIds: [],
   purchasePrice: '',
@@ -35,6 +36,7 @@ export default function ItemsPanel() {
             name: row.name ?? '',
             sku: row.sku ?? '',
             barcode: row.barcode ?? '',
+            modelNo: row.modelNo ?? '',
             brandId: row.brandId ?? '',
             categoryIds: (row.categories ?? []).map((c) => c.id),
             purchasePrice: row.purchasePrice ?? '',
@@ -64,6 +66,7 @@ export default function ItemsPanel() {
       name: form.name.trim(),
       sku: form.sku.trim(),
       barcode: form.barcode.trim() || undefined,
+      modelNo: form.modelNo.trim() || undefined,
       brandId: form.brandId || undefined,
       categoryIds: form.categoryIds,
       purchasePrice: form.purchasePrice === '' ? undefined : Number(form.purchasePrice),
@@ -134,6 +137,14 @@ export default function ItemsPanel() {
                 value={form.barcode}
                 placeholder="optional, scannable"
                 onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Model No.</label>
+              <input
+                value={form.modelNo}
+                placeholder="e.g. RT34K3753S8"
+                onChange={(e) => setForm({ ...form, modelNo: e.target.value })}
               />
             </div>
             <div>
@@ -244,6 +255,7 @@ export default function ItemsPanel() {
               <th>Name</th>
               <th>SKU</th>
               <th>Barcode</th>
+              <th>Model No.</th>
               <th>Brand</th>
               <th>Categories</th>
               <th className="right">Purchase</th>
@@ -259,6 +271,7 @@ export default function ItemsPanel() {
                 <td>{it.name}</td>
                 <td>{it.sku}</td>
                 <td>{it.barcode ?? '—'}</td>
+                <td>{it.modelNo ?? '—'}</td>
                 <td>{it.brand?.name ?? '—'}</td>
                 <td>
                   {(it.categories ?? []).length === 0

@@ -38,8 +38,12 @@ export class PurchasesService {
         const lineTotal = Number((unitPrice * line.quantity).toFixed(2));
         totalAmount += lineTotal;
 
+        // Per-line store; falls back to the purchase header's store.
+        const lineStoreId = line.storeId ?? dto.storeId;
+
         const pl = manager.create(PurchaseItem, {
           itemId: item.id,
+          storeId: lineStoreId,
           quantity: line.quantity,
           unitPrice,
           lineTotal,
@@ -73,7 +77,7 @@ export class PurchasesService {
         await this.stockService.recordMovement(
           {
             itemId: ln.itemId,
-            storeId: dto.storeId,
+            storeId: ln.storeId ?? dto.storeId,
             type: 'IN',
             quantity: ln.quantity,
             referenceType: 'PURCHASE',

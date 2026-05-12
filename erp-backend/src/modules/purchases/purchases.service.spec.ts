@@ -106,4 +106,31 @@ describe('PurchasesService', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].type).toBe('PURCHASE_CREATED');
   });
+
+  it('splits a single purchase across multiple stores via per-line storeId', async () => {
+    const storeRepo = ds.getRepository(Store);
+    const s1 = await storeRepo.save(storeRepo.create({ name: 'Main' }));
+    const s2 = await storeRepo.save(storeRepo.create({ name: 'Branch' }));
+
+    await service.create({
+      lines: [
+        { itemId, storeId: s1.id, quantity: 5, unitPrice: 300 },
+        { itemId, storeId: s2.id, quantity: 5, unitPrice: 300 },
+      ],
+    });
+
+    expect(await stock.getOnHand(itemId, s1.id)).toBe(5);
+    expect(await stock.getOnHand(itemId, s2.id)).toBe(5);
+    expect(await stock.getOnHand(itemId)).toBe(10);
+  });
+
+  it('falls back to the header storeId when a line omits storeId', async () => {
+    const storeRepo = ds.getRepository(Store);
+    const main = await storeRepo.save(storeRepo.create({ name: 'Main' }));
+    await service.create({
+      storeId: main.id,
+      lines: [{ itemId, quantity: 4, unitPrice: 300 }],
+    });
+    expect(await stock.getOnHand(itemId, main.id)).toBe(4);
+  });
 });

@@ -1,7 +1,7 @@
 import { Column, Entity } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 
-export type AccountType = 'CASH' | 'BANK' | 'WALLET';
+export type AccountType = 'CASH' | 'BANK' | 'WALLET' | 'CAPITAL' | 'CREDIT';
 
 @Entity('accounts')
 export class Account extends BaseEntity {

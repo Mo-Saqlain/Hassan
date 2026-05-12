@@ -14,6 +14,8 @@ import { Payment } from '../payments/entities/payment.entity';
 import { Account } from '../accounts/entities/account.entity';
 import { Item } from '../items/entities/item.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
+import { IncentivesModule } from '../incentives/incentives.module';
+import { FundTransfersModule } from '../fund-transfers/fund-transfers.module';
 
 @Module({
   imports: [
@@ -31,6 +33,8 @@ import { StockMovement } from '../stock/entities/stock-movement.entity';
       Item,
       StockMovement,
     ]),
+    IncentivesModule,
+    FundTransfersModule,
   ],
   controllers: [ReportsController],
   providers: [ReportsService],
