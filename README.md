@@ -54,11 +54,11 @@ One sidebar entry, seven tiles:
 
 | Tile | Entity | Notes |
 |---|---|---|
-| Items | `items` | unique SKU, optional unique barcode, brand FK, M2M categories, prices, unit, min-stock level |
+| Items | `items` | **Model No. is the primary identifier** (used as the item's display name). SKU auto-derives from Model No. on save (suffixed `-2`, `-3`… on collision) — you only see / fill SKU if you click "Advanced". Optional unique barcode, brand FK, M2M categories, prices, unit, min-stock level. **Quick search** bar at the top filters as you type across model no. / name / SKU / barcode / brand. Includes a Close / Reopen action that hides the item from new transactions without deleting history. |
 | Categories | `categories` | self-referencing tree (sub-categories), cycle-protected |
 | Brands | `brands` | simple name + description |
-| Customers | `customers` | name + contact + opening balance + **live computed balance** |
-| Suppliers | `suppliers` | same shape as customers, A/P side |
+| Customers | `customers` | name + contact + opening balance + **live computed balance**. Close / Reopen action to deactivate without losing ledger history. |
+| Suppliers | `suppliers` | same shape as customers, A/P side. Same Close / Reopen action. |
 | Stores | `stores` | multi-branch ready (single store works fine) |
 | Accounts | `accounts` | Five types — **Cash**, **Bank**, **Wallet**, **Capital** (owner's equity contributions), **Credit** (credit card / credit line). All can take part in fund transfers. |
 
@@ -83,6 +83,7 @@ One sidebar entry. Tiles are now grouped into four labeled sections:
 ### 5. Ledgers
 - **Customer Ledger** — chronological list of every sale, sale return, payment-at-sale, and receipt voucher for one customer, with Debit / Credit / running Balance columns. A positive balance means the customer owes you.
 - **Supplier Ledger** — same, liability-side. A positive balance means you owe the supplier.
+- **Account Ledger** — *new.* Per-account history for any Bank / Wallet / Cash / Capital / Credit account. Shows every payment voucher, fund-transfer in/out, and (for CASH accounts) cash-paid sales/purchases, with running balance starting from the account's opening balance. Dropdown is grouped by account type for fast switching.
 
 ### 6. Daily Cash Register (sidebar entry)
 A real cashier's day book. Sidebar → **Cash Book**.
@@ -241,7 +242,7 @@ Single-item sections render without a header; multi-item sections keep their lab
 
 - **(no header)** Dashboard, POS Terminal, Master Data, Transactions, Cash Book
 - **Inventory** — Stock Summary, Stock Ledger
-- **Ledgers** — Customer Ledger, Supplier Ledger
+- **Ledgers** — Customer Ledger, Supplier Ledger, Account Ledger
 - **Reports** — Financial Statements, Incentives
 
 ---
@@ -354,6 +355,7 @@ GET    /brands              POST   /brands         PATCH /brands/:id    DELETE /
 GET    /categories          GET    /categories/tree (root-nested)
 POST   /categories          PATCH  /categories/:id DELETE /categories/:id
 GET    /items               GET    /items/lookup?code=<sku-or-barcode>
+GET    /items/search?q=&limit=     # fuzzy search across modelNo/name/sku/barcode
 POST   /items               PATCH  /items/:id      DELETE /items/:id
 GET    /customers           POST   /customers      PATCH /customers/:id  DELETE /customers/:id
 GET    /suppliers           POST   /suppliers      PATCH /suppliers/:id  DELETE /suppliers/:id
@@ -426,6 +428,8 @@ GET    /reports/customer-ledger/:id
 GET    /reports/customer-balances
 GET    /reports/supplier-ledger/:id
 GET    /reports/supplier-balances
+GET    /reports/account-ledger/:id?asOf=     # Bank / Wallet / Cash / Capital / Credit
+GET    /reports/account-balances             # all accounts with current closing balance
 GET    /reports/stock-ledger?itemId=&categoryId=&brandId=&supplierId=&from=&to=
 GET    /reports/income-statement?from=&to=
 GET    /reports/balance-sheet?asOf=
@@ -469,6 +473,7 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 | `/stock-ledger` | Stock movement ledger with filters |
 | `/customer-ledger`, `/customer-ledger/:id` | Customer ledger |
 | `/supplier-ledger`, `/supplier-ledger/:id` | Supplier ledger |
+| `/account-ledger`, `/account-ledger/:id` | Account ledger (Bank / Wallet / Cash / Capital / Credit) |
 | `/financials` | 4-tab financial statements |
 | `/incentives` | Incentives — Targets / Progress / Awards tabs |
 | `/print/sale/:id`, `/print/purchase/:id` | Print-friendly invoice/bill |
@@ -524,6 +529,8 @@ Untested (intentional): thin CRUD services for `accounts`, `brands`, `customers`
 - **Sidebar discipline** — new master-data entities → tile in `/master`, new transaction types → tile in one of the four `/transactions` groups (Sales / Purchases / Money / Treasury). Cash Book and Incentives are sidebar-level because they're cross-cutting tools, not single transaction types. Singleton sidebar sections render without a category header.
 - **Idempotent sync** — every outbound event has a client-generated UUID; the cloud receiver returns `DUPLICATE` (with the prior result id) if the same ID arrives twice
 - **Voucher numbers** — auto-generated, not gap-free (`count + 1`). Prefixes: `INV-` sales, `BILL-` purchases, `SR-`/`PR-` returns, `RCT-` receipts, `PMT-` payments, **`TRF-` fund transfers**. Replace with a sequences table if strict sequencing matters
+- **Item identity** — Model No. is the item's name. The frontend hides the legacy `name` and `sku` fields in the standard form; the backend auto-fills `name = modelNo` and `sku = modelNo` (suffixed on collision) when they aren't supplied. SKU is preserved as the internal unique code for backwards compatibility and POS barcode-or-SKU lookup; users only touch it via the form's "Advanced" toggle.
+- **Close vs Delete** — items, customers, and suppliers all support a Close (set `isActive = false`) action that hides them from new transactions while preserving their full ledger history. Use Delete only for records created in error.
 - **TypeORM columns** — snake_case in DB via `name: 'foo_bar'`, camelCase in entity. `.orderBy()` must use the camelCase property name. Use `type: 'timestamp'` for datetime columns — Postgres rejects `'datetime'`.
 - **Account types** — five flavours: **CASH** (physical till), **BANK** (current/savings), **WALLET** (Easypaisa/JazzCash), **CAPITAL** (owner's contributed equity), **CREDIT** (credit card or credit line — surfaces on the balance sheet as a liability when balance is negative).
 - **Cash register sessions** — open one per shop-day. Opening flow optionally books a FundTransfer atomically (Capital → Cash to cover shortfall). New cash-book entries are blocked client-side once a session is CLOSED.

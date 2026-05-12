@@ -295,6 +295,165 @@ export class ReportsService {
   }
 
   // ──────────────────────────────────────────────────────────
+  // Account ledger (Bank / Wallet / Capital / Credit / Cash)
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Movement history for a single account: payment vouchers, fund transfers
+   * in/out, and (for CASH accounts) day-book entries. Running balance walks
+   * forward from the account's opening balance.
+   */
+  async accountLedger(accountId: string, asOf?: Date) {
+    const account = await this.accounts.findOne({ where: { id: accountId } });
+    if (!account) throw new NotFoundException(`Account ${accountId} not found`);
+    const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
+
+    const opening = Number(account.openingBalance ?? 0);
+
+    // 1) Payment vouchers on this account.
+    const vouchers = await this.payments.find({
+      where: { accountId, ...dateClause },
+    });
+
+    // 2) Fund transfers touching this account (either side).
+    const transfersOut = await this.transfers.findInvolvingAccounts(
+      [accountId],
+      new Date(0),
+      asOf ?? new Date('9999-12-31'),
+    );
+
+    type Row = {
+      date: Date;
+      ref: string;
+      refId: string;
+      type: string;
+      description: string;
+      debit: number;
+      credit: number;
+    };
+    const rows: Row[] = [];
+
+    for (const v of vouchers) {
+      // From the account's POV: IN voucher = money received → debit (we have more)
+      // OUT voucher = money paid → credit (we have less).
+      const debit = v.direction === 'IN' ? Number(v.amount) : 0;
+      const credit = v.direction === 'OUT' ? Number(v.amount) : 0;
+      const partyName =
+        v.direction === 'IN' ? v.customer?.name : v.supplier?.name;
+      rows.push({
+        date: new Date(v.createdAt),
+        ref: v.voucherNo,
+        refId: v.id,
+        type: v.direction === 'IN' ? 'RECEIPT' : 'PAYMENT',
+        description: partyName
+          ? `${v.direction === 'IN' ? 'Receipt from' : 'Payment to'} ${partyName}`
+          : v.notes ?? v.voucherNo,
+        debit,
+        credit,
+      });
+    }
+
+    for (const t of transfersOut) {
+      const isIn = t.toAccountId === accountId;
+      rows.push({
+        date: new Date(t.createdAt),
+        ref: t.transferNo,
+        refId: t.id,
+        type: isIn ? 'TRANSFER_IN' : 'TRANSFER_OUT',
+        description: isIn
+          ? `Transfer from ${t.fromAccount?.name ?? '—'}`
+          : `Transfer to ${t.toAccount?.name ?? '—'}`,
+        debit: isIn ? Number(t.amount) : 0,
+        credit: isIn ? 0 : Number(t.amount),
+      });
+    }
+
+    // 3) Sale / Purchase paid-at-time portions that hit this specific account.
+    //    Sales/purchases don't store accountId — payment-method-CASH only counts
+    //    for CASH accounts. Plus the existing voucher rows above already cover
+    //    the explicit cases. We surface CASH paid-at-time too for CASH accounts.
+    if (account.type === 'CASH') {
+      const sales = await this.sales.find({
+        where: { paymentMethod: 'CASH' as any, ...dateClause },
+      });
+      for (const s of sales) {
+        const paid = Number(s.paidAmount ?? 0);
+        if (paid <= 0) continue;
+        rows.push({
+          date: new Date(s.createdAt),
+          ref: s.invoiceNo,
+          refId: s.id,
+          type: 'CASH_SALE',
+          description: `Cash sale ${s.invoiceNo}`,
+          debit: paid,
+          credit: 0,
+        });
+      }
+      const purchases = await this.purchases.find({
+        where: { paymentMethod: 'CASH', ...dateClause },
+      });
+      for (const p of purchases) {
+        const paid = Number(p.paidAmount ?? 0);
+        if (paid <= 0) continue;
+        rows.push({
+          date: new Date(p.createdAt),
+          ref: p.billNo,
+          refId: p.id,
+          type: 'CASH_PURCHASE',
+          description: `Cash purchase ${p.billNo}`,
+          debit: 0,
+          credit: paid,
+        });
+      }
+    }
+
+    rows.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    const entries: Array<Row & { balance: number }> = [];
+    let balance = opening;
+    if (opening !== 0) {
+      entries.push({
+        date: account.createdAt,
+        ref: '—',
+        refId: account.id,
+        type: 'OPENING',
+        description: 'Opening balance',
+        debit: opening > 0 ? opening : 0,
+        credit: opening < 0 ? -opening : 0,
+        balance,
+      });
+    }
+    for (const r of rows) {
+      balance = balance + r.debit - r.credit;
+      entries.push({ ...r, balance });
+    }
+
+    const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
+    const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
+
+    return {
+      account,
+      openingBalance: opening,
+      entries,
+      closingBalance: balance,
+      totalDebit,
+      totalCredit,
+    };
+  }
+
+  /** All accounts with their current closing balance — for the sidebar/index. */
+  async allAccountBalances() {
+    const list = await this.accounts.find({ order: { name: 'ASC' } });
+    const results = await Promise.all(
+      list.map(async (a) => {
+        const l = await this.accountLedger(a.id);
+        return { ...a, balance: l.closingBalance };
+      }),
+    );
+    return results;
+  }
+
+  // ──────────────────────────────────────────────────────────
   // Stock ledger
   // ──────────────────────────────────────────────────────────
 

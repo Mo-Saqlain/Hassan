@@ -3,10 +3,9 @@ import { api } from '../../api/client';
 import { useResource } from '../../hooks/useResource';
 
 const empty = {
-  name: '',
-  sku: '',
-  barcode: '',
   modelNo: '',
+  barcode: '',
+  sku: '',
   brandId: '',
   categoryIds: [],
   purchasePrice: '',
@@ -25,6 +24,19 @@ export default function ItemsPanel() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [submitError, setSubmitError] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Quick search — typing here filters the list as you go.
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter((it) =>
+      [it.modelNo, it.name, it.sku, it.barcode, it.brand?.name]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(term)),
+    );
+  }, [items, query]);
 
   const categoryPaths = useMemo(() => buildCategoryPaths(categories), [categories]);
 
@@ -33,10 +45,9 @@ export default function ItemsPanel() {
     setForm(
       row
         ? {
-            name: row.name ?? '',
-            sku: row.sku ?? '',
+            modelNo: row.modelNo ?? row.name ?? '',
             barcode: row.barcode ?? '',
-            modelNo: row.modelNo ?? '',
+            sku: row.sku ?? '',
             brandId: row.brandId ?? '',
             categoryIds: (row.categories ?? []).map((c) => c.id),
             purchasePrice: row.purchasePrice ?? '',
@@ -47,6 +58,7 @@ export default function ItemsPanel() {
           }
         : empty,
     );
+    setShowAdvanced(false);
     setShowForm(true);
     setSubmitError(null);
   };
@@ -62,11 +74,18 @@ export default function ItemsPanel() {
 
   const submit = async (e) => {
     e.preventDefault();
+    const modelNo = form.modelNo.trim();
+    if (!modelNo) {
+      setSubmitError('Model No. is required');
+      return;
+    }
     const payload = {
-      name: form.name.trim(),
-      sku: form.sku.trim(),
+      modelNo,
+      // name auto-derives from modelNo on the backend; send it explicitly so
+      // the displayed name updates in lockstep when the user edits modelNo.
+      name: modelNo,
       barcode: form.barcode.trim() || undefined,
-      modelNo: form.modelNo.trim() || undefined,
+      sku: form.sku.trim() || undefined,
       brandId: form.brandId || undefined,
       categoryIds: form.categoryIds,
       purchasePrice: form.purchasePrice === '' ? undefined : Number(form.purchasePrice),
@@ -90,12 +109,21 @@ export default function ItemsPanel() {
   };
 
   const remove = async (row) => {
-    if (!window.confirm(`Delete "${row.name}"?`)) return;
+    if (!window.confirm(`Delete "${row.modelNo ?? row.name}"?`)) return;
     try {
       await api.delete(`/items/${row.id}`);
       reload();
     } catch (err) {
       alert(err.uiMessage ?? 'Delete failed');
+    }
+  };
+
+  const toggleActive = async (row) => {
+    try {
+      await api.patch(`/items/${row.id}`, { isActive: !row.isActive });
+      reload();
+    } catch (err) {
+      alert(err.uiMessage ?? 'Update failed');
     }
   };
 
@@ -110,26 +138,49 @@ export default function ItemsPanel() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      <div className="card" style={{ marginBottom: 12 }}>
+        <label>Quick search</label>
+        <input
+          autoFocus={!showForm}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Type a model no., name, SKU, barcode, or brand…"
+          list="items-quick-search-list"
+        />
+        <datalist id="items-quick-search-list">
+          {items.map((it) => (
+            <option
+              key={it.id}
+              value={it.modelNo ?? it.name}
+              label={`${it.brand?.name ?? '—'} · Buy ${Number(it.purchasePrice).toFixed(0)} · Sell ${Number(it.salePrice).toFixed(0)}`}
+            />
+          ))}
+        </datalist>
+        {query.trim() && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {filtered.length} match{filtered.length === 1 ? '' : 'es'}
+          </div>
+        )}
+      </div>
+
       {showForm && (
         <form className="card" onSubmit={submit}>
           <h4 style={{ marginTop: 0 }}>{editing ? 'Edit Item' : 'New Item'}</h4>
           {submitError && <div className="alert alert-error">{submitError}</div>}
           <div className="form-row">
             <div>
-              <label>Name *</label>
+              <label>Model No. *</label>
               <input
                 required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                autoFocus
+                value={form.modelNo}
+                placeholder="e.g. RT34K3753S8"
+                onChange={(e) => setForm({ ...form, modelNo: e.target.value })}
               />
-            </div>
-            <div>
-              <label>SKU *</label>
-              <input
-                required
-                value={form.sku}
-                onChange={(e) => setForm({ ...form, sku: e.target.value })}
-              />
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                The model number is used as this item's name. SKU is
+                auto-generated from it.
+              </div>
             </div>
             <div>
               <label>Barcode</label>
@@ -137,14 +188,6 @@ export default function ItemsPanel() {
                 value={form.barcode}
                 placeholder="optional, scannable"
                 onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-              />
-            </div>
-            <div>
-              <label>Model No.</label>
-              <input
-                value={form.modelNo}
-                placeholder="e.g. RT34K3753S8"
-                onChange={(e) => setForm({ ...form, modelNo: e.target.value })}
               />
             </div>
             <div>
@@ -208,6 +251,33 @@ export default function ItemsPanel() {
             </div>
           </div>
 
+          <div style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              {showAdvanced ? '− Hide advanced' : '+ Advanced (override SKU)'}
+            </button>
+          </div>
+
+          {showAdvanced && (
+            <div className="form-row" style={{ marginTop: 8 }}>
+              <div>
+                <label>SKU (override)</label>
+                <input
+                  value={form.sku}
+                  placeholder="Auto-derived from Model No. when blank"
+                  onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                />
+                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Stock Keeping Unit — internal unique code. Leave blank to let
+                  the system match it to your Model No.
+                </div>
+              </div>
+            </div>
+          )}
+
           <div>
             <label>Categories (select any number)</label>
             {categories.length === 0 ? (
@@ -246,33 +316,39 @@ export default function ItemsPanel() {
 
       {loading ? (
         <div className="muted">Loading…</div>
-      ) : items.length === 0 ? (
-        <div className="card muted center">No items yet.</div>
+      ) : filtered.length === 0 ? (
+        <div className="card muted center">
+          {query.trim() ? 'No items match your search.' : 'No items yet.'}
+        </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>SKU</th>
-              <th>Barcode</th>
-              <th>Model No.</th>
+              <th>Model No. / Name</th>
               <th>Brand</th>
+              <th>Barcode</th>
               <th>Categories</th>
               <th className="right">Purchase</th>
               <th className="right">Sale</th>
               <th>Unit</th>
               <th className="right">Min</th>
+              <th>Status</th>
               <th className="right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {items.map((it) => (
-              <tr key={it.id}>
-                <td>{it.name}</td>
-                <td>{it.sku}</td>
-                <td>{it.barcode ?? '—'}</td>
-                <td>{it.modelNo ?? '—'}</td>
+            {filtered.map((it) => (
+              <tr key={it.id} style={!it.isActive ? { opacity: 0.55 } : undefined}>
+                <td>
+                  <strong>{it.modelNo ?? it.name}</strong>
+                  {it.sku && it.sku !== (it.modelNo ?? it.name) && (
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      SKU: {it.sku}
+                    </div>
+                  )}
+                </td>
                 <td>{it.brand?.name ?? '—'}</td>
+                <td>{it.barcode ?? '—'}</td>
                 <td>
                   {(it.categories ?? []).length === 0
                     ? '—'
@@ -286,9 +362,19 @@ export default function ItemsPanel() {
                 <td className="right">{Number(it.salePrice).toFixed(2)}</td>
                 <td>{it.unit}</td>
                 <td className="right">{it.minStockLevel}</td>
+                <td>
+                  <span
+                    className={`badge ${it.isActive ? 'badge-green' : 'badge-gray'}`}
+                  >
+                    {it.isActive ? 'Active' : 'Closed'}
+                  </span>
+                </td>
                 <td className="right">
                   <button className="btn btn-sm" onClick={() => open(it)}>
                     Edit
+                  </button>{' '}
+                  <button className="btn btn-sm" onClick={() => toggleActive(it)}>
+                    {it.isActive ? 'Close' : 'Reopen'}
                   </button>{' '}
                   <button
                     className="btn btn-sm btn-danger"

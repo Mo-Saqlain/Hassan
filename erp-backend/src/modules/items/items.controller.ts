@@ -33,6 +33,13 @@ export class ItemsController {
     return this.service.findByCode(code);
   }
 
+  /** Fuzzy item search for the quick-search combobox: ?q=<partial-text> */
+  @Get('search')
+  search(@Query('q') q?: string, @Query('limit') limit?: string) {
+    const n = limit ? Math.min(parseInt(limit, 10) || 25, 100) : 25;
+    return this.service.search(q, n);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);

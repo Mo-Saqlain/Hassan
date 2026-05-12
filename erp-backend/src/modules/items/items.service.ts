@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { ILike, In, Repository } from 'typeorm';
 import { Item } from './entities/item.entity';
 import { Category } from '../categories/entities/category.entity';
 import { CreateItemDto } from './dto/create-item.dto';
@@ -16,20 +16,59 @@ export class ItemsService {
   ) {}
 
   async create(dto: CreateItemDto) {
-    await this.ensureUniqueCodes(dto.sku, dto.barcode);
-    const item = this.repo.create(this.stripCategoryIds(dto));
+    // The shop uses Model No. as the item's name. Auto-derive name + sku
+    // from modelNo when the caller didn't supply them. For backwards-compat,
+    // if modelNo is missing but name is set, fall back to name as the modelNo.
+    const modelNo = (dto.modelNo ?? dto.name ?? '').trim();
+    if (!modelNo) {
+      throw new ConflictException('modelNo (or name) is required');
+    }
+    const name = dto.name?.trim() || modelNo;
+    const sku = dto.sku?.trim() || (await this.deriveSku(modelNo));
+    await this.ensureUniqueCodes(sku, dto.barcode);
+    const item = this.repo.create({
+      ...this.stripCategoryIds(dto),
+      name,
+      sku,
+      modelNo,
+    });
     item.categories = await this.resolveCategories(dto.categoryIds);
     return this.repo.save(item);
   }
 
   findAll() {
-    return this.repo.find({ order: { name: 'ASC' } });
+    return this.repo.find({ order: { modelNo: 'ASC' } });
   }
 
   async findOne(id: string) {
     const item = await this.repo.findOne({ where: { id } });
     if (!item) throw new NotFoundException(`Item ${id} not found`);
     return item;
+  }
+
+  /**
+   * Fuzzy search across modelNo / name / sku / barcode for the quick-search
+   * combobox. Case-insensitive substring match (ILIKE), capped at 25 results.
+   */
+  async search(q?: string, limit = 25): Promise<Item[]> {
+    const term = (q ?? '').trim();
+    if (!term) {
+      return this.repo.find({
+        order: { modelNo: 'ASC' },
+        take: limit,
+      });
+    }
+    const like = `%${term}%`;
+    return this.repo.find({
+      where: [
+        { modelNo: ILike(like) },
+        { name: ILike(like) },
+        { sku: ILike(like) },
+        { barcode: ILike(like) },
+      ],
+      order: { modelNo: 'ASC' },
+      take: limit,
+    });
   }
 
   /** POS-style lookup by SKU or barcode (exact match). */
@@ -41,6 +80,20 @@ export class ItemsService {
       (await this.repo.findOne({ where: { sku: trimmed } }));
     if (!item) throw new NotFoundException(`No item with code ${trimmed}`);
     return item;
+  }
+
+  private async deriveSku(modelNo: string): Promise<string> {
+    // Try the model number itself; if taken, suffix -2, -3, etc.
+    const base = modelNo.trim();
+    let candidate = base;
+    let n = 1;
+    // Bound the loop generously — collisions on the same modelNo are rare.
+    while (await this.repo.findOne({ where: { sku: candidate } })) {
+      n += 1;
+      candidate = `${base}-${n}`;
+      if (n > 1000) break;
+    }
+    return candidate;
   }
 
   async update(id: string, dto: UpdateItemDto) {

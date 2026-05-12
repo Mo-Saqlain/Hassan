@@ -19,6 +19,7 @@ import FundTransfers from './pages/FundTransfers';
 import Incentives from './pages/Incentives';
 import CustomerLedger from './pages/CustomerLedger';
 import SupplierLedger from './pages/SupplierLedger';
+import AccountLedger from './pages/AccountLedger';
 import Financials from './pages/Financials';
 import InvoicePrint from './pages/InvoicePrint';
 
@@ -47,6 +48,8 @@ export default function App() {
             <Route path="customer-ledger/:id" element={<CustomerLedger />} />
             <Route path="supplier-ledger" element={<SupplierLedger />} />
             <Route path="supplier-ledger/:id" element={<SupplierLedger />} />
+            <Route path="account-ledger" element={<AccountLedger />} />
+            <Route path="account-ledger/:id" element={<AccountLedger />} />
             <Route path="financials" element={<Financials />} />
           </Route>
           <Route path="print/sale/:id" element={<InvoicePrint type="sale" />} />

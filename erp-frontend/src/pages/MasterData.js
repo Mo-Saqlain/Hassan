@@ -271,6 +271,17 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
     }
   };
 
+  const toggleActive = async (row) => {
+    const verb = row.isActive ? 'Close' : 'Reopen';
+    if (!window.confirm(`${verb} ${row.name}?`)) return;
+    try {
+      await api.patch(`${basePath}/${row.id}`, { isActive: !row.isActive });
+      reload();
+    } catch (err) {
+      alert(err.uiMessage ?? 'Update failed');
+    }
+  };
+
   return (
     <>
       <div className="panel-header">
@@ -371,9 +382,23 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
             {rows.map((r) => {
               const bal = Number(r.balance ?? 0);
               const cls = bal > 0 ? 'badge-red' : bal < 0 ? 'badge-green' : 'badge-gray';
+              const isActive = r.isActive ?? true;
               return (
-                <tr key={r.id}>
-                  <td>{r.name}</td>
+                <tr
+                  key={r.id}
+                  style={!isActive ? { opacity: 0.55 } : undefined}
+                >
+                  <td>
+                    {r.name}
+                    {!isActive && (
+                      <span
+                        className="badge badge-gray"
+                        style={{ marginLeft: 6, fontSize: 10 }}
+                      >
+                        CLOSED
+                      </span>
+                    )}
+                  </td>
                   <td>{r.phone ?? '—'}</td>
                   <td>{r.email ?? '—'}</td>
                   <td className="right">{Number(r.openingBalance ?? 0).toFixed(2)}</td>
@@ -391,6 +416,17 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
                     </Link>{' '}
                     <button className="btn btn-sm" onClick={() => startEdit(r)}>
                       Edit
+                    </button>{' '}
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => toggleActive(r)}
+                      title={
+                        isActive
+                          ? 'Mark as closed (kept in records, hidden from new transactions)'
+                          : 'Reopen this party'
+                      }
+                    >
+                      {isActive ? 'Close' : 'Reopen'}
                     </button>{' '}
                     <button
                       className="btn btn-sm btn-danger"

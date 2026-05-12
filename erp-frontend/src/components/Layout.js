@@ -32,6 +32,7 @@ const sections = [
     items: [
       { to: '/customer-ledger', label: 'Customer Ledger', icon: 'book' },
       { to: '/supplier-ledger', label: 'Supplier Ledger', icon: 'book' },
+      { to: '/account-ledger', label: 'Account Ledger', icon: 'card' },
     ],
   },
   {

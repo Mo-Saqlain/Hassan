@@ -12,18 +12,30 @@ import {
 } from 'class-validator';
 
 export class CreateItemDto {
+  /**
+   * Display name. If omitted, the service copies `modelNo` here — the shop
+   * treats Model No. as the item's name.
+   */
   @IsString()
-  @MinLength(1)
-  name: string;
+  @IsOptional()
+  name?: string;
 
+  /**
+   * Stock Keeping Unit — unique internal code per item variant. If omitted,
+   * the service derives one from `modelNo` (suffixing -2 / -3… on collision).
+   */
   @IsString()
-  @MinLength(1)
-  sku: string;
+  @IsOptional()
+  sku?: string;
 
   @IsString()
   @IsOptional()
   barcode?: string;
 
+  /**
+   * Manufacturer's model number — the item's identifier in the shop's eyes.
+   * Required unless `name` is provided as a fallback (legacy callers).
+   */
   @IsString()
   @IsOptional()
   modelNo?: string;

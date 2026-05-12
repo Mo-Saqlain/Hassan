@@ -32,6 +32,19 @@ export class ReportsController {
     return this.service.allSupplierBalances();
   }
 
+  @Get('account-ledger/:id')
+  accountLedger(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('asOf') asOf?: string,
+  ) {
+    return this.service.accountLedger(id, asOf ? new Date(asOf) : undefined);
+  }
+
+  @Get('account-balances')
+  accountBalances() {
+    return this.service.allAccountBalances();
+  }
+
   @Get('stock-ledger')
   stockLedger(
     @Query('itemId') itemId?: string,
