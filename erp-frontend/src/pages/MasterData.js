@@ -58,6 +58,7 @@ function BrandsPanel() {
     <CrudPage
       title="Brands"
       path="/brands"
+      searchKeys={['name', 'description']}
       columns={[
         { key: 'name', label: 'Name' },
         { key: 'description', label: 'Description' },
@@ -113,6 +114,7 @@ function StoresPanel() {
     <CrudPage
       title="Stores / Branches"
       path="/stores"
+      searchKeys={['name', 'location']}
       columns={[
         { key: 'name', label: 'Name' },
         { key: 'location', label: 'Location' },
@@ -140,6 +142,7 @@ function AccountsPanel() {
     <CrudPage
       title="Accounts (Cash / Bank / Wallet / Capital / Credit)"
       path="/accounts"
+      searchKeys={['name', 'type', 'bank', 'accountNumber']}
       columns={[
         { key: 'name', label: 'Name' },
         { key: 'type', label: 'Type' },
@@ -184,6 +187,15 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const [submitError, setSubmitError] = useState(null);
+  const [query, setQuery] = useState('');
+
+  const filtered = rows.filter((r) => {
+    const term = query.trim().toLowerCase();
+    if (!term) return true;
+    return [r.name, r.phone, r.email, r.address]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(term));
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -293,6 +305,20 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      <div className="card" style={{ marginBottom: 12 }}>
+        <label>Quick search</label>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={`Type name, phone, email, or address…`}
+        />
+        {query.trim() && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {filtered.length} of {rows.length}
+          </div>
+        )}
+      </div>
+
       {showForm && (
         <form className="card" onSubmit={submit}>
           <h4 style={{ marginTop: 0 }}>{editing ? 'Edit' : 'New'}</h4>
@@ -363,8 +389,10 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
 
       {loading ? (
         <div className="muted">Loading…</div>
-      ) : rows.length === 0 ? (
-        <div className="card muted center">No records yet.</div>
+      ) : filtered.length === 0 ? (
+        <div className="card muted center">
+          {query.trim() ? 'No matches.' : 'No records yet.'}
+        </div>
       ) : (
         <table>
           <thead>
@@ -379,7 +407,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {filtered.map((r) => {
               const bal = Number(r.balance ?? 0);
               const cls = bal > 0 ? 'badge-red' : bal < 0 ? 'badge-green' : 'badge-gray';
               const isActive = r.isActive ?? true;

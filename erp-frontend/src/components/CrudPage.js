@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 
@@ -10,12 +10,33 @@ import { useResource } from '../hooks/useResource';
  *   key, label, type ('text'|'number'|'email'|'checkbox'|'textarea'),
  *   required?, placeholder?, defaultValue?
  * }
+ *
+ * `searchKeys` (default: ['name']) controls which fields the quick-search
+ * bar checks for substring matches.
  */
-export default function CrudPage({ title, path, columns, formFields }) {
+export default function CrudPage({
+  title,
+  path,
+  columns,
+  formFields,
+  searchKeys = ['name'],
+}) {
   const { data, loading, error, reload } = useResource(path);
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return data;
+    return data.filter((row) =>
+      searchKeys.some((k) => {
+        const v = row[k];
+        return v != null && String(v).toLowerCase().includes(term);
+      }),
+    );
+  }, [data, query, searchKeys]);
 
   const startAdd = () => {
     setEditing(null);
@@ -66,6 +87,20 @@ export default function CrudPage({ title, path, columns, formFields }) {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      <div className="card" style={{ marginBottom: 12 }}>
+        <label>Quick search</label>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={`Type to filter ${title.toLowerCase()}…`}
+        />
+        {query.trim() && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {filtered.length} of {data.length}
+          </div>
+        )}
+      </div>
+
       {showForm && (
         <CrudForm
           fields={formFields}
@@ -78,8 +113,10 @@ export default function CrudPage({ title, path, columns, formFields }) {
 
       {loading ? (
         <div className="muted">Loading…</div>
-      ) : data.length === 0 ? (
-        <div className="card muted center">No records yet.</div>
+      ) : filtered.length === 0 ? (
+        <div className="card muted center">
+          {query.trim() ? 'No matches.' : 'No records yet.'}
+        </div>
       ) : (
         <table>
           <thead>
@@ -93,7 +130,7 @@ export default function CrudPage({ title, path, columns, formFields }) {
             </tr>
           </thead>
           <tbody>
-            {data.map((row) => (
+            {filtered.map((row) => (
               <tr key={row.id}>
                 {columns.map((c) => (
                   <td key={c.key} className={c.align}>

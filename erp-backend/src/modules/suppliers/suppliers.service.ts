@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
+import { deleteOrConflict } from '../../common/delete-guard';
 
 @Injectable()
 export class SuppliersService {
@@ -29,7 +30,9 @@ export class SuppliersService {
 
   async remove(id: string) {
     const s = await this.findOne(id);
-    await this.repo.remove(s);
-    return { deleted: true, id };
+    return deleteOrConflict(async () => {
+      await this.repo.remove(s);
+      return { deleted: true, id };
+    }, 'supplier');
   }
 }

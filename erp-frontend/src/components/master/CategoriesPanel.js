@@ -13,6 +13,16 @@ export default function CategoriesPanel() {
 
   const tree = useMemo(() => buildTree(categories), [categories]);
   const flat = useMemo(() => flattenTree(tree), [tree]);
+  const [query, setQuery] = useState('');
+  const filteredFlat = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return flat;
+    return flat.filter((n) =>
+      [n.name, n.description]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(term)),
+    );
+  }, [flat, query]);
 
   const open = (row) => {
     setEditing(row);
@@ -75,6 +85,20 @@ export default function CategoriesPanel() {
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <label>Quick search</label>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Type a category name or description…"
+        />
+        {query.trim() && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {filteredFlat.length} of {flat.length}
+          </div>
+        )}
+      </div>
 
       {showForm && (
         <form className="card" onSubmit={submit}>
@@ -140,6 +164,46 @@ export default function CategoriesPanel() {
         <div className="muted">Loading…</div>
       ) : tree.length === 0 ? (
         <div className="card muted center">No categories yet.</div>
+      ) : query.trim() ? (
+        // When searching, show a flat list of matches — collapsing the tree
+        // makes a single-keyword search useful instead of hiding hits inside
+        // closed branches.
+        filteredFlat.length === 0 ? (
+          <div className="card muted center">No matches.</div>
+        ) : (
+          <div className="card">
+            <ul className="category-tree">
+              {filteredFlat.map((n) => (
+                <li key={n.id}>
+                  <div className="category-row">
+                    <span>
+                      <strong>{n.name}</strong>
+                      {n.description && (
+                        <span className="muted"> — {n.description}</span>
+                      )}
+                      {!n.isActive && (
+                        <span className="badge badge-gray" style={{ marginLeft: 6 }}>
+                          inactive
+                        </span>
+                      )}
+                    </span>
+                    <span>
+                      <button className="btn btn-sm" onClick={() => open(n)}>
+                        Edit
+                      </button>{' '}
+                      <button
+                        className="btn btn-sm btn-danger"
+                        onClick={() => remove(n)}
+                      >
+                        Delete
+                      </button>
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
       ) : (
         <div className="card">
           <CategoryTree nodes={tree} onEdit={open} onDelete={remove} />

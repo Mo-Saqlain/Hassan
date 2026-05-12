@@ -76,9 +76,9 @@ One sidebar entry. Tiles are now grouped into four labeled sections:
 | **Treasury** | Fund Transfers | Move money between your own accounts (Capital → Cash, Cash → Bank, Bank → Credit, …). Auto-numbered TRF-NNNNNN. |
 
 ### 4. Inventory
-- **Stock Summary** — every item's current on-hand quantity vs minimum, with Low/OK status
+- **Stock Summary** — every item's current on-hand quantity vs minimum, with Low/OK status. Quick-search bar filters by item name or SKU.
 - **Stock Ledger** — every IN/OUT movement, filterable by item, category, brand, supplier, and date range, with running balance per row
-- **Manual adjustment** — `POST /api/stock/adjust` allows write-off / count correction
+- **Reason-driven manual adjustment** — `POST /api/stock/adjust` allows write-off / count correction. The frontend never asks the user to pick "IN" or "OUT" directly; instead they pick a **reason** (`Loss / stolen`, `Damaged`, `Found`, `Stock count — was over / under`, `Correction +/−`) and the direction follows automatically. The form shows current on-hand and the projected new on-hand, and blocks submission if the adjustment would drive stock negative — preventing the common mistake of writing-off losses as a stock INCREASE.
 
 ### 5. Ledgers
 - **Customer Ledger** — chronological list of every sale, sale return, payment-at-sale, and receipt voucher for one customer, with Debit / Credit / running Balance columns. A positive balance means the customer owes you.
@@ -116,8 +116,10 @@ Single page with four tabs:
 ### 10. UX / UI
 - **Branded** — "Hassan Electronics · Home Appliances" with custom logo mark (gradient + lightning bolt)
 - **Light & Dark theme** — toggle in the sidebar footer; preference persisted in `localStorage`, initial theme honours `prefers-color-scheme`. No flash on load (theme bootstrap script in `index.html` runs before React)
+- **Glassmorphism** — cards, tables, and tiles use semi-transparent backgrounds with `backdrop-filter: blur(16px) saturate(170%)` so they appear to float over a soft aurora gradient painted behind the app. Light and dark themes each have their own aurora palette (indigo/green/amber/cyan).
+- **Colored sidebar icons** — every sidebar nav item gets a gradient icon chip in its own colour (Dashboard indigo, POS red, Master Data violet, Transactions sky, Cash Book teal, Stock orange/cyan, Ledgers green/amber/teal, Reports purple/gold). Hover tilts the chip slightly; the active item glows in its own colour.
 - **Responsive** — sidebar collapses to a 72px icon-only rail on desktop; turns into an off-canvas drawer with hamburger on mobile (≤ 768px)
-- **Colored icons** — every nav item and master-data/transaction tile has its own colored SVG icon badge
+- **Colored hub tiles** — every master-data and transaction tile has its own colored SVG icon badge that matches the sidebar palette
 - **Fonts** — Plus Jakarta Sans (display) + Inter (body) loaded from Google Fonts
 
 ---
@@ -531,6 +533,8 @@ Untested (intentional): thin CRUD services for `accounts`, `brands`, `customers`
 - **Voucher numbers** — auto-generated, not gap-free (`count + 1`). Prefixes: `INV-` sales, `BILL-` purchases, `SR-`/`PR-` returns, `RCT-` receipts, `PMT-` payments, **`TRF-` fund transfers**. Replace with a sequences table if strict sequencing matters
 - **Item identity** — Model No. is the item's name. The frontend hides the legacy `name` and `sku` fields in the standard form; the backend auto-fills `name = modelNo` and `sku = modelNo` (suffixed on collision) when they aren't supplied. SKU is preserved as the internal unique code for backwards compatibility and POS barcode-or-SKU lookup; users only touch it via the form's "Advanced" toggle.
 - **Close vs Delete** — items, customers, and suppliers all support a Close (set `isActive = false`) action that hides them from new transactions while preserving their full ledger history. Use Delete only for records created in error.
+- **Delete = safe** — every master-data delete (items, customers, suppliers, brands, stores, accounts) is wrapped in `deleteOrConflict` ([erp-backend/src/common/delete-guard.ts](erp-backend/src/common/delete-guard.ts)) which catches DB foreign-key violations (Postgres `23503` / SQLite `FOREIGN KEY constraint failed`) and turns them into a friendly 409 telling the user to use Close instead. No more silent 500 Internal Server Error when trying to delete a row that's still referenced by a sale, purchase, payment, or stock movement.
+- **Quick-search bar everywhere** — Items, Brands, Stores, Accounts, Customers, Suppliers, Categories, and Stock Summary all have a "Quick search" input at the top that filters the list as you type. CrudPage exposes `searchKeys={[...]}` so each entity controls which fields it searches.
 - **TypeORM columns** — snake_case in DB via `name: 'foo_bar'`, camelCase in entity. `.orderBy()` must use the camelCase property name. Use `type: 'timestamp'` for datetime columns — Postgres rejects `'datetime'`.
 - **Account types** — five flavours: **CASH** (physical till), **BANK** (current/savings), **WALLET** (Easypaisa/JazzCash), **CAPITAL** (owner's contributed equity), **CREDIT** (credit card or credit line — surfaces on the balance sheet as a liability when balance is negative).
 - **Cash register sessions** — open one per shop-day. Opening flow optionally books a FundTransfer atomically (Capital → Cash to cover shortfall). New cash-book entries are blocked client-side once a session is CLOSED.

@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository } from 'typeorm';
+import { deleteOrConflict } from '../../common/delete-guard';
 import { Item } from './entities/item.entity';
 import { Category } from '../categories/entities/category.entity';
 import { CreateItemDto } from './dto/create-item.dto';
@@ -114,8 +115,10 @@ export class ItemsService {
 
   async remove(id: string) {
     const item = await this.findOne(id);
-    await this.repo.remove(item);
-    return { deleted: true, id };
+    return deleteOrConflict(async () => {
+      await this.repo.remove(item);
+      return { deleted: true, id };
+    }, 'item');
   }
 
   private async ensureUniqueCodes(sku?: string, barcode?: string, ignoreId?: string) {

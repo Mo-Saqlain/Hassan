@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Customer } from './entities/customer.entity';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { deleteOrConflict } from '../../common/delete-guard';
 
 @Injectable()
 export class CustomersService {
@@ -34,7 +35,9 @@ export class CustomersService {
 
   async remove(id: string) {
     const c = await this.findOne(id);
-    await this.repo.remove(c);
-    return { deleted: true, id };
+    return deleteOrConflict(async () => {
+      await this.repo.remove(c);
+      return { deleted: true, id };
+    }, 'customer');
   }
 }

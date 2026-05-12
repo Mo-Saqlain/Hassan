@@ -8,38 +8,41 @@ import ThemeToggle from './ThemeToggle';
  * `label: null` renders the items without a category heading — used for
  * lone entries so we don't slap a one-item section header above them.
  * Multi-item groups keep their headings.
+ *
+ * `color` paints the icon chip beside the label; it's passed to the CSS
+ * via a `--c` custom property so a single rule does all the gradient work.
  */
 const sections = [
   {
     label: null,
     items: [
-      { to: '/', label: 'Dashboard', end: true, icon: 'dashboard' },
-      { to: '/pos', label: 'POS Terminal', icon: 'pos' },
-      { to: '/master', label: 'Master Data', icon: 'master' },
-      { to: '/transactions', label: 'Transactions', icon: 'cart' },
-      { to: '/cash-register', label: 'Cash Book', icon: 'cash' },
+      { to: '/', label: 'Dashboard', end: true, icon: 'dashboard', color: '#6366f1' },
+      { to: '/pos', label: 'POS Terminal', icon: 'pos', color: '#ef4444' },
+      { to: '/master', label: 'Master Data', icon: 'master', color: '#8b5cf6' },
+      { to: '/transactions', label: 'Transactions', icon: 'cart', color: '#0ea5e9' },
+      { to: '/cash-register', label: 'Cash Book', icon: 'cash', color: '#14b8a6' },
     ],
   },
   {
     label: 'Inventory',
     items: [
-      { to: '/stock', label: 'Stock Summary', icon: 'boxes' },
-      { to: '/stock-ledger', label: 'Stock Ledger', icon: 'warehouse' },
+      { to: '/stock', label: 'Stock Summary', icon: 'boxes', color: '#f97316' },
+      { to: '/stock-ledger', label: 'Stock Ledger', icon: 'warehouse', color: '#06b6d4' },
     ],
   },
   {
     label: 'Ledgers',
     items: [
-      { to: '/customer-ledger', label: 'Customer Ledger', icon: 'book' },
-      { to: '/supplier-ledger', label: 'Supplier Ledger', icon: 'book' },
-      { to: '/account-ledger', label: 'Account Ledger', icon: 'card' },
+      { to: '/customer-ledger', label: 'Customer Ledger', icon: 'book', color: '#22c55e' },
+      { to: '/supplier-ledger', label: 'Supplier Ledger', icon: 'book', color: '#f59e0b' },
+      { to: '/account-ledger', label: 'Account Ledger', icon: 'card', color: '#14b8a6' },
     ],
   },
   {
     label: 'Reports',
     items: [
-      { to: '/financials', label: 'Financial Statements', icon: 'chartBar' },
-      { to: '/incentives', label: 'Incentives', icon: 'trophy' },
+      { to: '/financials', label: 'Financial Statements', icon: 'chartBar', color: '#a855f7' },
+      { to: '/incentives', label: 'Incentives', icon: 'trophy', color: '#eab308' },
     ],
   },
 ];
@@ -125,8 +128,11 @@ export default function Layout() {
                   to={n.to}
                   end={n.end}
                   title={collapsed ? n.label : undefined}
+                  style={n.color ? { '--c': n.color } : undefined}
                 >
-                  <Icon name={n.icon} size={18} />
+                  <span className="nav-icon" aria-hidden>
+                    <Icon name={n.icon} size={16} />
+                  </span>
                   <span className="nav-text">{n.label}</span>
                 </NavLink>
               ))}
