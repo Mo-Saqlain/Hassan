@@ -45,6 +45,20 @@ export class ReportsController {
     return this.service.allAccountBalances();
   }
 
+  @Get('employee-ledger/:id')
+  employeeLedger(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.employeeLedger(id, from, to);
+  }
+
+  @Get('employee-balances')
+  employeeBalances() {
+    return this.service.allEmployeeBalances();
+  }
+
   @Get('stock-ledger')
   stockLedger(
     @Query('itemId') itemId?: string,

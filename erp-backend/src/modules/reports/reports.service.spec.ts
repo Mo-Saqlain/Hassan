@@ -24,6 +24,9 @@ import { SyncQueueEntry } from '../outbox/entities/sync-queue.entity';
 import { IncentiveTarget } from '../incentives/entities/incentive-target.entity';
 import { IncentiveAward } from '../incentives/entities/incentive-award.entity';
 import { FundTransfer } from '../fund-transfers/entities/fund-transfer.entity';
+import { Employee } from '../employees/entities/employee.entity';
+import { EmployeeTransaction } from '../employee-transactions/entities/employee-transaction.entity';
+import { EmployeeIncentiveRule } from '../employee-incentives/entities/employee-incentive-rule.entity';
 
 import { ItemsService } from '../items/items.service';
 import { StockService } from '../stock/stock.service';
@@ -33,6 +36,7 @@ import { PurchasesService } from '../purchases/purchases.service';
 import { ReportsService } from './reports.service';
 import { IncentivesService } from '../incentives/incentives.service';
 import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
+import { EmployeeIncentivesService } from '../employee-incentives/employee-incentives.service';
 
 describe('ReportsService', () => {
   let reports: ReportsService;
@@ -55,7 +59,7 @@ describe('ReportsService', () => {
             StockMovement, Sale, SaleItem, Purchase, PurchaseItem,
             SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
             Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
-            FundTransfer,
+            FundTransfer, Employee, EmployeeTransaction, EmployeeIncentiveRule,
           ]),
         ),
         TypeOrmModule.forFeature([
@@ -63,13 +67,13 @@ describe('ReportsService', () => {
           StockMovement, Sale, SaleItem, Purchase, PurchaseItem,
           SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
           Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
-          FundTransfer,
+          FundTransfer, Employee, EmployeeTransaction, EmployeeIncentiveRule,
         ]),
       ],
       providers: [
         ReportsService, ItemsService, StockService, OutboxService,
         SalesService, PurchasesService, IncentivesService,
-        FundTransfersService,
+        FundTransfersService, EmployeeIncentivesService,
       ],
     }).compile();
 

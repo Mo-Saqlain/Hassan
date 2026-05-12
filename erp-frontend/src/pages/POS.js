@@ -290,46 +290,84 @@ export default function POS() {
 
       <div className="pos-grid">
         <div>
-          <form onSubmit={onScanSubmit} className="card pos-scan">
-            <label>Scan barcode or type SKU and press Enter</label>
-            <input
-              ref={scanInputRef}
-              autoFocus
-              value={code}
-              placeholder="e.g. 1234567890123 or PHN-001"
-              onChange={(e) => setCode(e.target.value)}
-            />
-            {scanError && <div className="alert alert-error">{scanError}</div>}
+          <form onSubmit={onScanSubmit} className="card" style={{ padding: 18 }}>
+            <div style={{ position: 'relative' }}>
+              <Icon
+                name="bolt"
+                size={16}
+                style={{
+                  position: 'absolute',
+                  left: 14,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--violet-400)',
+                  pointerEvents: 'none',
+                }}
+              />
+              <input
+                ref={scanInputRef}
+                autoFocus
+                className="input"
+                value={code}
+                placeholder="Type model no. — e.g. DAWLANCE LVS-15"
+                onChange={(e) => setCode(e.target.value)}
+                style={{
+                  paddingLeft: 38,
+                  height: 46,
+                  fontSize: 14,
+                  fontFamily: 'var(--font-mono)',
+                }}
+              />
+            </div>
+            {scanError && (
+              <div
+                className="chip chip-danger"
+                style={{ marginTop: 10, height: 'auto', padding: '6px 12px' }}
+              >
+                {scanError}
+              </div>
+            )}
           </form>
 
           {cart.length === 0 ? (
-            <div className="card muted center">Cart is empty. Scan or type a code above.</div>
+            <div
+              className="card"
+              style={{
+                padding: 40,
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                fontSize: 13,
+              }}
+            >
+              Cart is empty. Type a model no. above to add.
+            </div>
           ) : (
-            <table>
+            <table className="t">
               <thead>
                 <tr>
                   <th>Item</th>
-                  <th>SKU</th>
-                  <th className="right">Qty</th>
-                  <th className="right">Price</th>
-                  <th className="right">Total</th>
+                  <th className="num">Qty</th>
+                  <th className="num">Price</th>
+                  <th className="num">Total</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {cart.map((ln) => (
                   <tr key={ln.id}>
-                    <td>{ln.item?.name ?? ln.itemId}</td>
                     <td>
-                      {ln.item?.sku}
-                      {ln.item?.modelNo && (
-                        <div className="muted" style={{ fontSize: 11 }}>
-                          Model: {ln.item.modelNo}
-                        </div>
-                      )}
-                      {ln.item?.barcode && (
-                        <div className="muted" style={{ fontSize: 11 }}>
-                          {ln.item.barcode}
+                      <div style={{ fontWeight: 600, color: 'var(--text)' }}>
+                        {ln.item?.modelNo ?? ln.item?.name ?? ln.itemId}
+                      </div>
+                      {ln.item?.brand?.name && (
+                        <div
+                          className="muted"
+                          style={{
+                            fontSize: 11,
+                            fontFamily: 'var(--font-mono)',
+                          }}
+                        >
+                          {ln.item.brand.name}
                         </div>
                       )}
                     </td>

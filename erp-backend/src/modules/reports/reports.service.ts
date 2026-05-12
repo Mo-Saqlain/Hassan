@@ -15,6 +15,9 @@ import { Item } from '../items/entities/item.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { IncentivesService } from '../incentives/incentives.service';
 import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
+import { EmployeeIncentivesService } from '../employee-incentives/employee-incentives.service';
+import { Employee } from '../employees/entities/employee.entity';
+import { EmployeeTransaction } from '../employee-transactions/entities/employee-transaction.entity';
 
 type LedgerEntry = {
   date: Date;
@@ -44,7 +47,132 @@ export class ReportsService {
     @InjectRepository(StockMovement) private readonly movements: Repository<StockMovement>,
     private readonly incentives: IncentivesService,
     private readonly transfers: FundTransfersService,
+    private readonly employeeIncentives: EmployeeIncentivesService,
+    @InjectRepository(Employee) private readonly employees: Repository<Employee>,
+    @InjectRepository(EmployeeTransaction)
+    private readonly employeeTxns: Repository<EmployeeTransaction>,
   ) {}
+
+  // ──────────────────────────────────────────────────────────
+  // Employee ledger
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Per-employee ledger. Credits (we paid them / settled what we owed) are
+   * salary, advances, expense reimbursements, and incentive payouts.
+   * Debits (we owe them more) are incentives EARNED (computed from
+   * incentive rules × sales in the period). Running balance positive means
+   * we still owe the employee; negative means they owe us (took advance
+   * not yet settled).
+   */
+  async employeeLedger(employeeId: string, from?: string, to?: string) {
+    const employee = await this.employees.findOne({ where: { id: employeeId } });
+    if (!employee) {
+      throw new NotFoundException(`Employee ${employeeId} not found`);
+    }
+    const periodFrom = from ?? '1970-01-01';
+    const periodTo = to ?? new Date().toISOString().slice(0, 10);
+
+    // Earned incentives in period — debit (employee earns, we owe)
+    const incentiveCalc = await this.employeeIncentives.computeForPeriod(
+      periodFrom,
+      periodTo,
+      employeeId,
+    );
+
+    const txnWhere: any = { employeeId };
+    if (from && to) txnWhere.transactionDate = Between(from, to);
+    const txns = await this.employeeTxns.find({ where: txnWhere });
+
+    type Row = {
+      date: Date;
+      ref: string;
+      refId: string;
+      type: string;
+      description: string;
+      debit: number;
+      credit: number;
+    };
+    const rows: Row[] = [];
+
+    // Opening row if non-zero
+    const opening = Number(employee.openingBalance ?? 0);
+
+    for (const r of incentiveCalc.rows) {
+      rows.push({
+        date: new Date(r.saleDate),
+        ref: r.invoiceNo,
+        refId: r.saleId,
+        type: 'INCENTIVE',
+        description: `${r.itemName ?? 'Item'} · ${r.percentage}% · base ${r.baseAmount.toFixed(2)}`,
+        debit: r.amount > 0 ? r.amount : 0,
+        credit: r.amount < 0 ? -r.amount : 0,
+      });
+    }
+    for (const t of txns) {
+      // SALARY / ADVANCE / REIMBURSEMENT / EXPENSE / INCENTIVE_PAYOUT are
+      // all credits (money moves out of the shop to the employee).
+      // ADJUSTMENT can go either way — treat positive amount as a debit
+      // (we now owe more) and the user can negate if needed by entering a
+      // negative figure (validation prevents — so all txns are credits for
+      // simplicity; users can use NEGATIVE adjustments by deleting + redo).
+      rows.push({
+        date: new Date(`${t.transactionDate}T00:00:00.000Z`),
+        ref: t.voucherNo,
+        refId: t.id,
+        type: t.type,
+        description: t.description ?? labelForType(t.type),
+        debit: 0,
+        credit: Number(t.amount),
+      });
+    }
+
+    rows.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    const entries: Array<Row & { balance: number }> = [];
+    let balance = opening;
+    if (opening !== 0) {
+      entries.push({
+        date: employee.createdAt,
+        ref: '—',
+        refId: employee.id,
+        type: 'OPENING',
+        description: 'Opening balance',
+        debit: opening > 0 ? opening : 0,
+        credit: opening < 0 ? -opening : 0,
+        balance,
+      });
+    }
+    for (const r of rows) {
+      balance = balance + r.debit - r.credit;
+      entries.push({ ...r, balance });
+    }
+
+    const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
+    const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
+
+    return {
+      employee,
+      openingBalance: opening,
+      entries,
+      closingBalance: balance,
+      totalDebit,
+      totalCredit,
+      incentivesEarned: incentiveCalc.total,
+      period: { from: periodFrom, to: periodTo },
+    };
+  }
+
+  /** All employees with their current ledger closing balance. */
+  async allEmployeeBalances() {
+    const list = await this.employees.find({ order: { name: 'ASC' } });
+    return Promise.all(
+      list.map(async (e) => {
+        const l = await this.employeeLedger(e.id);
+        return { ...e, balance: l.closingBalance };
+      }),
+    );
+  }
 
   // ──────────────────────────────────────────────────────────
   // Customer ledger + balance (A/R)
@@ -583,11 +711,17 @@ export class ReportsService {
     }
 
     const grossProfit = netRevenue - returnsValue - (cogs - returnsCogs);
-    const expenses = 0; // no expense module yet
 
-    // Incentives are a separate margin bucket: we sometimes book per-unit
-    // losses to clear a target that unlocks a larger incentive, so net income
-    // must include both gross margin AND incentive awards in the period.
+    // Employee incentives are a real labor cost — earned by employees as
+    // a percentage of their sales, paid out separately. Subtract from
+    // trading net income.
+    const employeeIncentives = from && to
+      ? await this.employeeIncentives.totalForPeriod(from, to)
+      : 0;
+    const expenses = employeeIncentives;
+
+    // Manufacturer/supplier incentives — earned by the shop when targets
+    // are hit. Added on top of gross margin to produce adjusted net income.
     const incentivesEarned = await this.incentives.awardsTotal(from, to);
 
     const netIncome = grossProfit - expenses;
@@ -609,6 +743,7 @@ export class ReportsService {
       },
       grossProfit,
       expenses,
+      employeeIncentives,
       netIncome,
       incentives: incentivesEarned,
       adjustedNetIncome,
@@ -857,5 +992,17 @@ export class ReportsService {
     return (
       opening + Number(inSum?.sum ?? 0) - Number(outSum?.sum ?? 0) + transferDelta
     );
+  }
+}
+
+function labelForType(t: string): string {
+  switch (t) {
+    case 'SALARY': return 'Salary payment';
+    case 'ADVANCE': return 'Advance';
+    case 'REIMBURSEMENT': return 'Reimbursement';
+    case 'EXPENSE': return 'Shop expense paid by employee';
+    case 'INCENTIVE_PAYOUT': return 'Incentive payout';
+    case 'ADJUSTMENT': return 'Adjustment';
+    default: return t;
   }
 }

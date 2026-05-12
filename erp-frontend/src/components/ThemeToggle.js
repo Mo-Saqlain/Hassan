@@ -7,12 +7,12 @@ export default function ThemeToggle() {
   return (
     <button
       type="button"
-      className="theme-toggle"
+      className="btn btn-sm btn-icon btn-ghost"
       onClick={toggle}
       aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
       title={`${isDark ? 'Light' : 'Dark'} mode`}
     >
-      <Icon name={isDark ? 'sun' : 'moon'} size={18} />
+      <Icon name={isDark ? 'sun' : 'moon'} size={16} />
     </button>
   );
 }

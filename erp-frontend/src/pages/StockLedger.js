@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import ExportButtons from '../components/ExportButtons';
 
 export default function StockLedger() {
   const [filters, setFilters] = useState({
@@ -64,6 +65,30 @@ export default function StockLedger() {
     <>
       <div className="page-header">
         <h2>Stock Ledger</h2>
+        <ExportButtons
+          filename="stock_ledger"
+          title="Stock Ledger"
+          subtitle={
+            data
+              ? `Total IN ${data.totalIn} · Total OUT ${data.totalOut} · Net ${data.netChange}`
+              : ''
+          }
+          columns={[
+            {
+              key: 'date',
+              label: 'Date',
+              value: (m) => new Date(m.date).toLocaleString(),
+            },
+            { key: 'itemName', label: 'Item' },
+            { key: 'sku', label: 'SKU' },
+            { key: 'storeName', label: 'Store' },
+            { key: 'type', label: 'Type' },
+            { key: 'quantity', label: 'Qty', align: 'right' },
+            { key: 'referenceType', label: 'Reference' },
+            { key: 'runningBalance', label: 'Running', align: 'right' },
+          ]}
+          rows={data?.movements ?? []}
+        />
       </div>
 
       <div className="card">

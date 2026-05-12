@@ -1,6 +1,6 @@
 # Hassan Electronics — Home-Appliances ERP & POS
 
-Offline-first ERP with an integrated Point-of-Sale terminal for a small home-appliances retail shop. Inventory, master data, vouchers, customer/supplier ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Credit), an incentive-tracking system that feeds adjusted-net-income, and a four-statement financials report — all backed by Supabase Postgres in the cloud, with a desktop Electron build that bundles a local SQLite for true offline cashier operation.
+Offline-first ERP with an integrated Point-of-Sale terminal for a small home-appliances retail shop. Inventory, master data ("Catalogue"), vouchers, customer/supplier/account ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Credit), an incentive-tracking system that feeds adjusted-net-income, daily JSON backups with restore, and a four-statement financials report — all backed by Supabase Postgres in the cloud, with a desktop Electron build that bundles a local SQLite for true offline cashier operation. **UI is a violet→cyan aurora-glass redesign** ([design.md](./design.md)) — sticky topbar, glass cards, gradient brand mark, coloured sidebar icon chips, light + dark themes, responsive off-canvas drawer.
 
 ![Status](https://img.shields.io/badge/status-Phase%201%20%2B%202%20%2B%203%20complete-brightgreen)
 ![Tests](https://img.shields.io/badge/tests-77%2F77%20passing-success)
@@ -39,7 +39,7 @@ Everything is **offline-first**: the cashier can keep selling when the internet 
 ## Functional features
 
 ### 1. Point of Sale (POS)
-- **Barcode / SKU scan** — single input that auto-focuses; barcode matches first, then SKU
+- **Model-number scan** — single 46px input that auto-focuses with a bolt-icon prefix. Placeholder: *"Type model no. — e.g. DAWLANCE LVS-15"*. Backend matches barcode first then SKU then model no., but the cashier UI only mentions model no.
 - **Cart** with re-scan stacking (scanning the same item again increments the existing line)
 - **Inline quantity** +/− buttons, line remove, clear cart
 - **Payment methods**: Cash, Card, Bank, Credit
@@ -49,12 +49,12 @@ Everything is **offline-first**: the cashier can keep selling when the internet 
 - **Session lifecycle** — Start session → ring up sales → Close session. Running `salesTotal` and `salesCount` displayed
 - **Receipt printing** — every checkout shows a "Print receipt" link to a print-friendly route that auto-fires the browser's print dialog
 
-### 2. Master Data (consolidated)
-One sidebar entry, seven tiles:
+### 2. Catalogue (formerly "Master Data")
+Renamed to **Catalogue** in the sidebar and page header. URL stays at `/master` for backwards compat. One sidebar entry, seven tiles:
 
 | Tile | Entity | Notes |
 |---|---|---|
-| Items | `items` | **Model No. is the primary identifier** (used as the item's display name). SKU auto-derives from Model No. on save (suffixed `-2`, `-3`… on collision) — you only see / fill SKU if you click "Advanced". Optional unique barcode, brand FK, M2M categories, prices, unit, min-stock level. **Quick search** bar at the top filters as you type across model no. / name / SKU / barcode / brand. Includes a Close / Reopen action that hides the item from new transactions without deleting history. |
+| Items | `items` | **Model No. is the primary identifier** (used as the item's display name). SKU auto-derives from Model No. on save (suffixed `-2`, `-3`… on collision) — you only see / fill SKU if you click "Advanced". **Barcode UI removed** — the shop identifies items by model no., not barcode. Brand FK, M2M categories, prices, unit, min-stock level. **Quick search** bar at the top filters as you type across model no. / name / SKU / brand. Includes a Close / Reopen action that hides the item from new transactions without deleting history. |
 | Categories | `categories` | self-referencing tree (sub-categories), cycle-protected |
 | Brands | `brands` | simple name + description |
 | Customers | `customers` | name + contact + opening balance + **live computed balance**. Close / Reopen action to deactivate without losing ledger history. |
@@ -113,14 +113,48 @@ Single page with four tabs:
 - A background cron pushes the outbox to a configured `CLOUD_SYNC_URL` every 30 seconds when set
 - Cloud receiver is idempotent — duplicate event IDs return `DUPLICATE` with the previous result_id, not a re-applied transaction
 
-### 10. UX / UI
+### 10. Daily Backups + Restore
+Snapshot every business table (sales, purchases, payments, customers, items, stock movements, cash-register sessions, fund transfers, incentives, sync queue, …) to a single JSON file on local disk. Backups are tracked in a `backups` table with file path, size, and trigger (`AUTO` vs `MANUAL`).
+
+- **Why JSON?** Portable across DB engines (the same file restores into either SQLite or Postgres), human-readable so you can open it in any editor, and no external binary like `pg_dump`/`sqlite3` is required on the cashier PC. Downside is bigger files than a binary dump — irrelevant at shop scale.
+- **Auto daily backup** — `BackupScheduler` ticks hourly and creates a snapshot if (a) the configured hour matches the current hour AND (b) no backup has already been taken today. Default hour: **20 (8 PM)**, configurable through the UI without restarting.
+- **Manual snapshot** — sidebar → System → Backups → **"💾 Save backup now"** triggers a manual snapshot stored on the server. **"⬇ Download snapshot"** generates a snapshot in-memory and pushes it straight to the browser as a download — no file persisted server-side, useful when you want a copy on a USB stick without leaving traces on the till.
+- **Restore** — same Backups page has a 🔥 *Restore from backup* card. Pick any `.json` backup file, type `RESTORE` to confirm, and the backend wipes every business table and replays the snapshot inside a single transaction with FK enforcement temporarily disabled (`PRAGMA foreign_keys = OFF` on SQLite, `SET session_replication_role = 'replica'` on Postgres). The `backups` history itself is preserved across restores. Body limit is raised to **100 MB** in `main.ts` so multi-megabyte snapshots aren't rejected.
+- **Overdue prompt** — every page checks `/api/backup/status` on mount and polls every 5 minutes. If today's backup hasn't been taken and the scheduled hour has passed, a red banner appears at the top of the main pane with a one-click link to the Backups page. Dismissible per session.
+- **Backup history** — Backups page lists the last 200 backups with file name, source (AUTO/MANUAL), size, notes, and per-row Download / Delete actions.
+- **Storage location** — defaults to `erp-backend/backups/` in dev; Electron points `BACKUP_DIR` at `<userData>/backups` so backups travel with the desktop install. Path is shown in the Status card.
+
+### 11. CSV + PDF Exports
+Every list-like view exposes a pair of **CSV / PDF** buttons (top-right of the page header or panel) wired to a shared `<ExportButtons>` component ([erp-frontend/src/components/ExportButtons.js](erp-frontend/src/components/ExportButtons.js)) backed by helpers in [erp-frontend/src/utils/exporters.js](erp-frontend/src/utils/exporters.js).
+
+- **CSV** — generated client-side as UTF-8 with a BOM (so Excel opens it correctly), saved as `<filename>_<YYYYMMDD_HHMM>.csv`. Values are auto-escaped (commas, quotes, newlines), nested objects are JSON-stringified.
+- **PDF** — opens a new tab with a clean print-friendly table (Hassan Electronics letterhead + timestamp), then fires `window.print()`. The user picks "Save as PDF" as the destination — works on every platform without shipping a PDF library on the server.
+
+Coverage:
+
+| Where | CSV / PDF exports |
+|---|---|
+| Master Data → Items | Model No., SKU, Barcode, Brand, Categories, Purchase, Sale, Unit, Min, Active |
+| Master Data → Categories | Indented path, Description, Active |
+| Master Data → Customers / Suppliers | Name, Phone, Email, Address, Opening, Balance, Status, Active |
+| Master Data → Brands / Stores / Accounts | All columns defined on the CrudPage |
+| Customer / Supplier / Account Ledgers | Date, Ref, Type, Description, Debit, Credit, Balance + closing-balance footer |
+| Stock Ledger | Date, Item, SKU, Store, Type, Qty, Reference, Running |
+| Stock Summary | Item, SKU, On hand, Min, Status (Low/OK) — *new* |
+| Purchase Orders | PO #, Order date, Supplier, Status, Total, Item count |
+| Financial Statements (all 4 tabs) | Flattened {Item, Amount} rows of every line in the statement |
+
+### 12. UX / UI
 - **Branded** — "Hassan Electronics · Home Appliances" with custom logo mark (gradient + lightning bolt)
 - **Light & Dark theme** — toggle in the sidebar footer; preference persisted in `localStorage`, initial theme honours `prefers-color-scheme`. No flash on load (theme bootstrap script in `index.html` runs before React)
-- **Glassmorphism** — cards, tables, and tiles use semi-transparent backgrounds with `backdrop-filter: blur(16px) saturate(170%)` so they appear to float over a soft aurora gradient painted behind the app. Light and dark themes each have their own aurora palette (indigo/green/amber/cyan).
-- **Colored sidebar icons** — every sidebar nav item gets a gradient icon chip in its own colour (Dashboard indigo, POS red, Master Data violet, Transactions sky, Cash Book teal, Stock orange/cyan, Ledgers green/amber/teal, Reports purple/gold). Hover tilts the chip slightly; the active item glows in its own colour.
-- **Responsive** — sidebar collapses to a 72px icon-only rail on desktop; turns into an off-canvas drawer with hamburger on mobile (≤ 768px)
-- **Colored hub tiles** — every master-data and transaction tile has its own colored SVG icon badge that matches the sidebar palette
-- **Fonts** — Plus Jakarta Sans (display) + Inter (body) loaded from Google Fonts
+- **Aurora-glass design system** — `tokens.css` + `app.css` ([src/styles/](erp-frontend/src/styles/)) hold every variable. Cards, tables, and tiles use `rgba(surface, glass-strength*0.85)` with `backdrop-filter: blur(22px) saturate(170%)` plus a `::before` glossy specular sheen. The page-wide aurora (`body::before`) paints four radial blobs (violet / cyan / pink / indigo) at –10vmax inset, blurred 48px, and masks the bottom 30% so cards never sit on a glow band — animates over 28s. Light and dark themes both ship aurora; light uses 0.55+glass*0.20 surface alpha for visible translucency.
+- **Coloured sidebar icons** — every nav item gets a tinted chip in its own `--nav-c` token (Dashboard indigo, POS pink, Catalogue violet, Transactions sky, Cash teal, Stock orange, Ledgers green, Reports light-violet, System grey). Hover rotates the chip −4° and scales 1.04; active item fills the chip to 30% alpha and paints a 3px gradient bar to the left of the row.
+- **Sticky topbar** — 60px tall, glass surface. Global search input on the left, theme toggle on the right. Hamburger appears on the left ≤ 860px to open the off-canvas sidebar.
+- **Collapsible sidebar rail** — the gradient brand chip at the top of the sidebar renders a hamburger icon and doubles as the rail toggle: click it to collapse the desktop sidebar to a 72px icon-only rail (brand text + section headers hide); click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). Disabled on mobile (≤860px), where the off-canvas drawer pattern is used instead.
+- **Responsive** — sidebar becomes a fixed off-canvas drawer ≤ 860px (`.app[data-nav="open"]` toggles); grids collapse, tables get horizontal scroll, POS stacks vertically, cart rows reflow into 3-col with hidden price column
+- **Coloured hub tiles** — every Catalogue and Transactions tile has its own `--tile-c` value driving a 22%-alpha icon badge + `.tile-foot` linking forward
+- **Status chips** — pill-shaped, six variants (`chip-success`, `chip-warn`, `chip-danger`, `chip-info`, `chip-violet`, neutral). Used for payment states, low-stock badges, session status
+- **Fonts** — Plus Jakarta Sans (display headings) + Inter (body) + JetBrains Mono (numbers, voucher refs, SKUs) loaded from Google Fonts
 
 ---
 
@@ -238,14 +272,23 @@ src/
    └─ InvoicePrint.js     # auto-print invoice route
 ```
 
-### Sidebar layout
+### Sidebar layout (entity-centric, collapsible)
 
-Single-item sections render without a header; multi-item sections keep their label:
+The sidebar groups every page under the **entity** or **business process** it operates on, so each lives in its own collapsible section. Click any section header to fold / expand. Collapsed state persists per browser in `localStorage`. If the current route is inside a collapsed section, the section auto-expands so the user can always see where they are.
 
-- **(no header)** Dashboard, POS Terminal, Master Data, Transactions, Cash Book
-- **Inventory** — Stock Summary, Stock Ledger
-- **Ledgers** — Customer Ledger, Supplier Ledger, Account Ledger
-- **Reports** — Financial Statements, Incentives
+- **(no header)** Dashboard, POS Terminal, Cash Book
+- **Customer** — Customers, Receipts (money in), Customer Ledger
+- **Sales** — Sales History, Sale Returns
+- **Supplier** — Suppliers, Brands, Payments (money out), **Supplier Incentives** *(renamed from "Manufacturer Incentives")*, Supplier Ledger
+- **Purchase** — Purchase Orders, Purchases, Purchase Returns
+- **Item** — Items, Categories
+- **Stock** — Stores, Stock Summary, Stock Ledger, **Stock Transfers** *(new)*, **Damaged Goods** *(new)*
+- **Employee** — Employees, Attendance, Employee Payments, Incentive Rules, Employee Ledger
+- **Account** — Accounts, Fund Transfers, Account Ledger
+- **Reports** — Financial Statements
+- **System** — Backups
+
+The old Catalogue (`/master`) and Transactions (`/transactions`) hubs still exist as routes for legacy bookmarks, but they're no longer in the sidebar — every page they linked is now its own first-class sidebar entry via dedicated routes like `/items`, `/customers`, `/employees`, `/stores`, etc.
 
 ---
 
@@ -325,6 +368,11 @@ DB_SSL=true
 # Set on the LOCAL (shop) node so its outbox pushes events to the cloud.
 # Leave blank on the cloud node itself.
 CLOUD_SYNC_URL=https://erp-cloud.example.com/api/sync/push
+
+# ─── Backups ──────────────────────────────────────────────────────────
+# Directory where daily JSON snapshots are written. Defaults to
+# erp-backend/backups/ — Electron overrides this to <userData>/backups.
+BACKUP_DIR=./backups
 ```
 
 **Supabase gotchas:**
@@ -374,6 +422,19 @@ GET    /purchase-returns    GET    /purchase-returns/:id  POST /purchase-returns
 GET    /payments?direction=IN|OUT    POST  /payments
 GET    /fund-transfers?from=&to=     POST  /fund-transfers
 GET    /fund-transfers/:id           DELETE /fund-transfers/:id
+POST   /purchase-orders                    # create with line items
+GET    /purchase-orders?supplierId=&status=
+GET    /purchase-orders/:id
+PATCH  /purchase-orders/:id/status         # DRAFT → SENT → RECEIVED → CANCELLED
+DELETE /purchase-orders/:id
+POST   /stock-transfers                    # paired OUT/IN movements in one atomic txn
+GET    /stock-transfers?fromStoreId=&toStoreId=
+GET    /stock-transfers/:id
+POST   /damaged-goods                      # report damage → stock OUT on create
+GET    /damaged-goods?status=
+GET    /damaged-goods/tally                # totals per status
+PATCH  /damaged-goods/:id/status           # → REPAIRED books a reversing stock IN
+DELETE /damaged-goods/:id                  # only allowed once status is REPAIRED
 ```
 
 ### Cash Register
@@ -448,6 +509,19 @@ GET    /sync/status         # { cloudConfigured, cloudUrl, pending }
 POST   /sync/flush          # force the cron worker to run once
 ```
 
+### Backup
+```
+POST   /backup                     # save a manual snapshot to disk
+GET    /backup                     # list last 200 backup files
+GET    /backup/download-now        # snapshot + download in one shot (no file saved)
+GET    /backup/status              # { scheduledHour, latest, hasTodayBackup, overdue, ... }
+GET    /backup/schedule            # → { hour }
+POST   /backup/schedule { hour }   # change the daily backup hour (0–23)
+GET    /backup/:id/download        # stream a previously-saved backup file
+DELETE /backup/:id                 # remove a backup file from disk and history
+POST   /backup/restore             # wipe + replay { confirm: "RESTORE", snapshot }
+```
+
 ### Health
 ```
 GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
@@ -461,8 +535,12 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 |---|---|
 | `/` | Dashboard (stat cards) |
 | `/pos` | POS terminal |
-| `/master` | Master Data hub (7 tiles) |
-| `/transactions` | Transactions hub (grouped: Sales / Purchases / Money / Treasury) |
+| `/master` | Catalogue hub (8 tiles) — overview / legacy entry point |
+| `/transactions` | Transactions hub (Sales / Purchases / Money / Treasury / Staff) — overview / legacy |
+| `/items`, `/categories`, `/brands`, `/customers`, `/suppliers`, `/stores`, `/accounts`, `/employees` | Direct entity-centric routes — same panels as the Catalogue hub but with the entity's own page-head |
+| `/purchase-orders` | Purchase Orders (DRAFT → SENT → RECEIVED → CANCELLED workflow with line items) |
+| `/stock-transfers` | Stock transfers between stores — paired OUT/IN movements in one atomic transaction |
+| `/damaged-goods` | Damaged-goods register — Damaged / In repair / Write-off / Repaired status workflow with stock book-keeping |
 | `/sales` | Sales history (read-only) |
 | `/sale-returns` | Sale returns |
 | `/purchases` | Purchases |
@@ -478,6 +556,7 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 | `/account-ledger`, `/account-ledger/:id` | Account ledger (Bank / Wallet / Cash / Capital / Credit) |
 | `/financials` | 4-tab financial statements |
 | `/incentives` | Incentives — Targets / Progress / Awards tabs |
+| `/backup` | Backups — manual snapshot, history, schedule, overdue reminder |
 | `/print/sale/:id`, `/print/purchase/:id` | Print-friendly invoice/bill |
 
 ---

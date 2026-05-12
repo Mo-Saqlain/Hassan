@@ -75,6 +75,19 @@ const groups = [
       },
     ],
   },
+  {
+    label: 'Staff',
+    desc: 'Pay employees — salary, advances, reimbursements, expenses, incentive payouts',
+    tiles: [
+      {
+        to: '/employee-payments',
+        label: 'Employee Payments',
+        icon: 'user',
+        color: '#818cf8',
+        desc: 'Salary, advances, reimbursements, expenses, incentive payouts',
+      },
+    ],
+  },
 ];
 
 export default function Transactions() {

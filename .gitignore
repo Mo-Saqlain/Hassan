@@ -29,6 +29,11 @@ erp-backend/erp.sqlite-wal
 *.sqlite-shm
 *.sqlite-wal
 
+# ───────── Backup snapshots ─────────
+# Written by /api/backup; path overridable via BACKUP_DIR env var.
+backups/
+erp-backend/backups/
+
 # ───────── Electron ─────────
 erp-desktop/dist/
 erp-desktop/out/

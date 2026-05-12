@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { useResource } from '../../hooks/useResource';
+import ExportButtons from '../ExportButtons';
 
 const empty = { name: '', description: '', parentId: '', isActive: true };
 
@@ -79,9 +80,21 @@ export default function CategoriesPanel() {
     <>
       <div className="panel-header">
         <h3>Categories</h3>
-        <button className="btn btn-primary" onClick={() => open(null)}>
-          + Add Category
-        </button>
+        <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+          <ExportButtons
+            filename="categories"
+            title="Categories"
+            columns={[
+              { key: 'path', label: 'Category', value: (n) => indent(n.depth) + n.name },
+              { key: 'description', label: 'Description' },
+              { key: 'isActive', label: 'Active' },
+            ]}
+            rows={filteredFlat}
+          />
+          <button className="btn btn-primary" onClick={() => open(null)}>
+            + Add Category
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -255,6 +268,10 @@ function CategoryTree({ nodes, onEdit, onDelete, depth = 0 }) {
       ))}
     </ul>
   );
+}
+
+function indent(depth) {
+  return depth > 0 ? ' '.repeat(depth) + '› ' : '';
 }
 
 function buildTree(list) {

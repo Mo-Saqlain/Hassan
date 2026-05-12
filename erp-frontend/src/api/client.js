@@ -15,6 +15,11 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+/** Resolved API base URL (host + /api). Used for native browser downloads
+ *  that can't go through axios because we need the browser to handle the
+ *  Content-Disposition header. */
+export const apiBaseUrl = () => baseURL;
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {

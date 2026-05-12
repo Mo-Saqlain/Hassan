@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import ExportButtons from '../components/ExportButtons';
 
 /**
  * Reasons → direction. The user picks the reason; the IN/OUT direction
@@ -92,11 +93,33 @@ export default function Stock() {
 
   return (
     <>
-      <div className="page-header">
-        <h2>Stock</h2>
-        <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-          + Adjust Stock
-        </button>
+      <div className="page-head">
+        <div className="page-title">
+          <h1>Stock summary</h1>
+          <p>On-hand vs minimum per item · low-stock alerts highlighted</p>
+        </div>
+        <div className="row">
+          <ExportButtons
+            filename="stock_summary"
+            title="Stock Summary"
+            columns={[
+              { key: 'itemName', label: 'Item' },
+              { key: 'sku', label: 'SKU' },
+              { key: 'onHand', label: 'On hand', align: 'right' },
+              { key: 'minStockLevel', label: 'Min', align: 'right' },
+              {
+                key: 'status',
+                label: 'Status',
+                value: (r) =>
+                  r.minStockLevel > 0 && r.onHand < r.minStockLevel ? 'Low' : 'OK',
+              },
+            ]}
+            rows={filtered}
+          />
+          <button className="btn btn-sm btn-primary" onClick={() => setShowForm(true)}>
+            + Adjust Stock
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}

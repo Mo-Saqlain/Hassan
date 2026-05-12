@@ -1,31 +1,28 @@
-/** Brand mark + name for Hassan Electronics. In collapsed mode shows only the mark. */
-export default function Brand({ collapsed }) {
+import Icon from './Icon';
+
+/**
+ * Hassan Electronics brand mark.
+ *
+ * The 38×38 gradient chip is also the sidebar rail toggle — clicking it
+ * collapses/expands the sidebar. The chip renders a hamburger ("menu")
+ * icon so its purpose as a toggle is obvious in both states.
+ */
+export default function Brand({ onToggleRail, rail }) {
   return (
-    <div className={`brand ${collapsed ? 'brand-collapsed' : ''}`}>
-      <div className="brand-mark" aria-hidden>
-        <svg viewBox="0 0 32 32" width="34" height="34">
-          <defs>
-            <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#818cf8" />
-              <stop offset="100%" stopColor="#6366f1" />
-            </linearGradient>
-          </defs>
-          <rect x="0" y="0" width="32" height="32" rx="9" fill="url(#brandGrad)" />
-          <path
-            d="M18 6 8 18h6l-1 8 10-12h-6l1-8Z"
-            fill="#fef3c7"
-            stroke="#fef3c7"
-            strokeWidth="0.5"
-            strokeLinejoin="round"
-          />
-        </svg>
+    <div className="brand">
+      <button
+        type="button"
+        className="brand-mark"
+        onClick={onToggleRail}
+        aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+        title={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        <Icon name="menu" size={20} />
+      </button>
+      <div className="brand-text">
+        <div className="brand-name">Hassan Electronics</div>
+        <div className="brand-sub">Home Appliances · ERP</div>
       </div>
-      {!collapsed && (
-        <div className="brand-text">
-          <div className="brand-name">Hassan Electronics</div>
-          <div className="brand-tag">Home Appliances</div>
-        </div>
-      )}
     </div>
   );
 }

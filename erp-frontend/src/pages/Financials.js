@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import ExportButtons from '../components/ExportButtons';
 
 const tabs = [
   { key: 'income', label: 'Income Statement' },
@@ -47,15 +48,54 @@ export default function Financials() {
 
   return (
     <>
-      <div className="page-header">
-        <h2>Financial Statements</h2>
+      <div className="page-head">
+        <div className="page-title">
+          <h1>Financial statements</h1>
+          <p>
+            {tab === 'balance'
+              ? `As of ${asOf}`
+              : `${from} → ${to}`}{' '}
+            · incentives applied to adjusted net income
+          </p>
+        </div>
+        <div className="row">
+          {tab === 'balance' ? (
+            <input
+              className="input"
+              type="date"
+              value={asOf}
+              onChange={(e) => setAsOf(e.target.value)}
+              style={{ maxWidth: 160 }}
+            />
+          ) : (
+            <>
+              <input
+                className="input"
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                style={{ maxWidth: 160 }}
+              />
+              <input
+                className="input"
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                style={{ maxWidth: 160 }}
+              />
+            </>
+          )}
+          <button className="btn btn-sm btn-primary" onClick={load} disabled={loading}>
+            {loading ? 'Loading…' : 'Apply'}
+          </button>
+        </div>
       </div>
 
-      <div className="report-tabs">
+      <div className="tabs" style={{ marginBottom: 18 }}>
         {tabs.map((t) => (
-          <button
+          <div
             key={t.key}
-            className={`report-tab ${tab === t.key ? 'active' : ''}`}
+            className={'tab ' + (tab === t.key ? 'active' : '')}
             onClick={() => {
               if (t.key !== tab) {
                 setData(null);
@@ -64,41 +104,32 @@ export default function Financials() {
             }}
           >
             {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="card">
-        <div className="form-row" style={{ marginBottom: 0 }}>
-          {tab === 'balance' ? (
-            <div>
-              <label>As of</label>
-              <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
-            </div>
-          ) : (
-            <>
-              <div>
-                <label>From</label>
-                <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-              </div>
-              <div>
-                <label>To</label>
-                <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-              </div>
-            </>
-          )}
-          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <button className="btn btn-primary" onClick={load} disabled={loading}>
-              {loading ? 'Loading…' : 'Apply'}
-            </button>
           </div>
-        </div>
+        ))}
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
 
       {data && !loading && (
         <>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              marginBottom: 10,
+            }}
+          >
+            <ExportButtons
+              filename={`financials_${tab}`}
+              title={tabTitle(tab)}
+              subtitle={periodLabel(tab, data, asOf, from, to)}
+              columns={[
+                { key: 'label', label: 'Item' },
+                { key: 'value', label: 'Amount', align: 'right' },
+              ]}
+              rows={flattenStatement(tab, data)}
+            />
+          </div>
           {tab === 'income' && <IncomeStatement data={data} />}
           {tab === 'balance' && <BalanceSheet data={data} />}
           {tab === 'cash' && <CashFlow data={data} />}
@@ -112,11 +143,148 @@ export default function Financials() {
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function Line({ label, value, indent, total }) {
+function tabTitle(tab) {
+  switch (tab) {
+    case 'income':
+      return 'Income Statement';
+    case 'balance':
+      return 'Balance Sheet';
+    case 'cash':
+      return 'Cash Flow Statement';
+    case 'equity':
+      return 'Statement of Changes in Equity';
+    default:
+      return 'Financial Statement';
+  }
+}
+
+function periodLabel(tab, data, asOf, from, to) {
+  if (tab === 'balance' && data?.asOf) {
+    return `As of ${new Date(data.asOf).toLocaleDateString()}`;
+  }
+  if (data?.period?.from || data?.period?.to) {
+    return `${data.period.from ?? '…'}  to  ${data.period.to ?? '…'}`;
+  }
+  if (tab === 'balance') return `As of ${asOf}`;
+  return `${from} to ${to}`;
+}
+
+/**
+ * Flatten a structured financial statement into a list of {label, value}
+ * rows that CSV/PDF exporters can consume.
+ */
+function flattenStatement(tab, d) {
+  const out = [];
+  if (tab === 'income' && d?.revenue && d?.cogs) {
+    const r = d.revenue;
+    const c = d.cogs;
+    out.push(
+      { label: 'Gross Revenue', value: fmt(r.grossRevenue) },
+      { label: '(–) Sales Discounts', value: fmt(r.discounts) },
+      { label: 'Net Revenue', value: fmt(r.netRevenue) },
+      { label: '(–) Sales Returns', value: fmt(r.returns) },
+      { label: 'Revenue after Returns', value: fmt(r.revenueAfterReturns) },
+      { label: 'COGS', value: fmt(c.cogs) },
+      { label: '(–) Returns COGS', value: fmt(c.returnsCogs) },
+      { label: 'Net COGS', value: fmt(c.netCogs) },
+      { label: 'Gross Profit', value: fmt(d.grossProfit) },
+      {
+        label: 'Employee Incentives (per sale × rule)',
+        value: fmt(d.employeeIncentives ?? 0),
+      },
+      {
+        label: 'Other Expenses',
+        value: fmt(Math.max(0, (d.expenses ?? 0) - (d.employeeIncentives ?? 0))),
+      },
+      { label: 'Net Income (trading)', value: fmt(d.netIncome) },
+      { label: '(+) Incentive Awards', value: fmt(d.incentives ?? 0) },
+      { label: 'Adjusted Net Income', value: fmt(d.adjustedNetIncome ?? d.netIncome) },
+    );
+  } else if (tab === 'balance' && d?.assets && d?.liabilities) {
+    const a = d.assets;
+    const l = d.liabilities;
+    const eq =
+      typeof d.equity === 'object' && d.equity !== null
+        ? d.equity
+        : { total: d.equity ?? 0, capitalContributed: 0, retainedEarnings: 0 };
+    out.push(
+      { label: 'Cash on Hand', value: fmt(a.cash) },
+      { label: 'Bank Accounts', value: fmt(a.bank) },
+      { label: 'Wallet', value: fmt(a.wallet) },
+      { label: 'Inventory (at cost)', value: fmt(a.inventory) },
+      { label: 'Accounts Receivable', value: fmt(a.accountsReceivable) },
+      { label: 'Total Assets', value: fmt(a.total) },
+      { label: 'Accounts Payable', value: fmt(l.accountsPayable) },
+      { label: 'Credit Card / Credit Line', value: fmt(l.creditPayable ?? 0) },
+      { label: 'Total Liabilities', value: fmt(l.total) },
+      { label: 'Owner Capital Contributed', value: fmt(eq.capitalContributed) },
+      { label: 'Retained Earnings', value: fmt(eq.retainedEarnings) },
+      { label: 'Total Equity', value: fmt(eq.total) },
+    );
+  } else if (tab === 'cash' && d?.operating) {
+    const o = d.operating;
+    out.push(
+      { label: 'Receipts (vouchers)', value: fmt(o.receipts) },
+      { label: 'Cash from Sales', value: fmt(o.cashSales) },
+      { label: 'Total Inflows', value: fmt(o.inflows) },
+      { label: '(–) Payment vouchers', value: fmt(o.payments) },
+      { label: '(–) Cash for Purchases', value: fmt(o.cashPurchases) },
+      { label: 'Total Outflows', value: fmt(o.outflows) },
+      { label: 'Net Operating Cash', value: fmt(o.net) },
+      { label: 'Beginning Cash', value: fmt(d.beginningCash) },
+      { label: 'Net Change in Cash', value: fmt(d.netChange) },
+      { label: 'Ending Cash', value: fmt(d.endingCash) },
+    );
+  } else if (tab === 'equity' && d?.balanceCheck) {
+    out.push(
+      { label: 'Opening Equity', value: fmt(d.openingEquity) },
+      { label: '(+) Net Income for Period', value: fmt(d.netIncome) },
+      { label: '(+) Incentive Awards', value: fmt(d.incentives ?? 0) },
+      { label: '(–) Drawings', value: fmt(d.drawings) },
+      { label: 'Closing Equity', value: fmt(d.closingEquity) },
+      { label: 'Expected (Opening + Net Income)', value: fmt(d.balanceCheck.expected) },
+      { label: 'Actual Closing', value: fmt(d.balanceCheck.actual) },
+      { label: 'Difference', value: fmt(d.balanceCheck.difference) },
+    );
+  }
+  return out;
+}
+
+function Group({ label, value }) {
   return (
-    <div className={total ? 'total' : 'line'}>
-      <span className={indent ? 'indent' : ''}>{label}</span>
-      <span>{fmt(value)}</span>
+    <div className="stmt-row group">
+      <div>{label}</div>
+      {value != null && <div className="v">{fmt(value)}</div>}
+    </div>
+  );
+}
+
+function Sub({ label, value, prefix }) {
+  return (
+    <div className="stmt-row sub">
+      <div>{label}</div>
+      <div className="v">
+        {prefix}
+        {fmt(value)}
+      </div>
+    </div>
+  );
+}
+
+function Sum({ label, value }) {
+  return (
+    <div className="stmt-row sum">
+      <div>{label}</div>
+      <div className="v">{fmt(value)}</div>
+    </div>
+  );
+}
+
+function Final({ label, value }) {
+  return (
+    <div className="stmt-row final">
+      <div>{label}</div>
+      <div className="v">Rs {fmt(value)}</div>
     </div>
   );
 }
@@ -126,32 +294,36 @@ function IncomeStatement({ data }) {
   const r = data.revenue;
   const c = data.cogs;
   return (
-    <div className="statement">
-      <h3>Income Statement</h3>
-      <div className="section-head">Revenue</div>
-      <Line label="Gross Revenue" value={r.grossRevenue} indent />
-      <Line label="(–) Sales Discounts" value={r.discounts} indent />
-      <Line label="Net Revenue" value={r.netRevenue} indent />
-      <Line label="(–) Sales Returns" value={r.returns} indent />
-      <Line label="Revenue after Returns" value={r.revenueAfterReturns} total />
+    <div className="card stmt" style={{ padding: '6px 0 14px' }}>
+      <Group label="Revenue" />
+      <Sub label="Gross sales" value={r.grossRevenue} prefix="" />
+      <Sub label="Less: discounts" value={r.discounts} prefix="− " />
+      <Sub label="Less: sales returns" value={r.returns} prefix="− " />
+      <Sum label="Net revenue" value={r.revenueAfterReturns} />
 
-      <div className="section-head">Cost of Goods Sold</div>
-      <Line label="COGS" value={c.cogs} indent />
-      <Line label="(–) Returns COGS" value={c.returnsCogs} indent />
-      <Line label="Net COGS" value={c.netCogs} total />
+      <Group label="Cost of goods sold" />
+      <Sub label="COGS at cost" value={c.cogs} prefix="− " />
+      <Sub label="Returns at cost" value={c.returnsCogs} prefix="+ " />
+      <Sum label="Gross profit" value={data.grossProfit} />
 
-      <Line label="Gross Profit" value={data.grossProfit} total />
+      <Group label="Operating expenses" />
+      <Sub
+        label="Employee incentives (per sale × rule)"
+        value={data.employeeIncentives ?? 0}
+        prefix="− "
+      />
+      <Sub
+        label="Other expenses"
+        value={Math.max(0, (data.expenses ?? 0) - (data.employeeIncentives ?? 0))}
+        prefix="− "
+      />
+      <Sum label="Net income (trading)" value={data.netIncome} />
 
-      <div className="section-head">Operating Expenses</div>
-      <Line label="Expenses" value={data.expenses} indent />
-      <Line label="Net Income (from trading)" value={data.netIncome} total />
-
-      <div className="section-head">Incentives</div>
-      <Line label="(+) Incentive Awards" value={data.incentives ?? 0} indent />
-      <Line
-        label="Adjusted Net Income"
+      <Group label="Incentives" />
+      <Sub label="Awards received in period" value={data.incentives ?? 0} prefix="+ " />
+      <Final
+        label="Adjusted net income"
         value={data.adjustedNetIncome ?? data.netIncome}
-        total
       />
     </div>
   );
@@ -161,32 +333,28 @@ function BalanceSheet({ data }) {
   if (!data?.assets || !data?.liabilities) return null;
   const a = data.assets;
   const l = data.liabilities;
-  // Backwards-compat: equity used to be a number; now it's an object.
   const eq =
     typeof data.equity === 'object' && data.equity !== null
       ? data.equity
       : { total: data.equity ?? 0, capitalContributed: 0, retainedEarnings: 0 };
   return (
-    <div className="statement">
-      <h3>Balance Sheet — as of {new Date(data.asOf).toLocaleDateString()}</h3>
-
-      <div className="section-head">Assets</div>
-      <Line label="Cash on Hand" value={a.cash} indent />
-      <Line label="Bank Accounts" value={a.bank} indent />
-      <Line label="Wallet" value={a.wallet} indent />
-      <Line label="Inventory (at cost)" value={a.inventory} indent />
-      <Line label="Accounts Receivable" value={a.accountsReceivable} indent />
-      <Line label="Total Assets" value={a.total} total />
-
-      <div className="section-head">Liabilities</div>
-      <Line label="Accounts Payable" value={l.accountsPayable} indent />
-      <Line label="Credit Card / Credit Line" value={l.creditPayable ?? 0} indent />
-      <Line label="Total Liabilities" value={l.total} total />
-
-      <div className="section-head">Equity</div>
-      <Line label="Owner Capital Contributed" value={eq.capitalContributed} indent />
-      <Line label="Retained Earnings" value={eq.retainedEarnings} indent />
-      <Line label="Total Equity" value={eq.total} total />
+    <div className="grid-2">
+      <div className="card stmt" style={{ padding: '6px 0 14px' }}>
+        <Group label="Assets" value={a.total} />
+        <Sub label="Cash on hand" value={a.cash} prefix="" />
+        <Sub label="Bank balances" value={a.bank} prefix="" />
+        <Sub label="Wallet" value={a.wallet} prefix="" />
+        <Sub label="Inventory at cost" value={a.inventory} prefix="" />
+        <Sub label="Accounts receivable" value={a.accountsReceivable} prefix="" />
+      </div>
+      <div className="card stmt" style={{ padding: '6px 0 14px' }}>
+        <Group label="Liabilities" value={l.total} />
+        <Sub label="Accounts payable" value={l.accountsPayable} prefix="" />
+        <Sub label="Credit payable" value={l.creditPayable ?? 0} prefix="" />
+        <Group label="Equity" value={eq.total} />
+        <Sub label="Owner capital contributed" value={eq.capitalContributed} prefix="" />
+        <Sub label="Retained earnings" value={eq.retainedEarnings} prefix="" />
+      </div>
     </div>
   );
 }
@@ -195,22 +363,17 @@ function CashFlow({ data }) {
   if (!data?.operating) return null;
   const o = data.operating;
   return (
-    <div className="statement">
-      <h3>Cash Flow Statement</h3>
-
-      <div className="section-head">Operating Activities</div>
-      <Line label="Receipts (vouchers)" value={o.receipts} indent />
-      <Line label="Cash from Sales" value={o.cashSales} indent />
-      <Line label="Total Inflows" value={o.inflows} indent />
-      <Line label="(–) Payment vouchers" value={o.payments} indent />
-      <Line label="(–) Cash for Purchases" value={o.cashPurchases} indent />
-      <Line label="Total Outflows" value={o.outflows} indent />
-      <Line label="Net Operating Cash" value={o.net} total />
-
-      <div className="section-head">Summary</div>
-      <Line label="Beginning Cash" value={data.beginningCash} indent />
-      <Line label="Net Change in Cash" value={data.netChange} indent />
-      <Line label="Ending Cash" value={data.endingCash} total />
+    <div className="card stmt" style={{ padding: '6px 0 14px' }}>
+      <Group label="Operating activities" />
+      <Sub label="Cash receipts from customers" value={o.receipts} prefix="+ " />
+      <Sub label="Cash sales" value={o.cashSales} prefix="+ " />
+      <Sub label="Cash paid to suppliers" value={o.payments} prefix="− " />
+      <Sub label="Cash paid for purchases" value={o.cashPurchases} prefix="− " />
+      <Sum label="Net operating cash" value={o.net} />
+      <Group label="Summary" />
+      <Sub label="Beginning cash" value={data.beginningCash} prefix="" />
+      <Sub label="Net change in cash" value={data.netChange} prefix="" />
+      <Final label="Ending cash" value={data.endingCash} />
     </div>
   );
 }
@@ -218,20 +381,19 @@ function CashFlow({ data }) {
 function EquityChanges({ data }) {
   if (!data?.balanceCheck) return null;
   return (
-    <div className="statement">
-      <h3>Statement of Changes in Equity</h3>
-      <Line label="Opening Equity" value={data.openingEquity} indent />
-      <Line label="(+) Net Income for Period" value={data.netIncome} indent />
+    <div className="card stmt" style={{ padding: '6px 0 14px' }}>
+      <Sub label="Opening equity" value={data.openingEquity} prefix="" />
+      <Sub label="(+) Net income for period" value={data.netIncome} prefix="+ " />
       {(data.incentives ?? 0) > 0 && (
-        <Line label="(+) Incentive Awards" value={data.incentives} indent />
+        <Sub label="(+) Incentive awards" value={data.incentives} prefix="+ " />
       )}
-      <Line label="(–) Drawings" value={data.drawings} indent />
-      <Line label="Closing Equity" value={data.closingEquity} total />
+      <Sub label="(−) Drawings" value={data.drawings} prefix="− " />
+      <Final label="Closing equity" value={data.closingEquity} />
 
-      <div className="section-head">Reconciliation</div>
-      <Line label="Expected (Opening + Net Income)" value={data.balanceCheck.expected} indent />
-      <Line label="Actual Closing" value={data.balanceCheck.actual} indent />
-      <Line label="Difference" value={data.balanceCheck.difference} indent />
+      <Group label="Reconciliation" />
+      <Sub label="Expected (Opening + Net Income)" value={data.balanceCheck.expected} prefix="" />
+      <Sub label="Actual closing" value={data.balanceCheck.actual} prefix="" />
+      <Sub label="Difference" value={data.balanceCheck.difference} prefix="" />
     </div>
   );
 }

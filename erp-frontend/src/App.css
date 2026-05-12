@@ -11,14 +11,21 @@
   --surface-hover: #f1f5f9;
   /* RGB triplet of --surface for translucent rgba() */
   --surface-rgb: 255, 255, 255;
-  /* Subtle ambient wash painted behind everything so the glass blur has
-     something colourful to refract — without making the page noisy. */
+  /* Two-layer ambient wash painted behind everything so the glass blur has
+     something colourful to refract. In light mode this needs to be much
+     stronger than dark mode, otherwise white-on-white glass looks identical
+     to solid white. */
   --bg-aurora:
-    radial-gradient(900px 600px at 12% -10%, rgba(99, 102, 241, 0.10), transparent 60%),
-    radial-gradient(700px 500px at 95% 0%, rgba(34, 197, 94, 0.07), transparent 55%),
-    radial-gradient(900px 600px at 80% 100%, rgba(245, 158, 11, 0.08), transparent 60%),
-    radial-gradient(700px 500px at 0% 90%, rgba(6, 182, 212, 0.06), transparent 55%);
-  --glass-blur: blur(16px) saturate(170%);
+    radial-gradient(900px 600px at 10% -10%, rgba(99, 102, 241, 0.32), transparent 60%),
+    radial-gradient(800px 600px at 95% 5%, rgba(236, 72, 153, 0.22), transparent 55%),
+    radial-gradient(900px 700px at 80% 100%, rgba(245, 158, 11, 0.26), transparent 60%),
+    radial-gradient(800px 600px at 0% 90%, rgba(6, 182, 212, 0.22), transparent 55%);
+  --glass-blur: blur(18px) saturate(180%);
+  /* Specular highlight on top edge of glass surfaces. */
+  --glass-shine:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 22%, rgba(255, 255, 255, 0) 100%);
+  /* Card surface opacity — lower means more transparency. */
+  --glass-alpha: 0.55;
 
   /* Text */
   --text: #0f172a;
@@ -89,10 +96,13 @@
   --surface-hover: #16223d;
   --surface-rgb: 17, 28, 51;
   --bg-aurora:
-    radial-gradient(900px 600px at 12% -10%, rgba(129, 140, 248, 0.20), transparent 60%),
-    radial-gradient(700px 500px at 95% 0%, rgba(34, 197, 94, 0.12), transparent 55%),
-    radial-gradient(900px 600px at 80% 100%, rgba(251, 191, 36, 0.10), transparent 60%),
-    radial-gradient(700px 500px at 0% 90%, rgba(34, 211, 238, 0.10), transparent 55%);
+    radial-gradient(900px 600px at 10% -10%, rgba(129, 140, 248, 0.28), transparent 60%),
+    radial-gradient(800px 600px at 95% 5%, rgba(236, 72, 153, 0.18), transparent 55%),
+    radial-gradient(900px 700px at 80% 100%, rgba(251, 191, 36, 0.16), transparent 60%),
+    radial-gradient(800px 600px at 0% 90%, rgba(34, 211, 238, 0.18), transparent 55%);
+  --glass-shine:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 22%, rgba(255, 255, 255, 0) 100%);
+  --glass-alpha: 0.62;
 
   --text: #f1f5f9;
   --text-muted: #94a3b8;
@@ -186,388 +196,33 @@ a:hover { text-decoration: underline; }
   color: var(--text);
 }
 
-/* ──────────────────────────────────────────────────────────
-   App shell — responsive (desktop full / desktop rail / mobile drawer)
-   ────────────────────────────────────────────────────────── */
-
-.app-shell {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  min-height: 100vh;
-  transition: grid-template-columns 0.2s ease;
-}
-
-.app-shell.sidebar-collapsed {
-  grid-template-columns: 72px 1fr;
-}
-
-.sidebar {
-  background: var(--sidebar-bg);
-  background-image: linear-gradient(
-    180deg,
-    var(--sidebar-bg) 0%,
-    var(--sidebar-bg-2) 100%
-  );
-  color: var(--sidebar-text);
-  padding: 22px 0 16px;
-  border-right: 1px solid var(--sidebar-border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transition: transform 0.22s ease;
-}
-
-.sidebar-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding-right: 12px;
-}
-
-.mobile-menu-btn,
-.sidebar-close-btn {
-  display: none; /* desktop hidden; mobile media query enables */
-}
-
-.mobile-backdrop { display: none; }
-
-/* Brand */
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 22px 22px;
-  border-bottom: 1px solid var(--sidebar-border);
-  margin-bottom: 14px;
-  flex: 1;
-  transition: padding 0.2s ease;
-}
-
-.brand-collapsed { padding: 4px 0 22px; justify-content: center; }
-
-.brand-mark {
-  filter: drop-shadow(0 4px 12px rgba(99, 102, 241, 0.45));
-}
-
-.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
-
-.brand-name {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  font-weight: 800;
-  color: #fff;
-  font-size: 16px;
-  letter-spacing: -0.01em;
-}
-
-.brand-tag {
-  font-size: 11px;
-  color: var(--sidebar-text);
-  margin-top: 2px;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-}
-
-/* Sidebar nav */
-.sidebar nav { flex: 1; padding: 0 12px; overflow-y: auto; }
-
-.nav-section { margin-bottom: 14px; }
-
-.nav-section-label {
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--sidebar-section-label);
-  padding: 6px 12px;
-  margin-bottom: 4px;
-}
-
-.sidebar nav a {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 9px 12px;
-  color: var(--sidebar-text);
-  text-decoration: none;
-  font-size: 13.5px;
-  font-weight: 500;
-  border-radius: var(--r);
-  position: relative;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.sidebar nav a svg { flex-shrink: 0; }
-
-/* Coloured icon chip — each nav item passes its accent colour via the
-   --c custom property; the chip is a gradient from that colour into a
-   darker variant of itself, with an inner highlight for depth. */
-.nav-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  flex-shrink: 0;
-  background:
-    linear-gradient(135deg, var(--c, var(--primary)) 0%,
-    color-mix(in srgb, var(--c, var(--primary)) 68%, #000) 100%);
-  box-shadow:
-    0 2px 6px color-mix(in srgb, var(--c, var(--primary)) 45%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.20),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.10);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.sidebar nav a:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--sidebar-text-hover);
-}
-
-.sidebar nav a:hover .nav-icon {
-  transform: scale(1.08) rotate(-1.5deg);
-  box-shadow:
-    0 4px 12px color-mix(in srgb, var(--c, var(--primary)) 55%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
-}
-
-.sidebar nav a.active {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--sidebar-active-fg);
-  font-weight: 600;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-}
-
-.sidebar nav a.active::before {
-  content: '';
-  position: absolute;
-  left: -12px;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--c, var(--sidebar-active-bar));
-  box-shadow: 0 0 12px var(--c, var(--sidebar-active-bar));
-}
-
-.sidebar nav a.active .nav-icon {
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.08),
-    0 4px 14px color-mix(in srgb, var(--c, var(--primary)) 65%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
-}
-
-/* Slightly glassy sidebar so the aurora gradient bleeds through subtly. */
-.sidebar {
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(11, 18, 32, 0.94) 100%),
-    var(--sidebar-bg);
-  backdrop-filter: blur(12px) saturate(140%);
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
-}
-
-/* Collapsed (rail) mode — desktop, sidebar narrowed to icons only */
-.sidebar-collapsed .sidebar nav a {
-  justify-content: center;
-  padding: 10px 0;
-}
-
-.sidebar-collapsed .sidebar nav a .nav-text { display: none; }
-.sidebar-collapsed .sidebar nav { padding: 0 8px; }
-.sidebar-collapsed .brand { border-bottom-color: transparent; }
-.sidebar-collapsed .sidebar nav a.active::before {
-  left: -8px;
-}
-.sidebar-collapsed .footer-copy { display: none; }
-.sidebar-collapsed .sidebar-footer { justify-content: center; }
-
-/* Sidebar footer */
-.sidebar-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--sidebar-border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--sidebar-section-label);
-}
-
-.sidebar-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.collapse-toggle { width: 32px; height: 32px; }
+/* App shell, sidebar, topbar, brand, nav-section, nav-item, nav-icon, and
+   .app-shell.sidebar-collapsed legacy rules were removed from this file
+   because they collide with the redesign in src/styles/app.css. Compound
+   selectors like `.sidebar nav a` (specificity 0,1,2) were beating the new
+   `.nav-item` (0,1,0) rule, leaving the sidebar with the old palette and
+   spacing. All sidebar / topbar / page-head styling now lives exclusively
+   in src/styles/app.css. */
 
 /* ──────────────────────────────────────────────────────────
    Mobile (≤ 768px) — sidebar becomes off-canvas drawer
    ────────────────────────────────────────────────────────── */
+/* The old `@media (max-width: 768px)` block that targeted `.app-shell`,
+   `.mobile-menu-btn`, `.mobile-backdrop` etc. was removed because those
+   selectors don't match the new shell (which uses `.app[data-nav="open"]`
+   and `.scrim`). Mobile responsiveness is now owned entirely by
+   src/styles/app.css's `@media (max-width: 860px)` block. The few legacy
+   utility rules from that block (form-row stacking, modal width) are kept
+   below in their own little media query. */
 @media (max-width: 768px) {
-  .app-shell {
-    grid-template-columns: 1fr; /* main takes full width */
-  }
-  /* Even in "collapsed" persistent state, mobile shows the full drawer */
-  .app-shell.sidebar-collapsed { grid-template-columns: 1fr; }
-  .sidebar-collapsed .sidebar nav a { justify-content: flex-start; padding: 9px 12px; }
-  .sidebar-collapsed .sidebar nav a .nav-text { display: inline; }
-  .sidebar-collapsed .sidebar nav { padding: 0 12px; }
-  .sidebar-collapsed .footer-copy { display: inline; }
-  .sidebar-collapsed .brand { padding: 4px 22px 22px; justify-content: flex-start; }
-
-  .sidebar {
-    position: fixed;
-    top: 0; left: 0;
-    bottom: 0;
-    width: 280px;
-    z-index: 60;
-    transform: translateX(-100%);
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.4);
-  }
-
-  .app-shell.mobile-open .sidebar { transform: translateX(0); }
-
-  .mobile-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 50;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s ease;
-  }
-
-  .app-shell.mobile-open .mobile-backdrop {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  .mobile-menu-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    top: 14px;
-    left: 14px;
-    z-index: 40;
-    width: 38px;
-    height: 38px;
-    border-radius: var(--r);
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    cursor: pointer;
-    box-shadow: var(--shadow-sm);
-  }
-
-  .sidebar-close-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: var(--r);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--sidebar-text);
-    border: none;
-    cursor: pointer;
-    margin-top: 6px;
-  }
-
-  .main {
-    padding: 62px 16px 22px; /* room for the hamburger button */
-  }
-
-  .page-header {
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    text-align: center;
-    position: relative;
-  }
-
-  .page-header h2 {
-    font-size: 18px;
-    flex: 1 0 100%;
-    text-align: center;
-    margin-bottom: 6px;
-  }
-
-  /* Buttons/inputs in the header sit on their own row, full width */
-  .page-header > *:not(h2) {
-    flex: 1 1 auto;
-  }
-
-  /* Tables on mobile: allow horizontal scroll instead of squeezing */
-  table { display: block; overflow-x: auto; white-space: nowrap; }
-
-  /* Tile grid: smaller min so 3-4 fit on one row */
-  .tile-grid {
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 8px;
-  }
-  .tile { padding: 12px; }
-  .tile-label { font-size: 13px; }
-
-  /* POS: stack the cart and summary vertically */
-  .pos-grid {
-    grid-template-columns: 1fr;
-  }
-  .pos-summary { position: static; }
-
-  /* Stats grid */
-  .stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-  .stat-card { padding: 14px; }
-  .stat-card .value { font-size: 20px; }
-
   .form-row { grid-template-columns: 1fr; gap: 10px; }
-
   .modal { padding: 18px; width: 94vw; }
 }
 
-/* Main */
-.main {
-  padding: 26px 32px;
-  overflow-x: auto;
-  background: var(--bg);
-  min-height: 100vh;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 22px;
-  gap: 16px;
-}
-
-.page-header h2 {
-  font-size: 22px;
-  letter-spacing: -0.015em;
-}
-
-/* Theme toggle */
-.theme-toggle {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid var(--sidebar-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--sidebar-text);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.theme-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--sidebar-text-hover);
-}
+/* `.main`, `.page-header`, and `.theme-toggle` legacy rules removed —
+   the redesign uses `.main { display: flex; flex-direction: column }` from
+   src/styles/app.css plus the `.page-head` + `.page-title` layout, and
+   ThemeToggle now uses `.btn .btn-sm .btn-icon .btn-ghost`. */
 
 /* ──────────────────────────────────────────────────────────
    Buttons
@@ -686,34 +341,73 @@ textarea { min-height: 72px; resize: vertical; }
    ────────────────────────────────────────────────────────── */
 
 .card {
-  background: rgba(var(--surface-rgb), 0.72);
+  position: relative;
+  background: rgba(var(--surface-rgb), var(--glass-alpha));
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   padding: 22px;
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid rgba(var(--surface-rgb), 0.6);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.45);
   margin-bottom: 20px;
+  overflow: hidden;
+}
+
+/* Specular shine across the top edge — gives the glass a "lit from above"
+   look that's most visible in light mode. */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: var(--glass-shine);
+}
+
+[data-theme='dark'] .card {
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  background: rgba(var(--surface-rgb), 0.72);
+  background: rgba(var(--surface-rgb), var(--glass-alpha));
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-radius: var(--r-lg);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid rgba(var(--surface-rgb), 0.6);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+[data-theme='dark'] table {
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 th {
   /* Override default — the glass table needs a slightly more solid header
      so the column titles stay legible. */
-  background: rgba(var(--surface-rgb), 0.55) !important;
-  backdrop-filter: blur(6px);
+  background: rgba(var(--surface-rgb), 0.65) !important;
+  backdrop-filter: blur(8px);
+}
+
+tbody tr {
+  /* Translucent rows let the aurora bleed through; hover boosts contrast. */
+  background: transparent;
+}
+tbody tr:hover {
+  background: rgba(var(--surface-rgb), 0.45);
 }
 
 th, td {
@@ -853,39 +547,49 @@ tbody tr:hover { background: var(--surface-hover); }
   align-items: flex-start;
   gap: 10px;
   padding: 16px;
-  background: rgba(var(--surface-rgb), 0.7);
+  background: rgba(var(--surface-rgb), var(--glass-alpha));
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid rgba(var(--surface-rgb), 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.5);
   border-radius: var(--r-lg);
   cursor: pointer;
   font: inherit;
   color: var(--text);
   text-align: left;
-  transition: all 0.18s ease;
-  box-shadow: var(--shadow-xs);
+  transition: all 0.2s ease;
+  box-shadow:
+    var(--shadow-xs),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
   overflow: hidden;
 }
 
-/* Subtle highlight on the top edge — gives tiles a "lit from above" feel
-   that reinforces the glass treatment. */
+[data-theme='dark'] .tile {
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow:
+    var(--shadow-xs),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Glossy specular highlight on the top edge. */
 .tile::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.08) 0%,
-    rgba(255, 255, 255, 0) 50%
-  );
+  background: var(--glass-shine);
 }
 
 .tile:hover {
   transform: translateY(-3px);
-  box-shadow: var(--shadow);
-  border-color: rgba(var(--surface-rgb), 0.85);
+  box-shadow:
+    var(--shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+[data-theme='dark'] .tile:hover {
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .tile-icon {

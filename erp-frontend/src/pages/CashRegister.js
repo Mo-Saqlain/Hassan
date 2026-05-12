@@ -67,9 +67,12 @@ export default function CashRegister() {
 
   return (
     <>
-      <div className="page-header">
-        <h2>Daily Cash Register</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
+      <div className="page-head">
+        <div className="page-title">
+          <h1>Cash book — {date}</h1>
+          <p>Session-based daily till · running balance per row</p>
+        </div>
+        <div className="row">
           {!session && isToday && (
             <button
               className="btn btn-primary"
@@ -191,73 +194,50 @@ export default function CashRegister() {
           ))}
 
           {session && (
-            <div className="card" style={{ marginTop: 12 }}>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <div>
-                  <label>Status</label>
-                  <div>
-                    <span
-                      className={`badge ${
-                        session.status === 'OPEN'
-                          ? 'badge-green'
-                          : 'badge-gray'
-                      }`}
-                    >
-                      {session.status}
-                    </span>
-                  </div>
+            <div className="session-bar" style={{ marginTop: 12, marginBottom: 18 }}>
+              <div className="dot" />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>
+                  Session {session.sessionDate} · {session.status}
                 </div>
-                <div>
-                  <label>Expected Opening</label>
-                  <div>{fmt(session.expectedOpening)}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-soft)' }}>
+                  Expected opening {fmt(session.expectedOpening)} · Actual{' '}
+                  {fmt(session.actualOpening)} ·{' '}
+                  {Number(session.openingDifference) === 0
+                    ? 'no difference'
+                    : `${fmt(session.openingDifference)} diff`}
+                  {session.status === 'CLOSED' && (
+                    <>
+                      {' · Closing '}
+                      {fmt(session.actualClosing ?? 0)} (
+                      {Number(session.closingDifference ?? 0) === 0
+                        ? 'matched'
+                        : `${fmt(session.closingDifference ?? 0)} diff`}
+                      )
+                    </>
+                  )}
                 </div>
-                <div>
-                  <label>Actual Opening</label>
-                  <div>{fmt(session.actualOpening)}</div>
-                </div>
-                <div>
-                  <label>Opening Difference</label>
-                  <div
-                    style={{
-                      color:
-                        Number(session.openingDifference) === 0
-                          ? 'var(--text)'
-                          : 'var(--danger)',
-                    }}
-                  >
-                    {fmt(session.openingDifference)}
-                  </div>
-                </div>
-                {session.status === 'CLOSED' && (
-                  <>
-                    <div>
-                      <label>Expected Closing</label>
-                      <div>{fmt(session.expectedClosing ?? 0)}</div>
-                    </div>
-                    <div>
-                      <label>Actual Closing</label>
-                      <div>{fmt(session.actualClosing ?? 0)}</div>
-                    </div>
-                    <div>
-                      <label>Closing Difference</label>
-                      <div
-                        style={{
-                          color:
-                            Number(session.closingDifference ?? 0) === 0
-                              ? 'var(--text)'
-                              : 'var(--danger)',
-                        }}
-                      >
-                        {fmt(session.closingDifference ?? 0)}
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
+              <span
+                className={
+                  'chip ' +
+                  (Number(session.openingDifference) === 0 &&
+                  (session.status !== 'CLOSED' ||
+                    Number(session.closingDifference ?? 0) === 0)
+                    ? 'chip-success'
+                    : 'chip-warn')
+                }
+              >
+                {Number(session.openingDifference) === 0 &&
+                (session.status !== 'CLOSED' ||
+                  Number(session.closingDifference ?? 0) === 0)
+                  ? 'No discrepancies'
+                  : 'Variance recorded'}
+              </span>
             </div>
           )}
 
-          <div className="tile-grid" style={{ marginTop: 12 }}>
+          <div className="grid-stat" style={{ marginTop: 12 }}>
             <Stat label="Opening Cash" value={book.opening} />
             <Stat label="Cash In" value={book.totals.in} positive />
             <Stat label="Cash Out" value={book.totals.out} negative />
@@ -330,22 +310,21 @@ export default function CashRegister() {
 }
 
 function Stat({ label, value, positive, negative, accent }) {
-  const colour = positive
-    ? 'var(--tile-customers)'
+  const orb = positive
+    ? '#34d399'
     : negative
-    ? 'var(--tile-suppliers)'
+    ? '#fda4af'
     : accent
-    ? 'var(--tile-suppliers)'
-    : 'var(--primary)';
+    ? '#fda4af'
+    : 'var(--gradient-primary)';
   return (
-    <div className="tile" style={{ cursor: 'default' }}>
-      <span className="tile-icon" style={{ background: colour }} aria-hidden>
-        ₨
-      </span>
-      <span className="tile-label">{label}</span>
-      <span className="tile-desc" style={{ fontSize: 18, fontWeight: 600 }}>
+    <div className="stat">
+      <div className="stat-orb" style={{ '--stat-orb': orb, opacity: 0.35 }} />
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">
+        <span className="unit">Rs</span>
         {fmt(value)}
-      </span>
+      </div>
     </div>
   );
 }

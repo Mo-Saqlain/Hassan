@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import ExportButtons from './ExportButtons';
 
 /**
  * Generic CRUD page. Columns declare display only;
@@ -80,9 +81,18 @@ export default function CrudPage({
     <>
       <div className="page-header">
         <h2>{title}</h2>
-        <button className="btn btn-primary" onClick={startAdd}>
-          + Add {title.replace(/s$/, '')}
-        </button>
+        <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+          <ExportButtons
+            filename={title.toLowerCase().replace(/\s+/g, '_')}
+            title={title}
+            columns={columns}
+            rows={filtered}
+            size="sm"
+          />
+          <button className="btn btn-primary" onClick={startAdd}>
+            + Add {title.replace(/s$/, '')}
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}

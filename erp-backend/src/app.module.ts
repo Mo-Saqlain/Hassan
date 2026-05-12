@@ -23,6 +23,14 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { CashRegisterModule } from './modules/cash-register/cash-register.module';
 import { IncentivesModule } from './modules/incentives/incentives.module';
 import { FundTransfersModule } from './modules/fund-transfers/fund-transfers.module';
+import { BackupModule } from './modules/backup/backup.module';
+import { EmployeesModule } from './modules/employees/employees.module';
+import { EmployeeTransactionsModule } from './modules/employee-transactions/employee-transactions.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
+import { EmployeeIncentivesModule } from './modules/employee-incentives/employee-incentives.module';
+import { PurchaseOrdersModule } from './modules/purchase-orders/purchase-orders.module';
+import { StockTransfersModule } from './modules/stock-transfers/stock-transfers.module';
+import { DamagedGoodsModule } from './modules/damaged-goods/damaged-goods.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -66,6 +74,14 @@ function buildDbOptions(): TypeOrmModuleOptions {
     FundTransfersModule,
     CashRegisterModule,
     IncentivesModule,
+    EmployeesModule,
+    EmployeeTransactionsModule,
+    AttendanceModule,
+    EmployeeIncentivesModule,
+    PurchaseOrdersModule,
+    StockTransfersModule,
+    DamagedGoodsModule,
+    BackupModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { useResource } from '../../hooks/useResource';
+import ExportButtons from '../ExportButtons';
 
 const empty = {
   modelNo: '',
-  barcode: '',
   sku: '',
   brandId: '',
   categoryIds: [],
@@ -32,7 +32,7 @@ export default function ItemsPanel() {
     const term = query.trim().toLowerCase();
     if (!term) return items;
     return items.filter((it) =>
-      [it.modelNo, it.name, it.sku, it.barcode, it.brand?.name]
+      [it.modelNo, it.name, it.sku, it.brand?.name]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(term)),
     );
@@ -46,7 +46,6 @@ export default function ItemsPanel() {
       row
         ? {
             modelNo: row.modelNo ?? row.name ?? '',
-            barcode: row.barcode ?? '',
             sku: row.sku ?? '',
             brandId: row.brandId ?? '',
             categoryIds: (row.categories ?? []).map((c) => c.id),
@@ -84,7 +83,6 @@ export default function ItemsPanel() {
       // name auto-derives from modelNo on the backend; send it explicitly so
       // the displayed name updates in lockstep when the user edits modelNo.
       name: modelNo,
-      barcode: form.barcode.trim() || undefined,
       sku: form.sku.trim() || undefined,
       brandId: form.brandId || undefined,
       categoryIds: form.categoryIds,
@@ -131,9 +129,30 @@ export default function ItemsPanel() {
     <>
       <div className="panel-header">
         <h3>Items</h3>
-        <button className="btn btn-primary" onClick={() => open(null)}>
-          + Add Item
-        </button>
+        <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+          <ExportButtons
+            filename="items"
+            title="Items"
+            columns={[
+              { key: 'modelNo', label: 'Model No.' },
+              { key: 'brand', label: 'Brand', value: (r) => r.brand?.name ?? '' },
+              {
+                key: 'categories',
+                label: 'Categories',
+                value: (r) => (r.categories ?? []).map((c) => c.name).join('; '),
+              },
+              { key: 'purchasePrice', label: 'Purchase', align: 'right' },
+              { key: 'salePrice', label: 'Sale', align: 'right' },
+              { key: 'unit', label: 'Unit' },
+              { key: 'minStockLevel', label: 'Min', align: 'right' },
+              { key: 'isActive', label: 'Active' },
+            ]}
+            rows={filtered}
+          />
+          <button className="btn btn-primary" onClick={() => open(null)}>
+            + Add Item
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -174,21 +193,13 @@ export default function ItemsPanel() {
                 required
                 autoFocus
                 value={form.modelNo}
-                placeholder="e.g. RT34K3753S8"
+                placeholder="e.g. DAWLANCE LVS-15"
                 onChange={(e) => setForm({ ...form, modelNo: e.target.value })}
               />
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 The model number is used as this item's name. SKU is
                 auto-generated from it.
               </div>
-            </div>
-            <div>
-              <label>Barcode</label>
-              <input
-                value={form.barcode}
-                placeholder="optional, scannable"
-                onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-              />
             </div>
             <div>
               <label>Brand</label>
@@ -321,34 +332,29 @@ export default function ItemsPanel() {
           {query.trim() ? 'No items match your search.' : 'No items yet.'}
         </div>
       ) : (
-        <table>
+        <table className="t">
           <thead>
             <tr>
-              <th>Model No. / Name</th>
+              <th>Model No.</th>
               <th>Brand</th>
-              <th>Barcode</th>
               <th>Categories</th>
-              <th className="right">Purchase</th>
-              <th className="right">Sale</th>
+              <th className="num">Purchase</th>
+              <th className="num">Sale</th>
               <th>Unit</th>
-              <th className="right">Min</th>
+              <th className="num">Min</th>
               <th>Status</th>
-              <th className="right">Actions</th>
+              <th className="num">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((it) => (
               <tr key={it.id} style={!it.isActive ? { opacity: 0.55 } : undefined}>
                 <td>
-                  <strong>{it.modelNo ?? it.name}</strong>
-                  {it.sku && it.sku !== (it.modelNo ?? it.name) && (
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      SKU: {it.sku}
-                    </div>
-                  )}
+                  <strong style={{ color: 'var(--text)' }}>
+                    {it.modelNo ?? it.name}
+                  </strong>
                 </td>
                 <td>{it.brand?.name ?? '—'}</td>
-                <td>{it.barcode ?? '—'}</td>
                 <td>
                   {(it.categories ?? []).length === 0
                     ? '—'
@@ -358,18 +364,18 @@ export default function ItemsPanel() {
                         </span>
                       ))}
                 </td>
-                <td className="right">{Number(it.purchasePrice).toFixed(2)}</td>
-                <td className="right">{Number(it.salePrice).toFixed(2)}</td>
+                <td className="num">{Number(it.purchasePrice).toFixed(2)}</td>
+                <td className="num">{Number(it.salePrice).toFixed(2)}</td>
                 <td>{it.unit}</td>
-                <td className="right">{it.minStockLevel}</td>
+                <td className="num">{it.minStockLevel}</td>
                 <td>
                   <span
-                    className={`badge ${it.isActive ? 'badge-green' : 'badge-gray'}`}
+                    className={`chip ${it.isActive ? 'chip-success' : ''}`}
                   >
                     {it.isActive ? 'Active' : 'Closed'}
                   </span>
                 </td>
-                <td className="right">
+                <td className="num">
                   <button className="btn btn-sm" onClick={() => open(it)}>
                     Edit
                   </button>{' '}
