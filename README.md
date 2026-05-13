@@ -130,9 +130,8 @@ Snapshot every business table (sales, purchases, payments, customers, items, sto
 
 Both surfaced under **System → Audit** and **System → Errors**.
 
-- **Audit log** — every TypeORM insert / update / delete on a user-facing entity is captured by [erp-backend/src/modules/audit-logs/audit.subscriber.ts](erp-backend/src/modules/audit-logs/audit.subscriber.ts) and written to `audit_logs` with a human-readable summary plus a small JSON snapshot of the affected fields (or a before→after diff for updates). The subscriber filters out its own table, the outbox queue, and the error log to avoid recursion and noise. The frontend page has entity-type / action / date filters, quick-search, and **CSV + PDF export**.
-- **Error log** — a global Nest exception filter ([erp-backend/src/modules/error-logs/error-log.filter.ts](erp-backend/src/modules/error-logs/error-log.filter.ts)) writes every error response to `error_logs` with method, path, status code, message, stack, and a JSON snapshot of the request body / query / params. Validation 400s and 404s are tagged `WARN`; 5xx are tagged `ERROR`. The frontend page has level / source filters, quick-search, expandable stack viewer, and **CSV + PDF export**.
-- Both tables are **clearable** from their respective tabs (red "Clear all" button with confirmation) — handy when testing.
+- **Audit log** — every TypeORM insert / update / delete on a user-facing entity is captured by [erp-backend/src/modules/audit-logs/audit.subscriber.ts](erp-backend/src/modules/audit-logs/audit.subscriber.ts) and written to `audit_logs` with a human-readable summary plus a small JSON snapshot of the affected fields (or a before→after diff for updates). The subscriber filters out its own table, the outbox queue, and the error log to avoid recursion and noise. The frontend page has entity-type / action / date filters, quick-search, and **CSV + PDF export**. The audit log is intentionally append-only — there is no "Clear" button and no `DELETE /audit-logs` endpoint, so the trail can't be wiped from the UI.
+- **Error log** — a global Nest exception filter ([erp-backend/src/modules/error-logs/error-log.filter.ts](erp-backend/src/modules/error-logs/error-log.filter.ts)) writes every error response to `error_logs` with method, path, status code, message, stack, and a JSON snapshot of the request body / query / params. Validation 400s and 404s are tagged `WARN`; 5xx are tagged `ERROR`. The frontend page has level / source filters, quick-search, expandable stack viewer, and **CSV + PDF export**. Clearable from the System → Errors tab.
 
 ### 10c. Monthly salary accrual
 
@@ -554,7 +553,6 @@ POST   /employees/:id/accrue-salary         # same, single employee
 ### Audit + error logs (System tab)
 ```
 GET    /audit-logs?entityType=&action=&from=&to=&limit=
-DELETE /audit-logs                          # wipe (testing)
 GET    /error-logs?level=&source=&from=&to=&limit=
 DELETE /error-logs                          # wipe (testing)
 ```

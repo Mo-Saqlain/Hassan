@@ -58,16 +58,6 @@ export default function AuditLog() {
     );
   }, [rows, search]);
 
-  const clear = async () => {
-    if (!window.confirm('Wipe the audit log? This cannot be undone.')) return;
-    try {
-      await api.delete('/audit-logs');
-      load();
-    } catch (e) {
-      alert(e.uiMessage ?? 'Clear failed');
-    }
-  };
-
   return (
     <>
       <div className="page-header">
@@ -90,9 +80,6 @@ export default function AuditLog() {
           />
           <button className="btn btn-sm" onClick={load} disabled={loading}>
             {loading ? 'Loading…' : 'Refresh'}
-          </button>
-          <button className="btn btn-sm btn-danger" onClick={clear}>
-            Clear all
           </button>
         </div>
       </div>

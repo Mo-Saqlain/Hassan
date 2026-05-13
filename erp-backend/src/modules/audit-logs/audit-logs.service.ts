@@ -53,10 +53,4 @@ export class AuditLogsService {
       take: Math.min(opts.limit ?? 500, 5000),
     });
   }
-
-  /** Wipe audit history. Useful for testing — surfaced as DELETE /audit-logs. */
-  async clear() {
-    await this.repo.clear();
-    return { cleared: true };
-  }
 }

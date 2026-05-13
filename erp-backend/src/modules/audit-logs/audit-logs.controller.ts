@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { AuditLogsService } from './audit-logs.service';
 import { AuditAction } from './entities/audit-log.entity';
 
@@ -21,10 +21,5 @@ export class AuditLogsController {
       to,
       limit: limit ? Number(limit) : undefined,
     });
-  }
-
-  @Delete()
-  clear() {
-    return this.service.clear();
   }
 }
