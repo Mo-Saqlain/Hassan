@@ -52,6 +52,10 @@ export class CreateSaleDto {
   @IsOptional()
   paymentMethod?: 'CASH' | 'CARD' | 'BANK' | 'CREDIT';
 
+  @IsUUID()
+  @IsOptional()
+  accountId?: string;
+
   @IsString()
   @IsOptional()
   notes?: string;

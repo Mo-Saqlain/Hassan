@@ -52,6 +52,12 @@ export class SalesService {
 
       const invoiceNo = dto.invoiceNo ?? (await this.nextInvoiceNo(saleRepo));
 
+      // Sales paid in cash/card/bank credit a specific account (cash drawer,
+      // bank wallet, etc.). CREDIT-method sales must not pin an account —
+      // nothing is collected yet, the whole amount sits as A/R.
+      const paymentMethod = dto.paymentMethod ?? 'CASH';
+      const accountId = paymentMethod === 'CREDIT' ? undefined : dto.accountId;
+
       const sale = saleRepo.create({
         invoiceNo,
         customerId: dto.customerId,
@@ -61,7 +67,8 @@ export class SalesService {
         netAmount,
         paidAmount,
         dueAmount,
-        paymentMethod: dto.paymentMethod ?? 'CASH',
+        paymentMethod,
+        accountId,
         notes: dto.notes,
         lines,
       });

@@ -3,7 +3,7 @@
 Offline-first ERP with an integrated Point-of-Sale terminal for a small home-appliances retail shop. Inventory, master data ("Catalogue"), vouchers, customer/supplier/account ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Credit), an incentive-tracking system that feeds adjusted-net-income, daily JSON backups with restore, and a four-statement financials report — all backed by Supabase Postgres in the cloud, with a desktop Electron build that bundles a local SQLite for true offline cashier operation. **UI is a violet→cyan aurora-glass redesign** ([design.md](./design.md)) — sticky topbar, glass cards, gradient brand mark, coloured sidebar icon chips, light + dark themes, responsive off-canvas drawer.
 
 ![Status](https://img.shields.io/badge/status-Phase%201%20%2B%202%20%2B%203%20complete-brightgreen)
-![Tests](https://img.shields.io/badge/tests-77%2F77%20passing-success)
+![Tests](https://img.shields.io/badge/tests-82%2F82%20passing-success)
 ![Backend](https://img.shields.io/badge/backend-NestJS%20%2B%20TypeORM-e0234e)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20HashRouter-61dafb)
 ![Theme](https://img.shields.io/badge/themes-light%20%2B%20dark-6366f1)
@@ -43,8 +43,9 @@ Everything is **offline-first**: the cashier can keep selling when the internet 
 - **Cart** with re-scan stacking (scanning the same item again increments the existing line)
 - **Inline quantity** +/− buttons, line remove, clear cart
 - **Payment methods**: Cash, Card, Bank, Credit
-- **Partial payment** — paid amount can be less than net; the remainder becomes outstanding on the customer's ledger
-- **Change due** — paid amount over net shows change owed to customer
+- **Pick the receiving account** — on every CASH / CARD / BANK sale the cashier picks which **cash drawer / bank / wallet** account is being credited. The picker is filtered to `CASH` accounts for cash sales and to `BANK + WALLET` accounts for card / bank transfers. That sale's paid amount then flows through `/reports/account-ledger/:id`, the Balance Sheet, and the Cash Flow statement against the chosen account — so a Rs.50,000 card-tap sale credits the correct HBL account, not a generic "cash" bucket. CREDIT sales don't ask for an account (nothing is collected yet).
+- **Partial payment** — paid amount can be less than net; the remainder becomes a customer **receivable**. The Checkout panel switches its bottom row to read `Receivable · 25,000` and shows a banner explaining that the unpaid balance will be added to the customer's A/R. Selecting a customer is **required** for partial pay and for CREDIT sales — both the frontend and the backend enforce this so receivables never end up orphaned on a walk-in.
+- **Change due** — when paid > net, the same row reads `Change · …` so the cashier knows how much to hand back.
 - **In-flow customer create** — `+` button next to the customer dropdown opens a modal; saves and auto-selects on close
 - **In-flow item create on Purchases** — every Purchase-line item picker has a **+ New** button that opens a quick-add item modal (Model No, Name, Brand, SKU, Barcode, Purchase + Sale price). Saves to `/items`, prepends to the dropdown, auto-selects on the originating line, and prefills the line's unit price.
 - **Session lifecycle** — Start session → ring up sales → Close session. Running `salesTotal` and `salesCount` displayed
@@ -84,7 +85,7 @@ One sidebar entry. Tiles are now grouped into four labeled sections:
 ### 5. Ledgers
 - **Customer Ledger** — chronological list of every sale, sale return, payment-at-sale, and receipt voucher for one customer, with Debit / Credit / running Balance columns. A positive balance means the customer owes you.
 - **Supplier Ledger** — same, liability-side. A positive balance means you owe the supplier.
-- **Account Ledger** — *new.* Per-account history for any Bank / Wallet / Cash / Capital / Credit account. Shows every payment voucher, fund-transfer in/out, and (for CASH accounts) cash-paid sales/purchases, with running balance starting from the account's opening balance. Dropdown is grouped by account type for fast switching.
+- **Account Ledger** — *new.* Per-account history for any Bank / Wallet / Cash / Capital / Credit account. Shows every payment voucher, fund-transfer in/out, and POS sales explicitly attributed to that account (`SALE_RECEIPT` rows for the picked cash drawer / bank / wallet). CASH accounts also pick up legacy cash sales / purchases that weren't account-attributed. Running balance starts from the account's opening balance. Dropdown is grouped by account type for fast switching.
 
 ### 6. Daily Cash Register (sidebar entry)
 A real cashier's day book. Sidebar → **Cash Book**.

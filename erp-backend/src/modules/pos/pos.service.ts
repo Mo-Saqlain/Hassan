@@ -146,12 +146,38 @@ export class PosService {
       throw new BadRequestException('Cart is empty');
     }
 
+    const paymentMethod = dto.paymentMethod ?? 'CASH';
+    // A partial payment leaves a positive due amount → it must land on a
+    // specific customer's A/R, otherwise the receivable is orphaned.
+    if (
+      dto.paidAmount != null &&
+      !dto.customerId &&
+      paymentMethod !== 'CREDIT'
+    ) {
+      const cartTotal = cartLines.reduce(
+        (s, l) => s + Number(l.total),
+        0,
+      );
+      const net = Math.max(0, cartTotal - (dto.discount ?? 0));
+      if (Number(dto.paidAmount) < net) {
+        throw new BadRequestException(
+          'Select a customer for partial payments — the unpaid balance must be tracked as a receivable.',
+        );
+      }
+    }
+    if (paymentMethod === 'CREDIT' && !dto.customerId) {
+      throw new BadRequestException(
+        'Select a customer for CREDIT sales so the receivable is tracked.',
+      );
+    }
+
     const saleDto = {
       customerId: dto.customerId,
       storeId: session.storeId,
       discount: dto.discount ?? 0,
-      paidAmount: dto.paidAmount,
-      paymentMethod: dto.paymentMethod ?? 'CASH',
+      paidAmount: paymentMethod === 'CREDIT' ? 0 : dto.paidAmount,
+      paymentMethod,
+      accountId: paymentMethod === 'CREDIT' ? undefined : dto.accountId,
       notes: dto.notes,
       lines: cartLines.map((ln) => ({
         itemId: ln.itemId,

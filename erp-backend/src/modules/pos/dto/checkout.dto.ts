@@ -16,6 +16,10 @@ export class CheckoutDto {
   @IsOptional()
   customerId?: string;
 
+  @IsUUID()
+  @IsOptional()
+  accountId?: string;
+
   @IsNumber()
   @Min(0)
   @IsOptional()

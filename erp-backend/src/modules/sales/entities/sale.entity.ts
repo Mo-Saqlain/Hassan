@@ -9,6 +9,7 @@ import {
 import { BaseEntity } from '../../../common/entities/base.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { Store } from '../../stores/entities/store.entity';
+import { Account } from '../../accounts/entities/account.entity';
 import { SaleItem } from './sale-item.entity';
 
 export type PaymentMethod = 'CASH' | 'CARD' | 'BANK' | 'CREDIT';
@@ -50,6 +51,13 @@ export class Sale extends BaseEntity {
 
   @Column({ name: 'payment_method', default: 'CASH' })
   paymentMethod: PaymentMethod;
+
+  @Column({ name: 'account_id', nullable: true })
+  accountId?: string;
+
+  @ManyToOne(() => Account, { nullable: true, eager: true })
+  @JoinColumn({ name: 'account_id' })
+  account?: Account;
 
   @Column({ nullable: true })
   notes?: string;

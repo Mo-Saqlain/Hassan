@@ -8,6 +8,7 @@ import { Brand } from '../brands/entities/brand.entity';
 import { Category } from '../categories/entities/category.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Store } from '../stores/entities/store.entity';
+import { Account } from '../accounts/entities/account.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { Sale } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
@@ -27,7 +28,7 @@ describe('SalesService', () => {
       imports: [
         TypeOrmModule.forRoot(
           inMemoryTypeOrm([
-            Item, Brand, Category, Customer, Store,
+            Item, Brand, Category, Customer, Store, Account,
             StockMovement, Sale, SaleItem, SyncQueueEntry,
           ]),
         ),

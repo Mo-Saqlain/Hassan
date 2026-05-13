@@ -8,6 +8,7 @@ import { Brand } from '../brands/entities/brand.entity';
 import { Category } from '../categories/entities/category.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Store } from '../stores/entities/store.entity';
+import { Account } from '../accounts/entities/account.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { Sale } from '../sales/entities/sale.entity';
 import { SaleItem } from '../sales/entities/sale-item.entity';
@@ -32,7 +33,7 @@ describe('PosService', () => {
       imports: [
         TypeOrmModule.forRoot(
           inMemoryTypeOrm([
-            Item, Brand, Category, Customer, Store,
+            Item, Brand, Category, Customer, Store, Account,
             StockMovement, Sale, SaleItem,
             PosSession, PosCartItem, SyncQueueEntry,
           ]),
@@ -169,6 +170,73 @@ describe('PosService', () => {
     const refreshed = await service.findSession(s.id);
     expect(refreshed.salesCount).toBe(1);
     expect(Number(refreshed.salesTotal)).toBe(1500);
+  });
+
+  it('checkout with partial payment records dueAmount as receivable when customer is set', async () => {
+    const customer = await ds.getRepository(Customer).save(
+      ds.getRepository(Customer).create({ name: 'Acme Co' }),
+    );
+    const s = await service.startSession({});
+    await service.addToCart(s.id, { code: 'PHN-1', quantity: 2 }); // 1000
+
+    const sale = await service.checkout(s.id, {
+      paymentMethod: 'CASH',
+      customerId: customer.id,
+      paidAmount: 400,
+    });
+    expect(Number(sale.netAmount)).toBe(1000);
+    expect(Number(sale.paidAmount)).toBe(400);
+    expect(Number(sale.dueAmount)).toBe(600);
+    expect(sale.customerId).toBe(customer.id);
+  });
+
+  it('checkout rejects partial payment without a customer', async () => {
+    const s = await service.startSession({});
+    await service.addToCart(s.id, { code: 'PHN-1', quantity: 1 });
+    await expect(
+      service.checkout(s.id, { paymentMethod: 'CASH', paidAmount: 100 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('checkout rejects CREDIT sale without a customer', async () => {
+    const s = await service.startSession({});
+    await service.addToCart(s.id, { code: 'PHN-1', quantity: 1 });
+    await expect(
+      service.checkout(s.id, { paymentMethod: 'CREDIT' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('checkout persists accountId for non-CREDIT sales (so reports credit the right wallet)', async () => {
+    const account = await ds.getRepository(Account).save(
+      ds.getRepository(Account).create({ name: 'HBL Main', type: 'BANK' }),
+    );
+    const s = await service.startSession({});
+    await service.addToCart(s.id, { code: 'PHN-1', quantity: 1 });
+    const sale = await service.checkout(s.id, {
+      paymentMethod: 'BANK',
+      accountId: account.id,
+    });
+    expect(sale.accountId).toBe(account.id);
+    expect(sale.paymentMethod).toBe('BANK');
+  });
+
+  it('checkout strips accountId on CREDIT sales (full amount becomes A/R)', async () => {
+    const customer = await ds.getRepository(Customer).save(
+      ds.getRepository(Customer).create({ name: 'Acme Co' }),
+    );
+    const account = await ds.getRepository(Account).save(
+      ds.getRepository(Account).create({ name: 'HBL Main', type: 'BANK' }),
+    );
+    const s = await service.startSession({});
+    await service.addToCart(s.id, { code: 'PHN-1', quantity: 1 });
+    const sale = await service.checkout(s.id, {
+      paymentMethod: 'CREDIT',
+      customerId: customer.id,
+      accountId: account.id,
+    });
+    expect(sale.accountId).toBeNull();
+    expect(Number(sale.paidAmount)).toBe(0);
+    expect(Number(sale.dueAmount)).toBe(500);
   });
 
   it('checkout enqueues POS_SALE_CREATED outbox event (not double SALE_CREATED) when CLOUD_SYNC_URL set', async () => {

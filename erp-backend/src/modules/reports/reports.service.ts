@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, LessThanOrEqual, Repository } from 'typeorm';
+import { Between, In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import { Customer } from '../customers/entities/customer.entity';
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Sale } from '../sales/entities/sale.entity';
@@ -618,14 +618,37 @@ export class ReportsService {
       });
     }
 
-    // 3) Sale / Purchase paid-at-time portions that hit this specific account.
-    //    Sales/purchases don't store accountId — payment-method-CASH only counts
-    //    for CASH accounts. Plus the existing voucher rows above already cover
-    //    the explicit cases. We surface CASH paid-at-time too for CASH accounts.
+    // 3) Sale paid-at-time portions explicitly attributed to this account
+    //    via accountId (POS now lets the cashier pick which bank/wallet/cash
+    //    drawer received the money). These apply to ANY account type.
+    const attributedSales = await this.sales.find({
+      where: { accountId, ...dateClause },
+    });
+    for (const s of attributedSales) {
+      const paid = Number(s.paidAmount ?? 0);
+      if (paid <= 0) continue;
+      rows.push({
+        date: new Date(s.createdAt),
+        ref: s.invoiceNo,
+        refId: s.id,
+        type: 'SALE_RECEIPT',
+        description: `Sale ${s.invoiceNo} (${s.paymentMethod})`,
+        debit: paid,
+        credit: 0,
+      });
+    }
+
+    // 4) Legacy CASH fallback: cash sales / purchases without an explicit
+    //    account_id are spread to every CASH account. New POS sales pick an
+    //    account so they're excluded here to avoid double-counting.
     if (account.type === 'CASH') {
       const [cashSales, cashPurchases] = await Promise.all([
         this.sales.find({
-          where: { paymentMethod: 'CASH' as any, ...dateClause },
+          where: {
+            paymentMethod: 'CASH' as any,
+            accountId: IsNull(),
+            ...dateClause,
+          },
         }),
         this.purchases.find({
           where: { paymentMethod: 'CASH', ...dateClause },
@@ -707,7 +730,7 @@ export class ReportsService {
     const list = await this.accounts.find({ order: { name: 'ASC' } });
     if (list.length === 0) return [];
 
-    const [paySums, transferDelta] = await Promise.all([
+    const [paySums, transferDelta, saleSums] = await Promise.all([
       this.payments
         .createQueryBuilder('p')
         .select('p.account_id', 'aid')
@@ -718,6 +741,14 @@ export class ReportsService {
         .addGroupBy('p.direction')
         .getRawMany(),
       this.transfers.deltaByAccount(),
+      // Sales credited to a specific account via POS checkout.
+      this.sales
+        .createQueryBuilder('s')
+        .select('s.account_id', 'aid')
+        .addSelect('COALESCE(SUM(s.paid_amount), 0)', 'sum')
+        .where('s.account_id IS NOT NULL')
+        .groupBy('s.account_id')
+        .getRawMany(),
     ]);
 
     const payIn = new Map<string, number>();
@@ -726,11 +757,13 @@ export class ReportsService {
       const m = r.dir === 'IN' ? payIn : payOut;
       m.set(r.aid, Number(r.sum));
     }
+    const saleByAccount = new Map<string, number>(
+      saleSums.map((r) => [r.aid, Number(r.sum)]),
+    );
 
-    // Cash sales / purchases hit *every* CASH account in the current model
-    // (sales/purchases don't carry an explicit account_id). Compute the
-    // totals once and apply to each CASH-typed account. This preserves the
-    // semantics of the per-account `accountLedger`.
+    // Legacy CASH fallback: cash sales / purchases without an explicit
+    // account_id are spread to every CASH account. New POS sales pick an
+    // account and are excluded from this bucket.
     const hasCash = list.some((a) => a.type === 'CASH');
     let cashSalesTotal = 0;
     let cashPurchasesTotal = 0;
@@ -740,6 +773,7 @@ export class ReportsService {
           .createQueryBuilder('s')
           .select('COALESCE(SUM(s.paid_amount), 0)', 'sum')
           .where("s.payment_method = 'CASH'")
+          .andWhere('s.account_id IS NULL')
           .getRawOne(),
         this.purchases
           .createQueryBuilder('p')
@@ -756,8 +790,12 @@ export class ReportsService {
       const pin = payIn.get(a.id) ?? 0;
       const pout = payOut.get(a.id) ?? 0;
       const td = transferDelta.get(a.id) ?? 0;
+      const attributedSales = saleByAccount.get(a.id) ?? 0;
       const cashDelta = a.type === 'CASH' ? cashSalesTotal - cashPurchasesTotal : 0;
-      return { ...a, balance: opening + pin - pout + td + cashDelta };
+      return {
+        ...a,
+        balance: opening + pin - pout + td + attributedSales + cashDelta,
+      };
     });
   }
 
@@ -941,7 +979,7 @@ export class ReportsService {
     // Run the five reads we need to even start (accounts, items, customers,
     // suppliers, the per-account payment sums) in parallel. Each sub-result
     // is in turn computed without per-row N+1.
-    const [accounts, items, customers, suppliers, paySums, transferDelta] =
+    const [accounts, items, customers, suppliers, paySums, transferDelta, saleAcctSums] =
       await Promise.all([
         this.accounts.find(),
         this.items.find(),
@@ -958,6 +996,14 @@ export class ReportsService {
           .addGroupBy('p.direction')
           .getRawMany(),
         this.transfers.deltaByAccount(asOfDate),
+        this.sales
+          .createQueryBuilder('s')
+          .select('s.account_id', 'aid')
+          .addSelect('COALESCE(SUM(s.paid_amount), 0)', 'sum')
+          .where('s.account_id IS NOT NULL')
+          .andWhere('s.created_at <= :asOf', { asOf: asOfDate })
+          .groupBy('s.account_id')
+          .getRawMany(),
       ]);
 
     const payIn = new Map<string, number>();
@@ -966,6 +1012,9 @@ export class ReportsService {
       const m = r.dir === 'IN' ? payIn : payOut;
       m.set(r.aid, Number(r.sum));
     }
+    const saleByAccount = new Map<string, number>(
+      saleAcctSums.map((r) => [r.aid, Number(r.sum)]),
+    );
     const accountBalance = (ids: string[]) =>
       ids.reduce((s, id) => {
         const acct = accounts.find((a) => a.id === id);
@@ -973,7 +1022,8 @@ export class ReportsService {
         const td = transferDelta.get(id) ?? 0;
         const pin = payIn.get(id) ?? 0;
         const pout = payOut.get(id) ?? 0;
-        return s + op + pin - pout + td;
+        const sa = saleByAccount.get(id) ?? 0;
+        return s + op + pin - pout + td + sa;
       }, 0);
 
     const cashAccountIds = accounts.filter((a) => a.type === 'CASH').map((a) => a.id);
@@ -1166,7 +1216,7 @@ export class ReportsService {
     if (accounts.length === 0) return 0;
     const ids = accounts.map((a) => a.id);
     const opening = accounts.reduce((s, a) => s + Number(a.openingBalance ?? 0), 0);
-    const [inSum, outSum, transferDelta] = await Promise.all([
+    const [inSum, outSum, transferDelta, saleSum] = await Promise.all([
       this.payments
         .createQueryBuilder('p')
         .where('p.direction = :d', { d: 'IN' })
@@ -1182,9 +1232,19 @@ export class ReportsService {
         .select('COALESCE(SUM(p.amount), 0)', 'sum')
         .getRawOne(),
       this.transfers.groupDeltaAt(ids, asOf),
+      this.sales
+        .createQueryBuilder('s')
+        .where('s.account_id IN (:...ids)', { ids })
+        .andWhere('s.created_at <= :asOf', { asOf })
+        .select('COALESCE(SUM(s.paid_amount), 0)', 'sum')
+        .getRawOne(),
     ]);
     return (
-      opening + Number(inSum?.sum ?? 0) - Number(outSum?.sum ?? 0) + transferDelta
+      opening +
+      Number(inSum?.sum ?? 0) -
+      Number(outSum?.sum ?? 0) +
+      transferDelta +
+      Number(saleSum?.sum ?? 0)
     );
   }
 }

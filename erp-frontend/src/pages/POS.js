@@ -7,6 +7,7 @@ export default function POS() {
   const [cart, setCart] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [stores, setStores] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [openingFloat, setOpeningFloat] = useState('');
 
   const [code, setCode] = useState('');
@@ -14,6 +15,7 @@ export default function POS() {
 
   const [customerId, setCustomerId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [accountId, setAccountId] = useState('');
   const [discount, setDiscount] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
   const [checkoutError, setCheckoutError] = useState(null);
@@ -38,17 +40,19 @@ export default function POS() {
     setCart(r.data);
   }, []);
 
-  // Bootstrap: fetch active session, customers, stores
+  // Bootstrap: fetch active session, customers, stores, accounts
   useEffect(() => {
     (async () => {
       try {
-        const [active, cust, str] = await Promise.all([
+        const [active, cust, str, acct] = await Promise.all([
           api.get('/pos/sessions/active'),
           api.get('/customers'),
           api.get('/stores'),
+          api.get('/accounts'),
         ]);
         setCustomers(cust.data);
         setStores(str.data);
+        setAccounts(acct.data);
         if (active.data) {
           setSession(active.data);
           await loadCart(active.data.id);
@@ -70,8 +74,44 @@ export default function POS() {
   );
   const disc = Number(discount || 0);
   const net = Math.max(0, subtotal - disc);
-  const paid = Number(paidAmount || 0);
+  // CREDIT means "pay later" — paidAmount is forced to 0, full net is owed.
+  const isCredit = paymentMethod === 'CREDIT';
+  const paid = isCredit ? 0 : (paidAmount === '' ? net : Number(paidAmount || 0));
   const change = paid - net;
+  const receivable = Math.max(0, net - paid);
+  const isPartial = receivable > 0;
+
+  // Filter the account picker by payment method:
+  //  - CASH → CASH-typed accounts only (cash drawer)
+  //  - CARD/BANK → BANK + WALLET accounts (no cash drawer)
+  const accountTypeFilter = useMemo(() => {
+    if (paymentMethod === 'CASH') return ['CASH'];
+    if (paymentMethod === 'CARD' || paymentMethod === 'BANK')
+      return ['BANK', 'WALLET'];
+    return [];
+  }, [paymentMethod]);
+  const eligibleAccounts = useMemo(
+    () =>
+      accounts.filter(
+        (a) =>
+          a.isActive !== false && accountTypeFilter.includes(a.type),
+      ),
+    [accounts, accountTypeFilter],
+  );
+
+  // When the payment method changes, reset to a sensible default account
+  // (single match if there's only one, otherwise clear).
+  useEffect(() => {
+    if (isCredit) {
+      setAccountId('');
+      return;
+    }
+    if (eligibleAccounts.length === 1) {
+      setAccountId(eligibleAccounts[0].id);
+    } else if (!eligibleAccounts.some((a) => a.id === accountId)) {
+      setAccountId('');
+    }
+  }, [paymentMethod, eligibleAccounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startSession = async (storeId) => {
     setBusy(true);
@@ -154,14 +194,33 @@ export default function POS() {
 
   const checkout = async () => {
     if (!session || cart.length === 0) return;
+    // Local guard rails before hitting the API — surface the same rules
+    // the backend enforces, but with friendlier copy.
+    if ((isCredit || isPartial) && !customerId) {
+      setCheckoutError(
+        isCredit
+          ? 'Pick a customer for credit sales — the full amount becomes their receivable.'
+          : `Pick a customer for partial payments — ${receivable.toFixed(2)} will be tracked as a receivable.`,
+      );
+      return;
+    }
+    if (!isCredit && eligibleAccounts.length > 0 && !accountId) {
+      setCheckoutError('Pick which account is receiving the money.');
+      return;
+    }
     setBusy(true);
     setCheckoutError(null);
     try {
       const r = await api.post(`/pos/sessions/${session.id}/checkout`, {
         paymentMethod,
         customerId: customerId || undefined,
+        accountId: isCredit ? undefined : (accountId || undefined),
         discount: disc,
-        paidAmount: paidAmount === '' ? undefined : paid,
+        paidAmount: isCredit
+          ? 0
+          : paidAmount === ''
+            ? undefined
+            : paid,
       });
       setLastSale(r.data);
       setCart([]);
@@ -427,16 +486,49 @@ export default function POS() {
                 type="number"
                 step="any"
                 style={{ width: 100, textAlign: 'right' }}
-                value={paidAmount}
+                value={isCredit ? '0' : paidAmount}
+                disabled={isCredit}
                 onChange={(e) => setPaidAmount(e.target.value)}
                 placeholder={net.toFixed(2)}
               />
             </div>
             <div className="net">
-              <span>{change >= 0 ? 'Change' : 'Due'}</span>
-              <span>{Math.abs(change).toFixed(2)}</span>
+              <span>
+                {isCredit
+                  ? 'Receivable'
+                  : isPartial
+                    ? 'Receivable'
+                    : change >= 0
+                      ? 'Change'
+                      : 'Due'}
+              </span>
+              <span>
+                {isCredit
+                  ? net.toFixed(2)
+                  : isPartial
+                    ? receivable.toFixed(2)
+                    : Math.abs(change).toFixed(2)}
+              </span>
             </div>
           </div>
+
+          {(isCredit || isPartial) && (
+            <div
+              className="alert"
+              style={{
+                background: 'var(--info-soft)',
+                color: 'var(--info)',
+                borderColor: 'var(--info)',
+                fontSize: 12,
+                padding: '8px 10px',
+                marginBottom: 10,
+              }}
+            >
+              {isCredit
+                ? `Full ${net.toFixed(2)} will be added to customer's A/R.`
+                : `${receivable.toFixed(2)} will be added to customer's A/R.`}
+            </div>
+          )}
 
           <label>Customer</label>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -474,6 +566,37 @@ export default function POS() {
               </button>
             ))}
           </div>
+
+          {!isCredit && (
+            <>
+              <label style={{ marginTop: 10 }}>
+                {paymentMethod === 'CASH' ? 'Cash drawer' : 'Deposit to'}
+              </label>
+              {eligibleAccounts.length === 0 ? (
+                <div
+                  className="muted"
+                  style={{ fontSize: 12, padding: '6px 0' }}
+                >
+                  No {paymentMethod === 'CASH' ? 'cash' : 'bank / wallet'}{' '}
+                  account configured. Add one under Master Data → Bank /
+                  Wallet.
+                </div>
+              ) : (
+                <select
+                  value={accountId}
+                  onChange={(e) => setAccountId(e.target.value)}
+                >
+                  <option value="">— Select account —</option>
+                  {eligibleAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                      {a.bank ? ` · ${a.bank}` : ''} ({a.type})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
+          )}
 
           {checkoutError && <div className="alert alert-error">{checkoutError}</div>}
 
