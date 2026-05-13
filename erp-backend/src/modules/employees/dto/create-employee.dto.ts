@@ -1,14 +1,20 @@
 import {
   IsBoolean,
   IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
   MinLength,
 } from 'class-validator';
 
 export class CreateEmployeeDto {
+  @IsString()
+  @IsOptional()
+  code?: string;
+
   @IsString()
   @MinLength(1)
   name: string;
@@ -41,6 +47,16 @@ export class CreateEmployeeDto {
   @IsDateString()
   @IsOptional()
   joinedAt?: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  @IsOptional()
+  salaryDay?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  firstSalaryInAdvance?: boolean;
 
   @IsString()
   @IsOptional()

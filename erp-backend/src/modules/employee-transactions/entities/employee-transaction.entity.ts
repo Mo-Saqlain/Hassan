@@ -6,6 +6,9 @@ import { Account } from '../../accounts/entities/account.entity';
 /**
  * Semantics from the EMPLOYEE LEDGER's point of view:
  *
+ * - `SALARY_ACCRUED`   — monthly salary obligation booked on the employee's
+ *                        configured salary day → DEBIT (we now owe them this
+ *                        month's salary). Auto-posted by the scheduler.
  * - `SALARY`           — shop pays salary → credit (OUT of shop, settles employee debt)
  * - `ADVANCE`          — shop advances money → credit (OUT of shop, employee now owes back)
  * - `REIMBURSEMENT`    — shop reimburses an expense the employee paid out-of-pocket
@@ -15,10 +18,12 @@ import { Account } from '../../accounts/entities/account.entity';
  * - `INCENTIVE_PAYOUT` — shop pays out earned incentives → credit (OUT of shop)
  * - `ADJUSTMENT`       — manual debit/credit correction
  *
- * The ledger view debits incentives EARNED (computed from rules+sales) and
- * credits all payouts above to give a running balance.
+ * The ledger view debits incentives EARNED (computed from rules+sales) +
+ * SALARY_ACCRUED rows, and credits all payouts above to give a running
+ * balance — positive means we owe the employee, negative means they owe us.
  */
 export type EmployeeTransactionType =
+  | 'SALARY_ACCRUED'
   | 'SALARY'
   | 'ADVANCE'
   | 'REIMBURSEMENT'

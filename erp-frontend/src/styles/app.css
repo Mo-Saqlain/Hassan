@@ -44,80 +44,22 @@
   border-bottom: 1px solid var(--border);
   margin-bottom: 10px;
 }
-button.brand-mark {
-  width: 38px; height: 38px;
-  border-radius: 11px;
-  background: var(--gradient-primary);
+button.brand-toggle {
+  width: 36px; height: 36px;
+  border-radius: 9px;
+  background: transparent;
   display: grid; place-items: center;
-  position: relative;
   padding: 0;
-  border: 0;
+  border: 1px solid transparent;
   cursor: pointer;
-  color: #fff;
-  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.40), 0 1px 0 rgba(255,255,255,0.30) inset;
-  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  color: var(--text);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-button.brand-mark:hover { transform: scale(1.04); }
-button.brand-mark:focus-visible { outline: 2px solid var(--violet-500); outline-offset: 2px; }
-button.brand-mark::after {
-  content: "";
-  position: absolute; inset: 1px;
-  border-radius: 10px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.25), transparent 55%);
-  pointer-events: none;
-}
-button.brand-mark svg { position: relative; z-index: 1; }
+button.brand-toggle:hover { background: var(--chip-bg); border-color: var(--border); }
+button.brand-toggle:focus-visible { outline: 2px solid var(--violet-500); outline-offset: 2px; }
 .brand-name { font-family: var(--font-display); font-weight: 800; letter-spacing: -0.02em; font-size: 15.5px; line-height: 1.1; color: var(--text); }
 .brand-sub { font-size: 11px; color: var(--text-muted); letter-spacing: 0.04em; }
 
-.nav-section { margin-top: 14px; }
-.nav-section-label {
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--text-faint);
-  padding: 0 10px 6px;
-}
-
-/* Collapsible section header — styled to match nav items so the sidebar
-   feels visually consistent with the bigger "Dashboard"/"POS Terminal"
-   entries above it. */
-button.nav-section-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: transparent;
-  border: 0;
-  font: inherit;
-  font-family: var(--font-body, inherit);
-  font-size: 13.5px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: var(--text-soft);
-  padding: 9px 10px;
-  margin: 6px 0 2px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  text-align: left;
-  transition:
-    background var(--dur) var(--ease),
-    color var(--dur) var(--ease);
-}
-button.nav-section-toggle:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-button.nav-section-toggle svg {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  transition: transform var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-button.nav-section-toggle:hover svg {
-  color: var(--text);
-}
-button.nav-section-toggle:focus-visible {
-  outline: 2px solid var(--violet-500);
-  outline-offset: 2px;
-}
 .nav-item {
   display: flex; align-items: center; gap: 11px;
   padding: 9px 10px;
@@ -166,7 +108,6 @@ button.nav-section-toggle:focus-visible {
   .app[data-rail="on"] .sidebar { padding: 18px 8px 14px; }
   .app[data-rail="on"] .brand { justify-content: center; padding: 8px 0 16px; gap: 0; }
   .app[data-rail="on"] .brand-text { display: none; }
-  .app[data-rail="on"] .nav-section-toggle { display: none; }
   .app[data-rail="on"] .nav-item { justify-content: center; padding: 9px 6px; }
   .app[data-rail="on"] .nav-item > span { display: none; }
   .app[data-rail="on"] .nav-item.active::before { left: -8px; }
@@ -198,7 +139,74 @@ button.nav-section-toggle:focus-visible {
   position: relative;
 }
 .topbar .search .input { padding-left: 36px; height: 34px; }
-.topbar .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
+.topbar .search > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+
+/* Global-search results popover */
+.search-results {
+  position: absolute;
+  top: calc(100% + 6px); left: 0; right: 0;
+  background: var(--surface-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.25));
+  max-height: 380px; overflow: auto;
+  z-index: 20;
+  padding: 6px;
+}
+.search-empty {
+  padding: 14px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+button.search-result {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0; background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit; color: inherit;
+  text-align: left;
+}
+button.search-result:hover,
+button.search-result:focus-visible {
+  background: var(--chip-bg);
+  outline: none;
+}
+.search-result-icon {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  color: #fff;
+}
+.search-result-body {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.search-result-name {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.search-result-code {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--chip-bg); color: var(--text-muted);
+}
+.search-result-sub {
+  font-size: 11.5px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.search-result-kind {
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 .topbar .spacer { flex: 1; }
 .topbar .kbd {
   font-family: var(--font-mono); font-size: 10.5px;
@@ -220,6 +228,98 @@ button.nav-section-toggle:focus-visible {
 }
 .page-header > h2 { margin: 0; font-size: 22px; }
 .page-header > h2:only-child { margin-bottom: 0; }
+
+/* ───────────── Hub heading + tab strip ─────────────
+   Rendered by <HubFrame /> above each hub's sub-page. The heading
+   takes the place of the per-page page-head — it tells you which
+   domain you're in (Customers / Suppliers / Stock …) while the
+   tabs underneath switch between sub-pages of that domain. */
+.hub-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.hub-head h1 {
+  font-size: 26px;
+  font-family: var(--font-display, inherit);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.hub-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
+/* Inside a hub, the sub-page's own heading text is visually redundant
+   with the hub title and the highlighted active tab — hide just the
+   heading. Action buttons that live alongside the title (in the same
+   page-head / page-header / panel-header row) must stay visible, so
+   only the title element is hidden and the row is right-aligned. The
+   :has() rules collapse the wrapper entirely when it held nothing but
+   the heading, to avoid leaving a 22px ghost row above the content. */
+.hub-body .page-head > .page-title { display: none; }
+.hub-body .page-head { justify-content: flex-end; }
+.hub-body .page-head:has(> .page-title:only-child) { display: none; }
+.hub-body .page-header > h2:first-child,
+.hub-body .panel-header > h3:first-child { display: none; }
+.hub-body .page-header,
+.hub-body .panel-header { justify-content: flex-end; }
+.hub-body .page-header:has(> h2:only-child),
+.hub-body .panel-header:has(> h3:only-child) { display: none; }
+
+.hub-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.hub-tabs::-webkit-scrollbar { height: 6px; }
+.hub-tabs::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.hub-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: calc(var(--radius) - 4px);
+  font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
+  color: var(--text-soft);
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
+}
+.hub-tab:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.hub-tab.active {
+  color: var(--text);
+  background: var(--surface-elev);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.hub-tab.active::before {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--hub-c, var(--violet-500));
+  box-shadow: 0 0 8px var(--hub-c, var(--violet-500));
+  margin-right: -2px;
+}
+.hub-tab svg { color: var(--text-muted); flex-shrink: 0; }
+.hub-tab.active svg { color: var(--text); }
+@media (max-width: 720px) {
+  .hub-tabs { margin-bottom: 12px; }
+  .hub-tab { padding: 7px 11px; font-size: 12.5px; }
+}
 
 /* ───────────── Grids / layouts ───────────── */
 .row { display: flex; gap: 14px; flex-wrap: wrap; }

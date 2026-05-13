@@ -1,27 +1,36 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { getCached } from '../api/client';
 
 export function useResource(path) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.get(path);
-      setData(res.data);
-    } catch (e) {
-      setError(e.uiMessage ?? 'Failed to load');
-    } finally {
-      setLoading(false);
-    }
-  }, [path]);
+  const fetch = useCallback(
+    async (opts) => {
+      setError(null);
+      try {
+        const res = await getCached(path, opts);
+        setData(res.data);
+        return res;
+      } catch (e) {
+        setError(e.uiMessage ?? 'Failed to load');
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [path],
+  );
+
+  // `reload` is what call sites use after mutations — always bypass the
+  // cache so the screen reflects the write that just happened.
+  const reload = useCallback(() => fetch({ fresh: true }), [fetch]);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    setLoading(true);
+    fetch();
+  }, [fetch]);
 
   return { data, loading, error, reload, setData };
 }

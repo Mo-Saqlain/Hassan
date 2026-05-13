@@ -1,19 +1,28 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
 
 @Injectable()
-export class SuppliersService {
+export class SuppliersService implements OnModuleInit {
   constructor(
     @InjectRepository(Supplier)
     private readonly repo: Repository<Supplier>,
   ) {}
 
-  create(dto: CreateSupplierDto) { return this.repo.save(this.repo.create(dto)); }
+  async onModuleInit() {
+    await this.backfillCodes();
+  }
+
+  async create(dto: CreateSupplierDto) {
+    const entity = this.repo.create(dto);
+    if (!entity.code) entity.code = await this.nextCode();
+    return this.repo.save(entity);
+  }
+
   findAll() { return this.repo.find({ order: { name: 'ASC' } }); }
 
   async findOne(id: string) {
@@ -34,5 +43,25 @@ export class SuppliersService {
       await this.repo.remove(s);
       return { deleted: true, id };
     }, 'supplier');
+  }
+
+  private async nextCode(): Promise<string> {
+    const count = await this.repo.count();
+    return `SUPP-${String(count + 1).padStart(6, '0')}`;
+  }
+
+  private async backfillCodes() {
+    const missing = await this.repo.find({
+      where: { code: IsNull() },
+      order: { createdAt: 'ASC' },
+    });
+    if (missing.length === 0) return;
+    const total = await this.repo.count();
+    let n = total - missing.length;
+    for (const row of missing) {
+      n += 1;
+      row.code = `SUPP-${String(n).padStart(6, '0')}`;
+    }
+    await this.repo.save(missing);
   }
 }

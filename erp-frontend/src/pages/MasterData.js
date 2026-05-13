@@ -69,8 +69,10 @@ const tiles = [
 /**
  * Render a master-data panel. When called with no props, shows the full
  * Catalogue hub (tile grid + active panel). When called with `entity="…"`,
- * skips the hub and just renders that entity's panel with its own page-head
- * — used by entity-centric sidebar routes like `/customers`, `/items`, etc.
+ * skips the tile grid and just renders that entity's panel with its own
+ * page-head — note that this heading is suppressed by CSS when the panel
+ * is rendered inside a `<HubFrame />` (where the hub title already labels
+ * the section), so it shows up only on the standalone `/master` route.
  */
 export default function MasterData({ entity }) {
   const [active, setActive] = useState(entity ?? 'items');
@@ -265,7 +267,7 @@ function EmployeesPanel() {
   const filtered = rows.filter((r) => {
     const term = query.trim().toLowerCase();
     if (!term) return true;
-    return [r.name, r.role, r.phone, r.email]
+    return [r.code, r.name, r.role, r.phone, r.email]
       .filter(Boolean)
       .some((v) => String(v).toLowerCase().includes(term));
   });
@@ -313,6 +315,7 @@ function EmployeesPanel() {
   const startEdit = (row) => {
     setEditing(row);
     setForm({
+      code: row.code ?? '',
       name: row.name ?? '',
       role: row.role ?? '',
       phone: row.phone ?? '',
@@ -321,6 +324,8 @@ function EmployeesPanel() {
       monthlySalary: row.monthlySalary ?? '',
       openingBalance: row.openingBalance ?? '',
       joinedAt: row.joinedAt ?? '',
+      salaryDay: row.salaryDay ?? '',
+      firstSalaryInAdvance: row.firstSalaryInAdvance ?? false,
       notes: row.notes ?? '',
       isActive: row.isActive ?? true,
     });
@@ -332,6 +337,7 @@ function EmployeesPanel() {
     e.preventDefault();
     setSubmitError(null);
     const payload = {
+      code: form.code?.trim() || undefined,
       name: form.name.trim(),
       role: form.role?.trim() || undefined,
       phone: form.phone?.trim() || undefined,
@@ -342,6 +348,11 @@ function EmployeesPanel() {
       openingBalance:
         form.openingBalance === '' ? undefined : Number(form.openingBalance),
       joinedAt: form.joinedAt || undefined,
+      salaryDay:
+        form.salaryDay === '' || form.salaryDay == null
+          ? undefined
+          : Number(form.salaryDay),
+      firstSalaryInAdvance: !!form.firstSalaryInAdvance,
       notes: form.notes?.trim() || undefined,
       isActive: form.isActive,
     };
@@ -385,6 +396,7 @@ function EmployeesPanel() {
             filename="employees"
             title="Employees"
             columns={[
+              { key: 'code', label: 'Code' },
               { key: 'name', label: 'Name' },
               { key: 'role', label: 'Role' },
               { key: 'phone', label: 'Phone' },
@@ -394,6 +406,26 @@ function EmployeesPanel() {
             ]}
             rows={filtered}
           />
+          <button
+            className="btn btn-sm"
+            title="Post any due monthly-salary accruals now (idempotent)"
+            onClick={async () => {
+              try {
+                const r = await api.post('/employees/accrue-salaries');
+                const n = Array.isArray(r.data) ? r.data.length : 0;
+                alert(
+                  n === 0
+                    ? 'No salaries due to accrue right now.'
+                    : `Accrued salary for ${n} employee(s).`,
+                );
+                reload();
+              } catch (err) {
+                alert(err.uiMessage ?? 'Accrual failed');
+              }
+            }}
+          >
+            Run salary accrual
+          </button>{' '}
           <button className="btn btn-sm btn-primary" onClick={startAdd}>
             + Add Employee
           </button>
@@ -408,7 +440,7 @@ function EmployeesPanel() {
           className="input"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Type name, role, phone, or email…"
+          placeholder="Type code, name, role, phone, or email…"
         />
       </div>
 
@@ -421,6 +453,15 @@ function EmployeesPanel() {
             </div>
           )}
           <div className="form-row">
+            <div>
+              <label>Code</label>
+              <input
+                className="input"
+                value={form.code}
+                placeholder="Auto-generated if blank"
+                onChange={(e) => setForm({ ...form, code: e.target.value })}
+              />
+            </div>
             <div>
               <label>Name *</label>
               <input
@@ -491,6 +532,37 @@ function EmployeesPanel() {
                 }
               />
             </div>
+            <div>
+              <label>Salary day of month</label>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max="31"
+                step="1"
+                placeholder="1-31, blank = no auto-accrual"
+                value={form.salaryDay ?? ''}
+                onChange={(e) =>
+                  setForm({ ...form, salaryDay: e.target.value })
+                }
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                On this day each month, the salary is auto-credited to the
+                employee's ledger as money we owe them.
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={!!form.firstSalaryInAdvance}
+                  onChange={(e) =>
+                    setForm({ ...form, firstSalaryInAdvance: e.target.checked })
+                  }
+                />
+                Accrue salary for the joining month too (first salary in advance)
+              </label>
+            </div>
           </div>
           <div>
             <label>Address</label>
@@ -542,6 +614,7 @@ function EmployeesPanel() {
           <table className="t">
             <thead>
               <tr>
+                <th>Code</th>
                 <th>Name</th>
                 <th>Role</th>
                 <th>Phone</th>
@@ -557,6 +630,7 @@ function EmployeesPanel() {
                 const cls = bal > 0 ? 'chip-warn' : bal < 0 ? 'chip-info' : '';
                 return (
                   <tr key={r.id} style={!r.isActive ? { opacity: 0.55 } : undefined}>
+                    <td><code>{r.code ?? '—'}</code></td>
                     <td>
                       <strong>{r.name}</strong>
                       {!r.isActive && (
@@ -608,6 +682,7 @@ function EmployeesPanel() {
 
 function emptyEmployee() {
   return {
+    code: '',
     name: '',
     role: '',
     phone: '',
@@ -616,6 +691,8 @@ function emptyEmployee() {
     monthlySalary: '',
     openingBalance: '',
     joinedAt: '',
+    salaryDay: '',
+    firstSalaryInAdvance: false,
     notes: '',
     isActive: true,
   };
@@ -626,8 +703,9 @@ function AccountsPanel() {
     <CrudPage
       title="Accounts (Cash / Bank / Wallet / Capital / Credit)"
       path="/accounts"
-      searchKeys={['name', 'type', 'bank', 'accountNumber']}
+      searchKeys={['code', 'name', 'type', 'bank', 'accountNumber']}
       columns={[
+        { key: 'code', label: 'Code' },
         { key: 'name', label: 'Name' },
         { key: 'type', label: 'Type' },
         { key: 'bank', label: 'Bank' },
@@ -635,6 +713,7 @@ function AccountsPanel() {
         { key: 'openingBalance', label: 'Opening Bal.', align: 'right' },
       ]}
       formFields={[
+        { key: 'code', label: 'Code', placeholder: 'Auto-generated if blank (e.g. ACC-000001)' },
         { key: 'name', label: 'Name', required: true },
         {
           key: 'type',
@@ -676,7 +755,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
   const filtered = rows.filter((r) => {
     const term = query.trim().toLowerCase();
     if (!term) return true;
-    return [r.name, r.phone, r.email, r.address]
+    return [r.code, r.name, r.phone, r.email, r.address]
       .filter(Boolean)
       .some((v) => String(v).toLowerCase().includes(term));
   });
@@ -716,7 +795,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
 
   const startAdd = () => {
     setEditing(null);
-    setForm({ name: '', phone: '', email: '', address: '', openingBalance: '', isActive: true });
+    setForm({ code: '', name: '', phone: '', email: '', address: '', openingBalance: '', isActive: true });
     setShowForm(true);
     setSubmitError(null);
   };
@@ -724,6 +803,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
   const startEdit = (row) => {
     setEditing(row);
     setForm({
+      code: row.code ?? '',
       name: row.name ?? '',
       phone: row.phone ?? '',
       email: row.email ?? '',
@@ -739,6 +819,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
     e.preventDefault();
     setSubmitError(null);
     const payload = {
+      code: form.code?.trim() || undefined,
       name: form.name.trim(),
       phone: form.phone?.trim() || undefined,
       email: form.email?.trim() || undefined,
@@ -787,6 +868,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
             filename={title.toLowerCase()}
             title={title}
             columns={[
+              { key: 'code', label: 'Code' },
               { key: 'name', label: 'Name' },
               { key: 'phone', label: 'Phone' },
               { key: 'email', label: 'Email' },
@@ -815,7 +897,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Type name, phone, email, or address…`}
+          placeholder={`Type code, name, phone, email, or address…`}
         />
         {query.trim() && (
           <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
@@ -829,6 +911,14 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
           <h4 style={{ marginTop: 0 }}>{editing ? 'Edit' : 'New'}</h4>
           {submitError && <div className="alert alert-error">{submitError}</div>}
           <div className="form-row">
+            <div>
+              <label>Code</label>
+              <input
+                value={form.code}
+                placeholder="Auto-generated if blank"
+                onChange={(e) => setForm({ ...form, code: e.target.value })}
+              />
+            </div>
             <div>
               <label>Name *</label>
               <input
@@ -902,6 +992,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
         <table>
           <thead>
             <tr>
+              <th>Code</th>
               <th>Name</th>
               <th>Phone</th>
               <th>Email</th>
@@ -921,6 +1012,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
                   key={r.id}
                   style={!isActive ? { opacity: 0.55 } : undefined}
                 >
+                  <td><code>{r.code ?? '—'}</code></td>
                   <td>
                     {r.name}
                     {!isActive && (

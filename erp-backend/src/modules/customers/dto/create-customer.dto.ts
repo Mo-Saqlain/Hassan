@@ -10,6 +10,10 @@ import {
 
 export class CreateCustomerDto {
   @IsString()
+  @IsOptional()
+  code?: string;
+
+  @IsString()
   @MinLength(1)
   name: string;
 

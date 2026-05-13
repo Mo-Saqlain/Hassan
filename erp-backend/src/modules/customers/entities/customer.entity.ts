@@ -3,6 +3,9 @@ import { BaseEntity } from '../../../common/entities/base.entity';
 
 @Entity('customers')
 export class Customer extends BaseEntity {
+  @Column({ unique: true, nullable: true })
+  code?: string;
+
   @Column()
   name: string;
 

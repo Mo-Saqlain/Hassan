@@ -46,6 +46,7 @@ Everything is **offline-first**: the cashier can keep selling when the internet 
 - **Partial payment** — paid amount can be less than net; the remainder becomes outstanding on the customer's ledger
 - **Change due** — paid amount over net shows change owed to customer
 - **In-flow customer create** — `+` button next to the customer dropdown opens a modal; saves and auto-selects on close
+- **In-flow item create on Purchases** — every Purchase-line item picker has a **+ New** button that opens a quick-add item modal (Model No, Name, Brand, SKU, Barcode, Purchase + Sale price). Saves to `/items`, prepends to the dropdown, auto-selects on the originating line, and prefills the line's unit price.
 - **Session lifecycle** — Start session → ring up sales → Close session. Running `salesTotal` and `salesCount` displayed
 - **Receipt printing** — every checkout shows a "Print receipt" link to a print-friendly route that auto-fires the browser's print dialog
 
@@ -123,6 +124,23 @@ Snapshot every business table (sales, purchases, payments, customers, items, sto
 - **Overdue prompt** — every page checks `/api/backup/status` on mount and polls every 5 minutes. If today's backup hasn't been taken and the scheduled hour has passed, a red banner appears at the top of the main pane with a one-click link to the Backups page. Dismissible per session.
 - **Backup history** — Backups page lists the last 200 backups with file name, source (AUTO/MANUAL), size, notes, and per-row Download / Delete actions.
 - **Storage location** — defaults to `erp-backend/backups/` in dev; Electron points `BACKUP_DIR` at `<userData>/backups` so backups travel with the desktop install. Path is shown in the Status card.
+
+### 10b. Audit log + Error log
+
+Both surfaced under **System → Audit** and **System → Errors**.
+
+- **Audit log** — every TypeORM insert / update / delete on a user-facing entity is captured by [erp-backend/src/modules/audit-logs/audit.subscriber.ts](erp-backend/src/modules/audit-logs/audit.subscriber.ts) and written to `audit_logs` with a human-readable summary plus a small JSON snapshot of the affected fields (or a before→after diff for updates). The subscriber filters out its own table, the outbox queue, and the error log to avoid recursion and noise. The frontend page has entity-type / action / date filters, quick-search, and **CSV + PDF export**.
+- **Error log** — a global Nest exception filter ([erp-backend/src/modules/error-logs/error-log.filter.ts](erp-backend/src/modules/error-logs/error-log.filter.ts)) writes every error response to `error_logs` with method, path, status code, message, stack, and a JSON snapshot of the request body / query / params. Validation 400s and 404s are tagged `WARN`; 5xx are tagged `ERROR`. The frontend page has level / source filters, quick-search, expandable stack viewer, and **CSV + PDF export**.
+- Both tables are **clearable** from their respective tabs (red "Clear all" button with confirmation) — handy when testing.
+
+### 10c. Monthly salary accrual
+
+Each employee can declare a `salaryDay` (1–31) and `firstSalaryInAdvance` flag. The [erp-backend/src/modules/employees/salary-accrual.service.ts](erp-backend/src/modules/employees/salary-accrual.service.ts) cron ticks hourly; on the configured day of the month it posts a `SALARY_ACCRUED` transaction equal to the employee's `monthlySalary` to their ledger as a **debit** (we now owe them). The cashier later books a `SALARY` payment (credit) when handing over the cash, and the ledger nets out.
+
+- Idempotent per (employee, calendar month) — re-running the cron or restarting the server never creates a duplicate.
+- Months that don't have the configured day (e.g. day=31 in February) collapse to the last day of the month so nothing is silently lost.
+- `firstSalaryInAdvance` controls the joining month only: if `true`, the first accrual fires in the month they joined; if `false`, the first accrual waits until the following calendar month.
+- A **Run salary accrual** button at the top of the Employees panel calls `POST /employees/accrue-salaries` for manual catch-up after server downtime; `POST /employees/:id/accrue-salary` targets a single employee.
 
 ### 11. CSV + PDF Exports
 Every list-like view exposes a pair of **CSV / PDF** buttons (top-right of the page header or panel) wired to a shared `<ExportButtons>` component ([erp-frontend/src/components/ExportButtons.js](erp-frontend/src/components/ExportButtons.js)) backed by helpers in [erp-frontend/src/utils/exporters.js](erp-frontend/src/utils/exporters.js).
@@ -231,6 +249,10 @@ src/
    ├─ pos/                # session + cart + checkout
    ├─ outbox/             # local sync queue (decouples sales/purchases from sync)
    ├─ sync/               # receiver (POST /sync/push) + cron worker
+   ├─ employees/          # CRUD + monthly SalaryAccrualService (hourly cron, idempotent per month)
+   ├─ employee-transactions/ # SALARY_ACCRUED (debit) + SALARY/ADVANCE/REIMBURSEMENT/EXPENSE/INCENTIVE_PAYOUT/ADJUSTMENT (credits)
+   ├─ audit-logs/         # AuditSubscriber + REST; every insert/update/delete on a user-facing entity
+   ├─ error-logs/         # ErrorLogFilter (global Nest exception filter) + REST
    └─ reports/            # read-only: ledgers, stock ledger, 4 financial statements (consumes IncentivesService + FundTransfersService)
 ```
 
@@ -242,10 +264,13 @@ src/
 ├─ api/client.js          # axios instance; resolves API host from window.location.hostname
 ├─ theme/ThemeContext.js  # data-theme attr + localStorage
 ├─ hooks/useResource.js   # tiny GET-list hook
+├─ nav/hubs.js            # single source of truth for sidebar entries + hub-tab definitions
 ├─ components/
-│  ├─ Layout.js           # sidebar + main, collapsible + mobile drawer
-│  ├─ Brand.js            # logo mark
-│  ├─ Icon.js             # SVG icon library (25 icons)
+│  ├─ Layout.js           # flat sidebar + main, mobile drawer, rail toggle
+│  ├─ HubFrame.js         # layout route: title + horizontal tab strip + <Outlet />
+│  ├─ GlobalSearch.js     # topbar search across customers/suppliers/items/employees/accounts
+│  ├─ Brand.js            # logo mark (also the rail toggle)
+│  ├─ Icon.js             # SVG icon library (~25 icons)
 │  ├─ ThemeToggle.js
 │  ├─ CrudPage.js         # generic CRUD form+table used by simple master-data panels
 │  ├─ LedgerView.js       # shared by customer + supplier ledger pages
@@ -269,24 +294,34 @@ src/
    ├─ CustomerLedger.js
    ├─ SupplierLedger.js
    ├─ Financials.js       # 4-tab financial statements
+   ├─ AuditLog.js         # System → Audit (every entity mutation, filterable, CSV/PDF)
+   ├─ ErrorLog.js         # System → Errors (exceptions captured by the global filter)
    └─ InvoicePrint.js     # auto-print invoice route
 ```
 
-### Sidebar layout (entity-centric, collapsible)
+### Sidebar layout (flat hubs with horizontal tab strip)
 
-The sidebar groups every page under the **entity** or **business process** it operates on, so each lives in its own collapsible section. Click any section header to fold / expand. Collapsed state persists per browser in `localStorage`. If the current route is inside a collapsed section, the section auto-expands so the user can always see where they are.
+The sidebar is a flat list — one entry per domain — and the sub-pages of each domain live behind a horizontal **tab strip** rendered above the page body. Clicking a domain in the sidebar lands you on its default sub-page; you switch between sub-pages via the tab strip without changing rows in the sidebar.
 
-- **(no header)** Dashboard, POS Terminal, Cash Book
-- **Customer** — Customers, Receipts (money in), Customer Ledger
-- **Sales** — Sales History, Sale Returns
-- **Supplier** — Suppliers, Brands, Payments (money out), **Supplier Incentives** *(renamed from "Manufacturer Incentives")*, Supplier Ledger
-- **Purchase** — Purchase Orders, Purchases, Purchase Returns
-- **Item** — Items, Categories
-- **Stock** — Stores, Stock Summary, Stock Ledger, **Stock Transfers** *(new)*, **Damaged Goods** *(new)*
-- **Employee** — Employees, Attendance, Employee Payments, Incentive Rules, Employee Ledger
-- **Account** — Accounts, Fund Transfers, Account Ledger
-- **Reports** — Financial Statements
-- **System** — Backups
+| Sidebar entry | Default route | Tab strip (sub-pages) |
+|---|---|---|
+| Dashboard | `/` | — |
+| POS Terminal | `/pos` | — |
+| Cash Book | `/cash-register` | — |
+| Customer | `/customers` | Info · Receipts · Ledger |
+| Sales | `/sales` | History · Returns |
+| Supplier | `/suppliers` | Info · Brands · Payments · Incentives · Ledger |
+| Purchase | `/purchases` | Orders · Bills · Returns |
+| Item | `/items` | Catalogue · Categories |
+| Stock | `/stock` | Summary · Stores · Ledger · Transfers · Damaged |
+| Employee | `/employees` | Info · Attendance · Payments · Incentive Rules · Ledger |
+| Account | `/accounts` | Info · Transfers · Ledger |
+| Reports | `/financials` | — |
+| System | `/backup` | Backups · **Audit** · **Errors** |
+
+Routing-wise the hubs are layout routes wired in [erp-frontend/src/App.js](erp-frontend/src/App.js) with `<HubFrame title subtitle tabs />` around the matched child route ([erp-frontend/src/components/HubFrame.js](erp-frontend/src/components/HubFrame.js)). The hub definitions (label, default route, tabs) live in a single source of truth at [erp-frontend/src/nav/hubs.js](erp-frontend/src/nav/hubs.js).
+
+The hub's title block renders above the tab strip, and CSS suppresses each sub-page's own page-header heading so you never see "Customers" stacked on top of "Customers" — the active tab pill is the only label for the current sub-page. Action buttons that share the page-header row stay visible and right-align automatically.
 
 The old Catalogue (`/master`) and Transactions (`/transactions`) hubs still exist as routes for legacy bookmarks, but they're no longer in the sidebar — every page they linked is now its own first-class sidebar entry via dedicated routes like `/items`, `/customers`, `/employees`, `/stores`, etc.
 
@@ -509,6 +544,20 @@ GET    /sync/status         # { cloudConfigured, cloudUrl, pending }
 POST   /sync/flush          # force the cron worker to run once
 ```
 
+### Employees (salary accrual)
+```
+POST   /employees/accrue-salaries           # idempotent: post any due monthly accruals
+POST   /employees/:id/accrue-salary         # same, single employee
+```
+
+### Audit + error logs (System tab)
+```
+GET    /audit-logs?entityType=&action=&from=&to=&limit=
+DELETE /audit-logs                          # wipe (testing)
+GET    /error-logs?level=&source=&from=&to=&limit=
+DELETE /error-logs                          # wipe (testing)
+```
+
 ### Backup
 ```
 POST   /backup                     # save a manual snapshot to disk
@@ -557,6 +606,8 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 | `/financials` | 4-tab financial statements |
 | `/incentives` | Incentives — Targets / Progress / Awards tabs |
 | `/backup` | Backups — manual snapshot, history, schedule, overdue reminder |
+| `/audit-log` | Audit log — every entity insert/update/delete with CSV/PDF export |
+| `/error-log` | Error / exception log — every error response captured by the global Nest filter, with CSV/PDF export |
 | `/print/sale/:id`, `/print/purchase/:id` | Print-friendly invoice/bill |
 
 ---

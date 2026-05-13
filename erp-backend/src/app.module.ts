@@ -31,6 +31,8 @@ import { EmployeeIncentivesModule } from './modules/employee-incentives/employee
 import { PurchaseOrdersModule } from './modules/purchase-orders/purchase-orders.module';
 import { StockTransfersModule } from './modules/stock-transfers/stock-transfers.module';
 import { DamagedGoodsModule } from './modules/damaged-goods/damaged-goods.module';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+import { ErrorLogsModule } from './modules/error-logs/error-logs.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -82,6 +84,8 @@ function buildDbOptions(): TypeOrmModuleOptions {
     StockTransfersModule,
     DamagedGoodsModule,
     BackupModule,
+    AuditLogsModule,
+    ErrorLogsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

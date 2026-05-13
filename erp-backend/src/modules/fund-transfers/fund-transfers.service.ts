@@ -67,8 +67,10 @@ export class FundTransfersService {
       if (asOf) qb.andWhere('t.created_at <= :asOf', { asOf });
       return qb;
     };
-    const outRow = await baseQb('from').getRawOne();
-    const inRow = await baseQb('to').getRawOne();
+    const [outRow, inRow] = await Promise.all([
+      baseQb('from').getRawOne(),
+      baseQb('to').getRawOne(),
+    ]);
     return Number(inRow?.sum ?? 0) - Number(outRow?.sum ?? 0);
   }
 
@@ -87,9 +89,36 @@ export class FundTransfersService {
       if (asOf) qb.andWhere('t.created_at <= :asOf', { asOf });
       return qb;
     };
-    const outRow = await baseQb('from').getRawOne();
-    const inRow = await baseQb('to').getRawOne();
+    const [outRow, inRow] = await Promise.all([
+      baseQb('from').getRawOne(),
+      baseQb('to').getRawOne(),
+    ]);
     return Number(inRow?.sum ?? 0) - Number(outRow?.sum ?? 0);
+  }
+
+  /**
+   * Net change per account from every transfer, grouped in one round-trip.
+   * Returns a Map keyed by accountId. Used by report endpoints that need a
+   * one-shot balance for every account at once (no N+1).
+   */
+  async deltaByAccount(asOf?: Date): Promise<Map<string, number>> {
+    const baseQb = (dir: 'from' | 'to') => {
+      const qb = this.repo
+        .createQueryBuilder('t')
+        .select(`t.${dir}_account_id`, 'aid')
+        .addSelect('COALESCE(SUM(t.amount), 0)', 'sum')
+        .groupBy(`t.${dir}_account_id`);
+      if (asOf) qb.andWhere('t.created_at <= :asOf', { asOf });
+      return qb;
+    };
+    const [ins, outs] = await Promise.all([
+      baseQb('to').getRawMany(),
+      baseQb('from').getRawMany(),
+    ]);
+    const map = new Map<string, number>();
+    for (const r of ins) map.set(r.aid, Number(r.sum));
+    for (const r of outs) map.set(r.aid, (map.get(r.aid) ?? 0) - Number(r.sum));
+    return map;
   }
 
   /** Transfers entirely within a date range that touched any of these accounts. */

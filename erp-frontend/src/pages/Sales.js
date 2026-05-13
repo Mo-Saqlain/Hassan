@@ -32,6 +32,8 @@ export default function Sales() {
 
       <div className="alert" style={{ background: 'var(--info-soft)', color: 'var(--info)', borderColor: 'var(--info)' }}>
         Sales are created at the POS terminal. This page is a read-only history.
+        For collections, use the <strong>Customer → Receipts</strong> tab — the{' '}
+        <strong>Customer Ledger</strong> tab shows the net A/R balance per customer.
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -51,46 +53,33 @@ export default function Sales() {
               <th>Customer</th>
               <th className="right">Total</th>
               <th className="right">Net</th>
-              <th className="right">Paid</th>
-              <th className="right">Due</th>
+              <th className="right">Paid at sale</th>
               <th>Method</th>
               <th className="right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s) => {
-              const due = Number(s.dueAmount);
-              return (
-                <tr key={s.id}>
-                  <td>{s.invoiceNo}</td>
-                  <td>{new Date(s.createdAt).toLocaleString()}</td>
-                  <td>{s.customer?.name ?? 'Walk-in'}</td>
-                  <td className="right">{Number(s.totalAmount).toFixed(2)}</td>
-                  <td className="right">{Number(s.netAmount).toFixed(2)}</td>
-                  <td className="right">{Number(s.paidAmount).toFixed(2)}</td>
-                  <td className="right">
-                    {due > 0 ? (
-                      <span className="badge badge-red">{due.toFixed(2)}</span>
-                    ) : due < 0 ? (
-                      <span className="muted">+{(-due).toFixed(2)}</span>
-                    ) : (
-                      <span className="badge badge-green">Settled</span>
-                    )}
-                  </td>
-                  <td>{s.paymentMethod}</td>
-                  <td className="right">
-                    <a
-                      className="btn btn-sm"
-                      href={`#/print/sale/${s.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Print
-                    </a>
-                  </td>
-                </tr>
-              );
-            })}
+            {filtered.map((s) => (
+              <tr key={s.id}>
+                <td>{s.invoiceNo}</td>
+                <td>{new Date(s.createdAt).toLocaleString()}</td>
+                <td>{s.customer?.name ?? 'Walk-in'}</td>
+                <td className="right">{Number(s.totalAmount).toFixed(2)}</td>
+                <td className="right">{Number(s.netAmount).toFixed(2)}</td>
+                <td className="right">{Number(s.paidAmount ?? 0).toFixed(2)}</td>
+                <td>{s.paymentMethod}</td>
+                <td className="right">
+                  <a
+                    className="btn btn-sm"
+                    href={`#/print/sale/${s.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Print
+                  </a>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}

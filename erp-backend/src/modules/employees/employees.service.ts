@@ -1,19 +1,25 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { Employee } from './entities/employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
 
 @Injectable()
-export class EmployeesService {
+export class EmployeesService implements OnModuleInit {
   constructor(
     @InjectRepository(Employee) private readonly repo: Repository<Employee>,
   ) {}
 
-  create(dto: CreateEmployeeDto) {
-    return this.repo.save(this.repo.create(dto));
+  async onModuleInit() {
+    await this.backfillCodes();
+  }
+
+  async create(dto: CreateEmployeeDto) {
+    const entity = this.repo.create(dto);
+    if (!entity.code) entity.code = await this.nextCode();
+    return this.repo.save(entity);
   }
 
   findAll() {
@@ -38,5 +44,25 @@ export class EmployeesService {
       await this.repo.remove(e);
       return { deleted: true, id };
     }, 'employee');
+  }
+
+  private async nextCode(): Promise<string> {
+    const count = await this.repo.count();
+    return `EMP-${String(count + 1).padStart(6, '0')}`;
+  }
+
+  private async backfillCodes() {
+    const missing = await this.repo.find({
+      where: { code: IsNull() },
+      order: { createdAt: 'ASC' },
+    });
+    if (missing.length === 0) return;
+    const total = await this.repo.count();
+    let n = total - missing.length;
+    for (const row of missing) {
+      n += 1;
+      row.code = `EMP-${String(n).padStart(6, '0')}`;
+    }
+    await this.repo.save(missing);
   }
 }

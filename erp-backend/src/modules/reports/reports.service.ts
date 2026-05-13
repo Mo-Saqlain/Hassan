@@ -73,16 +73,13 @@ export class ReportsService {
     const periodFrom = from ?? '1970-01-01';
     const periodTo = to ?? new Date().toISOString().slice(0, 10);
 
-    // Earned incentives in period — debit (employee earns, we owe)
-    const incentiveCalc = await this.employeeIncentives.computeForPeriod(
-      periodFrom,
-      periodTo,
-      employeeId,
-    );
-
     const txnWhere: any = { employeeId };
     if (from && to) txnWhere.transactionDate = Between(from, to);
-    const txns = await this.employeeTxns.find({ where: txnWhere });
+    // Earned incentives in period — debit (employee earns, we owe)
+    const [incentiveCalc, txns] = await Promise.all([
+      this.employeeIncentives.computeForPeriod(periodFrom, periodTo, employeeId),
+      this.employeeTxns.find({ where: txnWhere }),
+    ]);
 
     type Row = {
       date: Date;
@@ -110,20 +107,22 @@ export class ReportsService {
       });
     }
     for (const t of txns) {
-      // SALARY / ADVANCE / REIMBURSEMENT / EXPENSE / INCENTIVE_PAYOUT are
-      // all credits (money moves out of the shop to the employee).
-      // ADJUSTMENT can go either way — treat positive amount as a debit
-      // (we now owe more) and the user can negate if needed by entering a
-      // negative figure (validation prevents — so all txns are credits for
-      // simplicity; users can use NEGATIVE adjustments by deleting + redo).
+      // SALARY_ACCRUED is a debit — booking the monthly obligation increases
+      // what we owe the employee. SALARY / ADVANCE / REIMBURSEMENT / EXPENSE /
+      // INCENTIVE_PAYOUT are credits (money moves out of the shop to the
+      // employee, settling what we owed). ADJUSTMENT is a credit by default;
+      // users wanting to add to our liability can use a SALARY_ACCRUED-style
+      // adjustment if needed.
+      const amount = Number(t.amount);
+      const isDebit = t.type === 'SALARY_ACCRUED';
       rows.push({
         date: new Date(`${t.transactionDate}T00:00:00.000Z`),
         ref: t.voucherNo,
         refId: t.id,
         type: t.type,
         description: t.description ?? labelForType(t.type),
-        debit: 0,
-        credit: Number(t.amount),
+        debit: isDebit ? amount : 0,
+        credit: isDebit ? 0 : amount,
       });
     }
 
@@ -163,15 +162,50 @@ export class ReportsService {
     };
   }
 
-  /** All employees with their current ledger closing balance. */
+  /**
+   * All employees with their current ledger closing balance.
+   *
+   * Batched: one pass to compute incentive totals for everyone, one query to
+   * sum employee_transactions per employee. Avoids the N+1 trip into
+   * `employeeLedger` (which would otherwise re-run the incentive engine for
+   * every employee).
+   */
   async allEmployeeBalances() {
     const list = await this.employees.find({ order: { name: 'ASC' } });
-    return Promise.all(
-      list.map(async (e) => {
-        const l = await this.employeeLedger(e.id);
-        return { ...e, balance: l.closingBalance };
-      }),
+    if (list.length === 0) return [];
+
+    const periodFrom = '1970-01-01';
+    const periodTo = new Date().toISOString().slice(0, 10);
+
+    const incentiveCalc = await this.employeeIncentives.computeForPeriod(
+      periodFrom,
+      periodTo,
     );
+    // Sum per (employee, type) so we can split debits (SALARY_ACCRUED)
+    // from credits (everything else). Treat each in the same direction
+    // the ledger does so the running balance and the rollup agree.
+    const txnSums = await this.employeeTxns
+      .createQueryBuilder('t')
+      .select('t.employee_id', 'employeeId')
+      .addSelect('t.type', 'type')
+      .addSelect('COALESCE(SUM(t.amount), 0)', 'sum')
+      .groupBy('t.employee_id')
+      .addGroupBy('t.type')
+      .getRawMany();
+    const debits = new Map<string, number>();
+    const credits = new Map<string, number>();
+    for (const r of txnSums) {
+      const map = r.type === 'SALARY_ACCRUED' ? debits : credits;
+      map.set(r.employeeId, (map.get(r.employeeId) ?? 0) + Number(r.sum));
+    }
+
+    return list.map((e) => {
+      const opening = Number(e.openingBalance ?? 0);
+      const incentives = Number(incentiveCalc.byEmployee[e.id] ?? 0);
+      const debit = debits.get(e.id) ?? 0;
+      const credit = credits.get(e.id) ?? 0;
+      return { ...e, balance: opening + incentives + debit - credit };
+    });
   }
 
   // ──────────────────────────────────────────────────────────
@@ -184,13 +218,13 @@ export class ReportsService {
 
     const opening = Number(customer.openingBalance ?? 0);
     const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
-    const sales = await this.sales.find({ where: { customerId, ...dateClause } });
-    const returns = await this.saleReturns.find({
-      where: { customerId, ...dateClause },
-    });
-    const receipts = await this.payments.find({
-      where: { customerId, direction: 'IN', ...dateClause },
-    });
+    const [sales, returns, receipts] = await Promise.all([
+      this.sales.find({ where: { customerId, ...dateClause } }),
+      this.saleReturns.find({ where: { customerId, ...dateClause } }),
+      this.payments.find({
+        where: { customerId, direction: 'IN', ...dateClause },
+      }),
+    ]);
 
     const all: Array<{
       date: Date;
@@ -288,15 +322,61 @@ export class ReportsService {
     return { customerId, balance: ledger.closingBalance };
   }
 
+  /**
+   * All customers with their current A/R balance.
+   *
+   * Batched: instead of running `customerLedger` per customer (4 queries each
+   * → 4N+1), we run four GROUP-BY-customer aggregates and combine in JS.
+   * Mirrors the same +debit / -credit math as `customerLedger`:
+   *   balance = opening + sales.net − sales.paid − returns.total − receipts.amount
+   */
   async allCustomerBalances() {
     const list = await this.customers.find({ order: { name: 'ASC' } });
-    const results = await Promise.all(
-      list.map(async (c) => {
-        const l = await this.customerLedger(c.id);
-        return { ...c, balance: l.closingBalance };
-      }),
+    if (list.length === 0) return [];
+
+    const [saleSums, returnSums, receiptSums] = await Promise.all([
+      this.sales
+        .createQueryBuilder('s')
+        .select('s.customer_id', 'cid')
+        .addSelect('COALESCE(SUM(s.net_amount), 0)', 'net')
+        .addSelect('COALESCE(SUM(s.paid_amount), 0)', 'paid')
+        .where('s.customer_id IS NOT NULL')
+        .groupBy('s.customer_id')
+        .getRawMany(),
+      this.saleReturns
+        .createQueryBuilder('r')
+        .select('r.customer_id', 'cid')
+        .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
+        .where('r.customer_id IS NOT NULL')
+        .groupBy('r.customer_id')
+        .getRawMany(),
+      this.payments
+        .createQueryBuilder('p')
+        .select('p.customer_id', 'cid')
+        .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
+        .where('p.direction = :d', { d: 'IN' })
+        .andWhere('p.customer_id IS NOT NULL')
+        .groupBy('p.customer_id')
+        .getRawMany(),
+    ]);
+
+    const saleMap = new Map<string, { net: number; paid: number }>(
+      saleSums.map((r) => [r.cid, { net: Number(r.net), paid: Number(r.paid) }]),
     );
-    return results;
+    const returnMap = new Map<string, number>(
+      returnSums.map((r) => [r.cid, Number(r.total)]),
+    );
+    const receiptMap = new Map<string, number>(
+      receiptSums.map((r) => [r.cid, Number(r.total)]),
+    );
+
+    return list.map((c) => {
+      const opening = Number(c.openingBalance ?? 0);
+      const s = saleMap.get(c.id) ?? { net: 0, paid: 0 };
+      const ret = returnMap.get(c.id) ?? 0;
+      const rcpt = receiptMap.get(c.id) ?? 0;
+      return { ...c, balance: opening + s.net - s.paid - ret - rcpt };
+    });
   }
 
   // ──────────────────────────────────────────────────────────
@@ -311,15 +391,13 @@ export class ReportsService {
     // payments = debit (we owe less). Balance is the amount we still owe.
     const opening = Number(supplier.openingBalance ?? 0);
     const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
-    const purchases = await this.purchases.find({
-      where: { supplierId, ...dateClause },
-    });
-    const returns = await this.purchaseReturns.find({
-      where: { supplierId, ...dateClause },
-    });
-    const payments = await this.payments.find({
-      where: { supplierId, direction: 'OUT', ...dateClause },
-    });
+    const [purchases, returns, payments] = await Promise.all([
+      this.purchases.find({ where: { supplierId, ...dateClause } }),
+      this.purchaseReturns.find({ where: { supplierId, ...dateClause } }),
+      this.payments.find({
+        where: { supplierId, direction: 'OUT', ...dateClause },
+      }),
+    ]);
 
     const all: Array<{
       date: Date;
@@ -411,15 +489,60 @@ export class ReportsService {
     };
   }
 
+  /**
+   * All suppliers with their current A/P balance.
+   *
+   * Batched: same approach as `allCustomerBalances`. Mirrors `supplierLedger`'s
+   * +credit / -debit math:
+   *   balance = opening + purchases.net − purchases.paid − returns.total − payments.amount
+   */
   async allSupplierBalances() {
     const list = await this.suppliers.find({ order: { name: 'ASC' } });
-    const results = await Promise.all(
-      list.map(async (s) => {
-        const l = await this.supplierLedger(s.id);
-        return { ...s, balance: l.closingBalance };
-      }),
+    if (list.length === 0) return [];
+
+    const [purchaseSums, returnSums, paymentSums] = await Promise.all([
+      this.purchases
+        .createQueryBuilder('p')
+        .select('p.supplier_id', 'sid')
+        .addSelect('COALESCE(SUM(p.net_amount), 0)', 'net')
+        .addSelect('COALESCE(SUM(p.paid_amount), 0)', 'paid')
+        .where('p.supplier_id IS NOT NULL')
+        .groupBy('p.supplier_id')
+        .getRawMany(),
+      this.purchaseReturns
+        .createQueryBuilder('r')
+        .select('r.supplier_id', 'sid')
+        .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
+        .where('r.supplier_id IS NOT NULL')
+        .groupBy('r.supplier_id')
+        .getRawMany(),
+      this.payments
+        .createQueryBuilder('p')
+        .select('p.supplier_id', 'sid')
+        .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
+        .where('p.direction = :d', { d: 'OUT' })
+        .andWhere('p.supplier_id IS NOT NULL')
+        .groupBy('p.supplier_id')
+        .getRawMany(),
+    ]);
+
+    const purMap = new Map<string, { net: number; paid: number }>(
+      purchaseSums.map((r) => [r.sid, { net: Number(r.net), paid: Number(r.paid) }]),
     );
-    return results;
+    const retMap = new Map<string, number>(
+      returnSums.map((r) => [r.sid, Number(r.total)]),
+    );
+    const payMap = new Map<string, number>(
+      paymentSums.map((r) => [r.sid, Number(r.total)]),
+    );
+
+    return list.map((s) => {
+      const opening = Number(s.openingBalance ?? 0);
+      const p = purMap.get(s.id) ?? { net: 0, paid: 0 };
+      const ret = retMap.get(s.id) ?? 0;
+      const pay = payMap.get(s.id) ?? 0;
+      return { ...s, balance: opening + p.net - p.paid - ret - pay };
+    });
   }
 
   // ──────────────────────────────────────────────────────────
@@ -439,16 +562,15 @@ export class ReportsService {
     const opening = Number(account.openingBalance ?? 0);
 
     // 1) Payment vouchers on this account.
-    const vouchers = await this.payments.find({
-      where: { accountId, ...dateClause },
-    });
-
     // 2) Fund transfers touching this account (either side).
-    const transfersOut = await this.transfers.findInvolvingAccounts(
-      [accountId],
-      new Date(0),
-      asOf ?? new Date('9999-12-31'),
-    );
+    const [vouchers, transfersOut] = await Promise.all([
+      this.payments.find({ where: { accountId, ...dateClause } }),
+      this.transfers.findInvolvingAccounts(
+        [accountId],
+        new Date(0),
+        asOf ?? new Date('9999-12-31'),
+      ),
+    ]);
 
     type Row = {
       date: Date;
@@ -501,10 +623,15 @@ export class ReportsService {
     //    for CASH accounts. Plus the existing voucher rows above already cover
     //    the explicit cases. We surface CASH paid-at-time too for CASH accounts.
     if (account.type === 'CASH') {
-      const sales = await this.sales.find({
-        where: { paymentMethod: 'CASH' as any, ...dateClause },
-      });
-      for (const s of sales) {
+      const [cashSales, cashPurchases] = await Promise.all([
+        this.sales.find({
+          where: { paymentMethod: 'CASH' as any, ...dateClause },
+        }),
+        this.purchases.find({
+          where: { paymentMethod: 'CASH', ...dateClause },
+        }),
+      ]);
+      for (const s of cashSales) {
         const paid = Number(s.paidAmount ?? 0);
         if (paid <= 0) continue;
         rows.push({
@@ -517,10 +644,7 @@ export class ReportsService {
           credit: 0,
         });
       }
-      const purchases = await this.purchases.find({
-        where: { paymentMethod: 'CASH', ...dateClause },
-      });
-      for (const p of purchases) {
+      for (const p of cashPurchases) {
         const paid = Number(p.paidAmount ?? 0);
         if (paid <= 0) continue;
         rows.push({
@@ -569,16 +693,72 @@ export class ReportsService {
     };
   }
 
-  /** All accounts with their current closing balance — for the sidebar/index. */
+  /**
+   * All accounts with their current closing balance — for the sidebar/index.
+   *
+   * Batched: one aggregate per source (payments, transfers in, transfers out,
+   * cash sales, cash purchases) instead of running the full `accountLedger`
+   * per account. Mirrors the same +debit / -credit math:
+   *   balance = opening + (payments IN − payments OUT)
+   *           + (transfers in − transfers out)
+   *           + (CASH only) (cashSales − cashPurchases)
+   */
   async allAccountBalances() {
     const list = await this.accounts.find({ order: { name: 'ASC' } });
-    const results = await Promise.all(
-      list.map(async (a) => {
-        const l = await this.accountLedger(a.id);
-        return { ...a, balance: l.closingBalance };
-      }),
-    );
-    return results;
+    if (list.length === 0) return [];
+
+    const [paySums, transferDelta] = await Promise.all([
+      this.payments
+        .createQueryBuilder('p')
+        .select('p.account_id', 'aid')
+        .addSelect('p.direction', 'dir')
+        .addSelect('COALESCE(SUM(p.amount), 0)', 'sum')
+        .where('p.account_id IS NOT NULL')
+        .groupBy('p.account_id')
+        .addGroupBy('p.direction')
+        .getRawMany(),
+      this.transfers.deltaByAccount(),
+    ]);
+
+    const payIn = new Map<string, number>();
+    const payOut = new Map<string, number>();
+    for (const r of paySums) {
+      const m = r.dir === 'IN' ? payIn : payOut;
+      m.set(r.aid, Number(r.sum));
+    }
+
+    // Cash sales / purchases hit *every* CASH account in the current model
+    // (sales/purchases don't carry an explicit account_id). Compute the
+    // totals once and apply to each CASH-typed account. This preserves the
+    // semantics of the per-account `accountLedger`.
+    const hasCash = list.some((a) => a.type === 'CASH');
+    let cashSalesTotal = 0;
+    let cashPurchasesTotal = 0;
+    if (hasCash) {
+      const [salesRow, purchasesRow] = await Promise.all([
+        this.sales
+          .createQueryBuilder('s')
+          .select('COALESCE(SUM(s.paid_amount), 0)', 'sum')
+          .where("s.payment_method = 'CASH'")
+          .getRawOne(),
+        this.purchases
+          .createQueryBuilder('p')
+          .select('COALESCE(SUM(p.paid_amount), 0)', 'sum')
+          .where("p.payment_method = 'CASH'")
+          .getRawOne(),
+      ]);
+      cashSalesTotal = Number(salesRow?.sum ?? 0);
+      cashPurchasesTotal = Number(purchasesRow?.sum ?? 0);
+    }
+
+    return list.map((a) => {
+      const opening = Number(a.openingBalance ?? 0);
+      const pin = payIn.get(a.id) ?? 0;
+      const pout = payOut.get(a.id) ?? 0;
+      const td = transferDelta.get(a.id) ?? 0;
+      const cashDelta = a.type === 'CASH' ? cashSalesTotal - cashPurchasesTotal : 0;
+      return { ...a, balance: opening + pin - pout + td + cashDelta };
+    });
   }
 
   // ──────────────────────────────────────────────────────────
@@ -683,8 +863,10 @@ export class ReportsService {
 
   async incomeStatement(from?: string, to?: string) {
     const where = this.buildDateWhere(from, to);
-    const sales = await this.sales.find({ where });
-    const returns = await this.saleReturns.find({ where });
+    const [sales, returns] = await Promise.all([
+      this.sales.find({ where }),
+      this.saleReturns.find({ where }),
+    ]);
 
     const grossRevenue = sales.reduce((s, x) => s + Number(x.totalAmount), 0);
     const discounts = sales.reduce((s, x) => s + Number(x.discount), 0);
@@ -714,15 +896,14 @@ export class ReportsService {
 
     // Employee incentives are a real labor cost — earned by employees as
     // a percentage of their sales, paid out separately. Subtract from
-    // trading net income.
-    const employeeIncentives = from && to
-      ? await this.employeeIncentives.totalForPeriod(from, to)
-      : 0;
+    // trading net income. Manufacturer/supplier incentives — earned by
+    // the shop when targets are hit. Added on top of gross margin to
+    // produce adjusted net income.
+    const [employeeIncentives, incentivesEarned] = await Promise.all([
+      from && to ? this.employeeIncentives.totalForPeriod(from, to) : Promise.resolve(0),
+      this.incentives.awardsTotal(from, to),
+    ]);
     const expenses = employeeIncentives;
-
-    // Manufacturer/supplier incentives — earned by the shop when targets
-    // are hit. Added on top of gross margin to produce adjusted net income.
-    const incentivesEarned = await this.incentives.awardsTotal(from, to);
 
     const netIncome = grossProfit - expenses;
     const adjustedNetIncome = netIncome + incentivesEarned;
@@ -757,80 +938,93 @@ export class ReportsService {
   async balanceSheet(asOf?: string) {
     const asOfDate = asOf ? new Date(asOf) : new Date();
 
-    // Cash on hand by account type
-    const accounts = await this.accounts.find();
+    // Run the five reads we need to even start (accounts, items, customers,
+    // suppliers, the per-account payment sums) in parallel. Each sub-result
+    // is in turn computed without per-row N+1.
+    const [accounts, items, customers, suppliers, paySums, transferDelta] =
+      await Promise.all([
+        this.accounts.find(),
+        this.items.find(),
+        this.customers.find(),
+        this.suppliers.find(),
+        this.payments
+          .createQueryBuilder('p')
+          .select('p.account_id', 'aid')
+          .addSelect('p.direction', 'dir')
+          .addSelect('COALESCE(SUM(p.amount), 0)', 'sum')
+          .where('p.account_id IS NOT NULL')
+          .andWhere('p.created_at <= :asOf', { asOf: asOfDate })
+          .groupBy('p.account_id')
+          .addGroupBy('p.direction')
+          .getRawMany(),
+        this.transfers.deltaByAccount(asOfDate),
+      ]);
+
+    const payIn = new Map<string, number>();
+    const payOut = new Map<string, number>();
+    for (const r of paySums) {
+      const m = r.dir === 'IN' ? payIn : payOut;
+      m.set(r.aid, Number(r.sum));
+    }
+    const accountBalance = (ids: string[]) =>
+      ids.reduce((s, id) => {
+        const acct = accounts.find((a) => a.id === id);
+        const op = acct ? Number(acct.openingBalance ?? 0) : 0;
+        const td = transferDelta.get(id) ?? 0;
+        const pin = payIn.get(id) ?? 0;
+        const pout = payOut.get(id) ?? 0;
+        return s + op + pin - pout + td;
+      }, 0);
+
     const cashAccountIds = accounts.filter((a) => a.type === 'CASH').map((a) => a.id);
     const bankAccountIds = accounts.filter((a) => a.type === 'BANK').map((a) => a.id);
     const walletAccountIds = accounts.filter((a) => a.type === 'WALLET').map((a) => a.id);
     const capitalAccountIds = accounts.filter((a) => a.type === 'CAPITAL').map((a) => a.id);
     const creditAccountIds = accounts.filter((a) => a.type === 'CREDIT').map((a) => a.id);
 
-    const accountBalance = async (ids: string[]) => {
-      const opening = accounts
-        .filter((a) => ids.includes(a.id))
-        .reduce((s, a) => s + Number(a.openingBalance ?? 0), 0);
-      if (ids.length === 0) return opening;
-      const inSum = await this.payments
-        .createQueryBuilder('p')
-        .where('p.direction = :d', { d: 'IN' })
-        .andWhere('p.account_id IN (:...ids)', { ids })
-        .andWhere('p.created_at <= :asOf', { asOf: asOfDate })
-        .select('COALESCE(SUM(p.amount), 0)', 'sum')
-        .getRawOne();
-      const outSum = await this.payments
-        .createQueryBuilder('p')
-        .where('p.direction = :d', { d: 'OUT' })
-        .andWhere('p.account_id IN (:...ids)', { ids })
-        .andWhere('p.created_at <= :asOf', { asOf: asOfDate })
-        .select('COALESCE(SUM(p.amount), 0)', 'sum')
-        .getRawOne();
-      const transferDelta = await this.transfers.groupDeltaAt(ids, asOfDate);
-      return (
-        opening +
-        Number(inSum?.sum ?? 0) -
-        Number(outSum?.sum ?? 0) +
-        transferDelta
-      );
-    };
+    const cash = accountBalance(cashAccountIds);
+    const bank = accountBalance(bankAccountIds);
+    const wallet = accountBalance(walletAccountIds);
+    const capital = accountBalance(capitalAccountIds);
+    const credit = accountBalance(creditAccountIds);
 
-    const cash = await accountBalance(cashAccountIds);
-    const bank = await accountBalance(bankAccountIds);
-    const wallet = await accountBalance(walletAccountIds);
-    const capital = await accountBalance(capitalAccountIds);
-    const credit = await accountBalance(creditAccountIds);
-
-    // Inventory at cost = sum on-hand * purchasePrice
-    const items = await this.items.find();
+    // Inventory: one GROUP BY instead of one query per item. Items without
+    // any movement default to qty=0 so they're skipped cheaply in JS.
+    const movementSums = await this.movements
+      .createQueryBuilder('m')
+      .select('m.item_id', 'iid')
+      .addSelect(
+        "COALESCE(SUM(CASE WHEN m.type = 'IN' THEN m.quantity ELSE -m.quantity END), 0)",
+        'qty',
+      )
+      .where('m.created_at <= :asOf', { asOf: asOfDate })
+      .groupBy('m.item_id')
+      .getRawMany();
+    const qtyByItem = new Map<string, number>(
+      movementSums.map((r) => [r.iid, Number(r.qty)]),
+    );
     let inventory = 0;
     for (const it of items) {
-      const row = await this.movements
-        .createQueryBuilder('m')
-        .where('m.item_id = :id', { id: it.id })
-        .andWhere('m.created_at <= :asOf', { asOf: asOfDate })
-        .select(
-          "COALESCE(SUM(CASE WHEN m.type = 'IN' THEN m.quantity ELSE -m.quantity END), 0)",
-          'qty',
-        )
-        .getRawOne();
-      const qty = Number(row?.qty ?? 0);
+      const qty = qtyByItem.get(it.id) ?? 0;
       inventory += qty * Number(it.purchasePrice);
     }
 
-    // A/R = sum of all customer balances
-    const customers = await this.customers.find();
-    let accountsReceivable = 0;
-    for (const c of customers) {
-      const l = await this.customerLedger(c.id, asOfDate);
-      accountsReceivable += Number(l.closingBalance);
-    }
-
-    // A/P = sum of all supplier balances
-    const suppliers = await this.suppliers.find();
-    let accountsPayable = 0;
-    for (const s of suppliers) {
-      const l = await this.supplierLedger(s.id, asOfDate);
-      accountsPayable += Number(l.closingBalance);
-    }
+    // A/R and A/P: customer + supplier ledgers fanned out concurrently. The
+    // per-party ledger queries are still N+1, but at least they're parallel
+    // now. Future work: a fully batched as-of variant of
+    // allCustomerBalances/allSupplierBalances.
+    const [arBalances, apBalances] = await Promise.all([
+      Promise.all(customers.map((c) => this.customerLedger(c.id, asOfDate))),
+      Promise.all(suppliers.map((s) => this.supplierLedger(s.id, asOfDate))),
+    ]);
+    const accountsReceivable = arBalances.reduce(
+      (s, l) => s + Number(l.closingBalance),
+      0,
+    );
+    const accountsPayable = apBalances.reduce(
+      (s, l) => s + Number(l.closingBalance),
+      0,
+    );
 
     // Treasury assets (excluding capital — capital sits as Owner's contribution
     // in equity, and its balance flows out via transfers into Cash/Bank/etc.).
@@ -874,17 +1068,17 @@ export class ReportsService {
   async cashFlow(from?: string, to?: string) {
     const where = this.buildDateWhere(from, to);
 
-    const receipts = await this.payments.find({
-      where: { ...where, direction: 'IN' },
-    });
-    const payouts = await this.payments.find({
-      where: { ...where, direction: 'OUT' },
-    });
-
     // Also include cash that flowed through sales/purchases without an explicit voucher.
     // For simplicity we only count explicit payment vouchers + the paid-at-time portion.
-    const sales = await this.sales.find({ where });
-    const purchases = await this.purchases.find({ where });
+    const [receipts, payouts, sales, purchases, beginningBS, endingBS] =
+      await Promise.all([
+        this.payments.find({ where: { ...where, direction: 'IN' } }),
+        this.payments.find({ where: { ...where, direction: 'OUT' } }),
+        this.sales.find({ where }),
+        this.purchases.find({ where }),
+        from ? this.cashAndBankAt(new Date(from)) : Promise.resolve(0),
+        to ? this.cashAndBankAt(new Date(to)) : this.cashAndBankAt(new Date()),
+      ]);
 
     const receiptsTotal = receipts.reduce((s, p) => s + Number(p.amount), 0);
     const paymentsTotal = payouts.reduce((s, p) => s + Number(p.amount), 0);
@@ -897,10 +1091,6 @@ export class ReportsService {
     const operatingInflows = receiptsTotal + cashFromSales;
     const operatingOutflows = paymentsTotal + cashToPurchases;
     const netOperating = operatingInflows - operatingOutflows;
-
-    // Compute beginning and ending cash position from balance sheet.
-    const beginningBS = from ? await this.cashAndBankAt(new Date(from)) : 0;
-    const endingBS = to ? await this.cashAndBankAt(new Date(to)) : await this.cashAndBankAt(new Date());
 
     return {
       period: { from: from ?? null, to: to ?? null },
@@ -929,9 +1119,11 @@ export class ReportsService {
     const start = from ? new Date(from) : new Date('1970-01-01');
     const end = to ? new Date(to) : new Date();
 
-    const openingBS = await this.balanceSheet(start.toISOString());
-    const closingBS = await this.balanceSheet(end.toISOString());
-    const period = await this.incomeStatement(from, to);
+    const [openingBS, closingBS, period] = await Promise.all([
+      this.balanceSheet(start.toISOString()),
+      this.balanceSheet(end.toISOString()),
+      this.incomeStatement(from, to),
+    ]);
 
     const periodIncome = period.adjustedNetIncome ?? period.netIncome;
 
@@ -974,21 +1166,23 @@ export class ReportsService {
     if (accounts.length === 0) return 0;
     const ids = accounts.map((a) => a.id);
     const opening = accounts.reduce((s, a) => s + Number(a.openingBalance ?? 0), 0);
-    const inSum = await this.payments
-      .createQueryBuilder('p')
-      .where('p.direction = :d', { d: 'IN' })
-      .andWhere('p.account_id IN (:...ids)', { ids })
-      .andWhere('p.created_at <= :asOf', { asOf })
-      .select('COALESCE(SUM(p.amount), 0)', 'sum')
-      .getRawOne();
-    const outSum = await this.payments
-      .createQueryBuilder('p')
-      .where('p.direction = :d', { d: 'OUT' })
-      .andWhere('p.account_id IN (:...ids)', { ids })
-      .andWhere('p.created_at <= :asOf', { asOf })
-      .select('COALESCE(SUM(p.amount), 0)', 'sum')
-      .getRawOne();
-    const transferDelta = await this.transfers.groupDeltaAt(ids, asOf);
+    const [inSum, outSum, transferDelta] = await Promise.all([
+      this.payments
+        .createQueryBuilder('p')
+        .where('p.direction = :d', { d: 'IN' })
+        .andWhere('p.account_id IN (:...ids)', { ids })
+        .andWhere('p.created_at <= :asOf', { asOf })
+        .select('COALESCE(SUM(p.amount), 0)', 'sum')
+        .getRawOne(),
+      this.payments
+        .createQueryBuilder('p')
+        .where('p.direction = :d', { d: 'OUT' })
+        .andWhere('p.account_id IN (:...ids)', { ids })
+        .andWhere('p.created_at <= :asOf', { asOf })
+        .select('COALESCE(SUM(p.amount), 0)', 'sum')
+        .getRawOne(),
+      this.transfers.groupDeltaAt(ids, asOf),
+    ]);
     return (
       opening + Number(inSum?.sum ?? 0) - Number(outSum?.sum ?? 0) + transferDelta
     );
@@ -997,6 +1191,7 @@ export class ReportsService {
 
 function labelForType(t: string): string {
   switch (t) {
+    case 'SALARY_ACCRUED': return 'Salary accrued (we owe)';
     case 'SALARY': return 'Salary payment';
     case 'ADVANCE': return 'Advance';
     case 'REIMBURSEMENT': return 'Reimbursement';

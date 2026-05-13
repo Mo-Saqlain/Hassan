@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 
 export class CreateSupplierDto {
+  @IsString() @IsOptional() code?: string;
   @IsString() @MinLength(1) name: string;
   @IsString() @IsOptional() phone?: string;
   @IsEmail() @IsOptional() email?: string;

@@ -5,6 +5,9 @@ export type AccountType = 'CASH' | 'BANK' | 'WALLET' | 'CAPITAL' | 'CREDIT';
 
 @Entity('accounts')
 export class Account extends BaseEntity {
+  @Column({ unique: true, nullable: true })
+  code?: string;
+
   @Column()
   name: string;
 

@@ -192,46 +192,47 @@ export class CashRegisterService {
     const start = new Date(`${day}T00:00:00.000Z`);
     const end = new Date(`${day}T23:59:59.999Z`);
 
-    const session = await this.sessions.findOne({ where: { sessionDate: day } });
-
+    // Fan everything out in parallel. Previously these eight reads were
+    // serialised, which over the Supabase pooler meant ~4 s of round-trip
+    // latency even on an empty day. Concurrent dispatch collapses it to
+    // roughly the slowest single query.
     const cashAccounts = await this.accounts.find({ where: { type: 'CASH' } });
     const cashAccountIds = new Set(cashAccounts.map((a) => a.id));
+    const cashIdsArr = [...cashAccountIds];
 
-    const entries = await this.repo.find({
-      where: { entryDate: day },
-      order: { createdAt: 'ASC' },
-    });
+    const [
+      session,
+      entries,
+      salesOnDay,
+      purchasesOnDay,
+      vouchers,
+      cashTransfers,
+      expectedOpening,
+    ] = await Promise.all([
+      this.sessions.findOne({ where: { sessionDate: day } }),
+      this.repo.find({
+        where: { entryDate: day },
+        order: { createdAt: 'ASC' },
+      }),
+      this.sales.find({ where: { createdAt: Between(start, end) } }),
+      this.purchases.find({ where: { createdAt: Between(start, end) } }),
+      this.payments.find({ where: { createdAt: Between(start, end) } }),
+      this.fundTransfers.findInvolvingAccounts(cashIdsArr, start, end),
+      this.cashOnHandAsOf(prevDay(day), cashAccounts),
+    ]);
 
-    const salesOnDay = await this.sales.find({
-      where: { createdAt: Between(start, end) },
-    });
     const cashSales = salesOnDay.filter(
       (s) => s.paymentMethod === 'CASH' && Number(s.paidAmount ?? 0) > 0,
     );
-
-    const purchasesOnDay = await this.purchases.find({
-      where: { createdAt: Between(start, end) },
-    });
     const cashPurchases = purchasesOnDay.filter(
       (p) => p.paymentMethod === 'CASH' && Number(p.paidAmount ?? 0) > 0,
     );
-
-    const vouchers = await this.payments.find({
-      where: { createdAt: Between(start, end) },
-    });
     const cashVouchers = vouchers.filter((v) =>
       cashAccountIds.has(v.accountId),
     );
 
-    const cashTransfers = await this.fundTransfers.findInvolvingAccounts(
-      [...cashAccountIds],
-      start,
-      end,
-    );
-
     // Opening: session value if a session exists for this date; otherwise
     // computed from prior-day closing.
-    const expectedOpening = await this.cashOnHandAsOf(prevDay(day));
     const opening = session
       ? Number(session.actualOpening)
       : expectedOpening;
@@ -379,80 +380,79 @@ export class CashRegisterService {
    * Cumulative cash on hand at end-of-day for the given date. Includes
    * account opening balances, all cash-tagged sale/purchase/voucher activity,
    * explicit cash-book entries, and fund-transfer inflows/outflows.
+   *
+   * Pass `preloadedAccounts` to skip an extra round-trip when the caller
+   * already has the list (e.g. `dailyBook`).
    */
-  private async cashOnHandAsOf(dateInclusive: string | null): Promise<number> {
-    const cashAccounts = await this.accounts.find({ where: { type: 'CASH' } });
-    if (!dateInclusive) {
-      return cashAccounts.reduce(
-        (s, a) => s + Number(a.openingBalance ?? 0),
-        0,
-      );
-    }
-    const cashIds = cashAccounts.map((a) => a.id);
+  private async cashOnHandAsOf(
+    dateInclusive: string | null,
+    preloadedAccounts?: Account[],
+  ): Promise<number> {
+    const cashAccounts =
+      preloadedAccounts ??
+      (await this.accounts.find({ where: { type: 'CASH' } }));
     const opening = cashAccounts.reduce(
       (s, a) => s + Number(a.openingBalance ?? 0),
       0,
     );
+    if (!dateInclusive) return opening;
+
+    const cashIds = cashAccounts.map((a) => a.id);
     const end = new Date(`${dateInclusive}T23:59:59.999Z`);
 
-    const salesIn = await this.sales
-      .createQueryBuilder('s')
-      .where('s.payment_method = :m', { m: 'CASH' })
-      .andWhere('s.created_at <= :end', { end })
-      .select('COALESCE(SUM(s.paid_amount), 0)', 'sum')
-      .getRawOne();
-    const purchasesOut = await this.purchases
-      .createQueryBuilder('p')
-      .where('p.payment_method = :m', { m: 'CASH' })
-      .andWhere('p.created_at <= :end', { end })
-      .select('COALESCE(SUM(p.paid_amount), 0)', 'sum')
-      .getRawOne();
-
-    let voucherInSum = 0;
-    let voucherOutSum = 0;
-    if (cashIds.length > 0) {
-      const voucherIn = await this.payments
-        .createQueryBuilder('p')
-        .where('p.direction = :d', { d: 'IN' })
-        .andWhere('p.account_id IN (:...ids)', { ids: cashIds })
-        .andWhere('p.created_at <= :end', { end })
-        .select('COALESCE(SUM(p.amount), 0)', 'sum')
-        .getRawOne();
-      const voucherOut = await this.payments
-        .createQueryBuilder('p')
-        .where('p.direction = :d', { d: 'OUT' })
-        .andWhere('p.account_id IN (:...ids)', { ids: cashIds })
-        .andWhere('p.created_at <= :end', { end })
-        .select('COALESCE(SUM(p.amount), 0)', 'sum')
-        .getRawOne();
-      voucherInSum = Number(voucherIn?.sum ?? 0);
-      voucherOutSum = Number(voucherOut?.sum ?? 0);
-    }
-
-    const entryIn = await this.repo
-      .createQueryBuilder('e')
-      .where('e.direction = :d', { d: 'IN' })
-      .andWhere('e.entry_date <= :d2', { d2: dateInclusive })
-      .select('COALESCE(SUM(e.amount), 0)', 'sum')
-      .getRawOne();
-    const entryOut = await this.repo
-      .createQueryBuilder('e')
-      .where('e.direction = :d', { d: 'OUT' })
-      .andWhere('e.entry_date <= :d2', { d2: dateInclusive })
-      .select('COALESCE(SUM(e.amount), 0)', 'sum')
-      .getRawOne();
-
-    const transferDelta = await this.fundTransfers.groupDeltaAt(
-      cashIds,
-      end,
-    );
+    const [salesIn, purchasesOut, voucherIn, voucherOut, entryIn, entryOut, transferDelta] =
+      await Promise.all([
+        this.sales
+          .createQueryBuilder('s')
+          .where('s.payment_method = :m', { m: 'CASH' })
+          .andWhere('s.created_at <= :end', { end })
+          .select('COALESCE(SUM(s.paid_amount), 0)', 'sum')
+          .getRawOne(),
+        this.purchases
+          .createQueryBuilder('p')
+          .where('p.payment_method = :m', { m: 'CASH' })
+          .andWhere('p.created_at <= :end', { end })
+          .select('COALESCE(SUM(p.paid_amount), 0)', 'sum')
+          .getRawOne(),
+        cashIds.length === 0
+          ? Promise.resolve(null)
+          : this.payments
+              .createQueryBuilder('p')
+              .where('p.direction = :d', { d: 'IN' })
+              .andWhere('p.account_id IN (:...ids)', { ids: cashIds })
+              .andWhere('p.created_at <= :end', { end })
+              .select('COALESCE(SUM(p.amount), 0)', 'sum')
+              .getRawOne(),
+        cashIds.length === 0
+          ? Promise.resolve(null)
+          : this.payments
+              .createQueryBuilder('p')
+              .where('p.direction = :d', { d: 'OUT' })
+              .andWhere('p.account_id IN (:...ids)', { ids: cashIds })
+              .andWhere('p.created_at <= :end', { end })
+              .select('COALESCE(SUM(p.amount), 0)', 'sum')
+              .getRawOne(),
+        this.repo
+          .createQueryBuilder('e')
+          .where('e.direction = :d', { d: 'IN' })
+          .andWhere('e.entry_date <= :d2', { d2: dateInclusive })
+          .select('COALESCE(SUM(e.amount), 0)', 'sum')
+          .getRawOne(),
+        this.repo
+          .createQueryBuilder('e')
+          .where('e.direction = :d', { d: 'OUT' })
+          .andWhere('e.entry_date <= :d2', { d2: dateInclusive })
+          .select('COALESCE(SUM(e.amount), 0)', 'sum')
+          .getRawOne(),
+        this.fundTransfers.groupDeltaAt(cashIds, end),
+      ]);
 
     return (
       opening +
       Number(salesIn?.sum ?? 0) -
       Number(purchasesOut?.sum ?? 0) +
-      voucherInSum -
-      voucherOutSum +
+      Number(voucherIn?.sum ?? 0) -
+      Number(voucherOut?.sum ?? 0) +
       Number(entryIn?.sum ?? 0) -
       Number(entryOut?.sum ?? 0) +
       transferDelta
@@ -476,27 +476,16 @@ export class CashRegisterService {
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       days.push(d.toISOString().slice(0, 10));
     }
-    const rows: Array<{
-      date: string;
-      opening: number;
-      in: number;
-      out: number;
-      miscTotal: number;
-      closing: number;
-      warned: boolean;
-    }> = [];
-    for (const d of days) {
-      const book = await this.dailyBook(d);
-      rows.push({
-        date: d,
-        opening: book.opening,
-        in: book.totals.in,
-        out: book.totals.out,
-        miscTotal: book.totals.miscTotal,
-        closing: book.closing,
-        warned: book.warnings.length > 0,
-      });
-    }
+    const books = await Promise.all(days.map((d) => this.dailyBook(d)));
+    const rows = books.map((book, i) => ({
+      date: days[i],
+      opening: book.opening,
+      in: book.totals.in,
+      out: book.totals.out,
+      miscTotal: book.totals.miscTotal,
+      closing: book.closing,
+      warned: book.warnings.length > 0,
+    }));
     return { from, to, rows };
   }
 }

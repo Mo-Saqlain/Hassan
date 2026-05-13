@@ -9,6 +9,7 @@ import { CreateEmployeeTransactionDto } from './dto/create-employee-transaction.
 
 /** TYPE → voucher prefix. Each type sequences independently. */
 const PREFIX: Record<EmployeeTransactionType, string> = {
+  SALARY_ACCRUED: 'SALA',
   SALARY: 'SAL',
   ADVANCE: 'ADV',
   REIMBURSEMENT: 'RBT',

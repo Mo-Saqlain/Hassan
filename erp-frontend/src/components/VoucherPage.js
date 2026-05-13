@@ -10,12 +10,20 @@ export default function VoucherPage({ direction }) {
   const partyLabel = direction === 'IN' ? 'Customer' : 'Supplier';
   const partyKey = direction === 'IN' ? 'customerId' : 'supplierId';
   const partyPath = direction === 'IN' ? '/customers' : '/suppliers';
+  // Surface a per-party running balance next to the picker so cashiers
+  // can see how much is outstanding before deciding the amount. For
+  // suppliers a positive balance means we owe them; for customers a
+  // positive balance means they owe us.
+  const balancesPath =
+    direction === 'IN'
+      ? '/reports/customer-balances'
+      : '/reports/supplier-balances';
 
   const { data: vouchers, loading, error, reload } = useResource(
     `/payments?direction=${direction}`,
   );
   const { data: accounts } = useResource('/accounts');
-  const { data: parties } = useResource(partyPath);
+  const { data: parties } = useResource(balancesPath);
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -74,12 +82,45 @@ export default function VoucherPage({ direction }) {
                 }
               >
                 <option value="">— Select —</option>
-                {parties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
+                {parties.map((p) => {
+                  const bal = Number(p.balance ?? 0);
+                  const label = bal === 0
+                    ? p.name
+                    : direction === 'IN'
+                    ? `${p.name} — ${bal > 0 ? `owes ${bal.toFixed(2)}` : `credit ${Math.abs(bal).toFixed(2)}`}`
+                    : `${p.name} — ${bal > 0 ? `we owe ${bal.toFixed(2)}` : `they owe ${Math.abs(bal).toFixed(2)}`}`;
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
+              {form[partyKey] && (() => {
+                const p = parties.find((x) => x.id === form[partyKey]);
+                if (!p) return null;
+                const bal = Number(p.balance ?? 0);
+                if (bal === 0) {
+                  return (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      Settled.
+                    </div>
+                  );
+                }
+                const hint =
+                  direction === 'IN'
+                    ? bal > 0
+                      ? `Outstanding A/R: ${bal.toFixed(2)}`
+                      : `Customer credit: ${Math.abs(bal).toFixed(2)}`
+                    : bal > 0
+                    ? `Outstanding A/P: ${bal.toFixed(2)}`
+                    : `Supplier owes us: ${Math.abs(bal).toFixed(2)}`;
+                return (
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    {hint}
+                  </div>
+                );
+              })()}
             </div>
             <div>
               <label>Account *</label>

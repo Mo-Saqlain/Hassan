@@ -30,6 +30,60 @@ api.interceptors.response.use(
   },
 );
 
+// ─────────────── Tiny GET cache ────────────────────────────────────────
+// In-memory cache + in-flight dedup for GETs. Designed so that bouncing
+// between pages that ask for the same list (e.g. /accounts, /customers)
+// doesn't re-pay the network round-trip every time. POST/PATCH/DELETE
+// through `api` invalidate everything; callers can also force a fresh
+// read with `getCached(path, { fresh: true })`.
+const CACHE_TTL_MS = 10_000;
+const cache = new Map(); // path -> { data, expiresAt }
+const inflight = new Map(); // path -> Promise
+
+export function getCached(path, { fresh = false, ttlMs = CACHE_TTL_MS } = {}) {
+  const now = Date.now();
+  if (!fresh) {
+    const hit = cache.get(path);
+    if (hit && hit.expiresAt > now) {
+      return Promise.resolve({ data: hit.data, cached: true });
+    }
+  }
+  const pending = inflight.get(path);
+  if (pending) return pending;
+  const req = api.get(path).then(
+    (res) => {
+      cache.set(path, { data: res.data, expiresAt: Date.now() + ttlMs });
+      inflight.delete(path);
+      return res;
+    },
+    (err) => {
+      inflight.delete(path);
+      throw err;
+    },
+  );
+  inflight.set(path, req);
+  return req;
+}
+
+export function invalidateCache(prefix) {
+  if (!prefix) {
+    cache.clear();
+    return;
+  }
+  for (const k of cache.keys()) {
+    if (k.startsWith(prefix)) cache.delete(k);
+  }
+}
+
+// Writes invalidate the whole cache by default — safest behaviour for a
+// small ERP where a sale impacts customer balances, stock, cash book…
+api.interceptors.request.use((cfg) => {
+  if (cfg.method && cfg.method.toLowerCase() !== 'get') {
+    invalidateCache();
+  }
+  return cfg;
+});
+
 export const endpoints = {
   brands: '/brands',
   items: '/items',

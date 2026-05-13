@@ -105,33 +105,30 @@ export class EmployeeIncentivesService {
 
     const ruleWhere: any = { isActive: true };
     if (employeeId) ruleWhere.employeeId = employeeId;
-    const rules = await this.rules.find({ where: ruleWhere });
+
+    // Run the four independent reads (rules, sales+lines on period, returns
+    // on period, items) concurrently. Previously every step waited for the
+    // prior, which over the network was the dominant cost.
+    const [rules, sales, returns, items] = await Promise.all([
+      this.rules.find({ where: ruleWhere }),
+      this.sales.find({ where: { createdAt: Between(fromDate, toDate) } }),
+      this.saleReturns.find({ where: { createdAt: Between(fromDate, toDate) } }),
+      this.items.find(),
+    ]);
     if (rules.length === 0) {
       return { rows: [], byEmployee: {}, total: 0 };
     }
-
-    const sales = await this.sales.find({
-      where: { createdAt: Between(fromDate, toDate) },
-    });
     const saleIds = sales.map((s) => s.id);
     if (saleIds.length === 0) {
       return { rows: [], byEmployee: {}, total: 0 };
     }
-
-    const lines = await this.saleItems.find({
-      where: { saleId: In(saleIds) },
-    });
-
-    const returns = await this.saleReturns.find({
-      where: { createdAt: Between(fromDate, toDate) },
-    });
     const returnIds = returns.map((r) => r.id);
-    const returnLines = returnIds.length
-      ? await this.saleReturnItems.find({ where: { saleReturnId: In(returnIds) } })
-      : [];
-
-    // Build a lookup of itemId → categories[] and itemId → brandId.
-    const items = await this.items.find();
+    const [lines, returnLines] = await Promise.all([
+      this.saleItems.find({ where: { saleId: In(saleIds) } }),
+      returnIds.length
+        ? this.saleReturnItems.find({ where: { saleReturnId: In(returnIds) } })
+        : Promise.resolve([]),
+    ]);
     const itemBrand = new Map<string, string | undefined>();
     const itemCategories = new Map<string, string[]>();
     for (const it of items) {

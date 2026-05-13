@@ -4,11 +4,30 @@ import { useResource } from '../hooks/useResource';
 
 const emptyLine = () => ({ itemId: '', storeId: '', quantity: 1, unitPrice: 0 });
 
+const emptyItem = () => ({
+  modelNo: '',
+  name: '',
+  sku: '',
+  barcode: '',
+  brandId: '',
+  purchasePrice: '',
+  salePrice: '',
+});
+
 export default function Purchases() {
   const { data: purchases, loading, error, reload } = useResource('/purchases');
-  const { data: items } = useResource('/items');
+  const { data: items, setData: setItems, reload: reloadItems } = useResource('/items');
   const { data: suppliers } = useResource('/suppliers');
   const { data: stores } = useResource('/stores');
+  const { data: brands } = useResource('/brands');
+
+  // Inline item-creator: which line (index) is currently asking for a new
+  // item, plus its draft. Saving creates the item, appends it to the
+  // items list, and auto-selects it on the originating line.
+  const [newItemFor, setNewItemFor] = useState(null);
+  const [newItem, setNewItem] = useState(emptyItem());
+  const [newItemError, setNewItemError] = useState(null);
+  const [savingNewItem, setSavingNewItem] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -60,6 +79,56 @@ export default function Purchases() {
       lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines,
     }));
 
+  const openNewItem = (idx) => {
+    setNewItem(emptyItem());
+    setNewItemFor(idx);
+    setNewItemError(null);
+  };
+  const closeNewItem = () => {
+    setNewItemFor(null);
+    setNewItemError(null);
+  };
+  const saveNewItem = async (e) => {
+    e.preventDefault();
+    setNewItemError(null);
+    setSavingNewItem(true);
+    const payload = {
+      modelNo: newItem.modelNo?.trim() || undefined,
+      name: newItem.name?.trim() || undefined,
+      sku: newItem.sku?.trim() || undefined,
+      barcode: newItem.barcode?.trim() || undefined,
+      brandId: newItem.brandId || undefined,
+      purchasePrice:
+        newItem.purchasePrice === '' ? undefined : Number(newItem.purchasePrice),
+      salePrice:
+        newItem.salePrice === '' ? undefined : Number(newItem.salePrice),
+    };
+    if (!payload.modelNo && !payload.name) {
+      setNewItemError('Model No or Name is required');
+      setSavingNewItem(false);
+      return;
+    }
+    try {
+      const r = await api.post('/items', payload);
+      const created = r.data;
+      // Optimistically prepend so the picker shows it immediately, then
+      // kick off a background refresh in case the backend filled defaults.
+      setItems((prev) => [created, ...prev]);
+      reloadItems();
+      // Auto-select on the originating line + prefill its unit price.
+      const targetIdx = newItemFor;
+      updateLine(targetIdx, {
+        itemId: created.id,
+        unitPrice: Number(created.purchasePrice ?? 0),
+      });
+      closeNewItem();
+    } catch (err) {
+      setNewItemError(err.uiMessage ?? 'Save failed');
+    } finally {
+      setSavingNewItem(false);
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmitError(null);
@@ -108,6 +177,12 @@ export default function Purchases() {
         <button className="btn btn-primary" onClick={() => setShowForm(true)}>
           + New Purchase
         </button>
+      </div>
+
+      <div className="chip chip-info" style={{ marginBottom: 12 }}>
+        Bills aren't paid one-for-one. To pay suppliers, use the{' '}
+        <strong>Payments</strong> tab — the <strong>Supplier Ledger</strong> tab
+        shows the net balance you owe.
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -175,18 +250,29 @@ export default function Purchases() {
               {form.lines.map((ln, idx) => (
                 <tr key={idx}>
                   <td>
-                    <select
-                      value={ln.itemId}
-                      onChange={(e) => onItemChange(idx, e.target.value)}
-                    >
-                      <option value="">— Select —</option>
-                      {items.map((i) => (
-                        <option key={i.id} value={i.id}>
-                          {i.name} ({i.sku})
-                          {i.modelNo ? ` — ${i.modelNo}` : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <select
+                        value={ln.itemId}
+                        onChange={(e) => onItemChange(idx, e.target.value)}
+                        style={{ flex: 1, minWidth: 0 }}
+                      >
+                        <option value="">— Select —</option>
+                        {items.map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {i.name} ({i.sku})
+                            {i.modelNo ? ` — ${i.modelNo}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        title="Create a new item without leaving this form"
+                        onClick={() => openNewItem(idx)}
+                      >
+                        + New
+                      </button>
+                    </div>
                   </td>
                   <td>
                     <select
@@ -308,8 +394,7 @@ export default function Purchases() {
               <th>Supplier</th>
               <th className="right">Total</th>
               <th className="right">Net</th>
-              <th className="right">Paid</th>
-              <th className="right">Due</th>
+              <th className="right">Paid at bill</th>
               <th>Method</th>
               <th className="right">Actions</th>
             </tr>
@@ -322,8 +407,7 @@ export default function Purchases() {
                 <td>{p.supplier?.name ?? '—'}</td>
                 <td className="right">{Number(p.totalAmount).toFixed(2)}</td>
                 <td className="right">{Number(p.netAmount).toFixed(2)}</td>
-                <td className="right">{Number(p.paidAmount).toFixed(2)}</td>
-                <td className="right">{Number(p.dueAmount).toFixed(2)}</td>
+                <td className="right">{Number(p.paidAmount ?? 0).toFixed(2)}</td>
                 <td>{p.paymentMethod}</td>
                 <td className="right">
                   <a
@@ -339,6 +423,113 @@ export default function Purchases() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {newItemFor !== null && (
+        <div className="modal-backdrop" onClick={closeNewItem}>
+          <form
+            className="modal"
+            onSubmit={saveNewItem}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0 }}>Quick add item</h3>
+            {newItemError && (
+              <div className="alert alert-error">{newItemError}</div>
+            )}
+            <div className="form-row">
+              <div>
+                <label>Model No</label>
+                <input
+                  autoFocus
+                  value={newItem.modelNo}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, modelNo: e.target.value })
+                  }
+                  placeholder="e.g. WRG-475LP"
+                />
+              </div>
+              <div>
+                <label>Name (optional, defaults to Model No)</label>
+                <input
+                  value={newItem.name}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, name: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label>Brand</label>
+                <select
+                  value={newItem.brandId}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, brandId: e.target.value })
+                  }
+                >
+                  <option value="">— None —</option>
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label>SKU (auto-derived if blank)</label>
+                <input
+                  value={newItem.sku}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, sku: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label>Barcode</label>
+                <input
+                  value={newItem.barcode}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, barcode: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label>Purchase price</label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={newItem.purchasePrice}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, purchasePrice: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label>Sale price</label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={newItem.salePrice}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, salePrice: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={savingNewItem}
+              >
+                {savingNewItem ? 'Saving…' : 'Save item & use on this line'}
+              </button>
+              <button type="button" className="btn" onClick={closeNewItem}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </>
   );

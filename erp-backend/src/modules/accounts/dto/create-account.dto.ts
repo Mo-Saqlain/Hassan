@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 
 export class CreateAccountDto {
+  @IsString() @IsOptional() code?: string;
   @IsString() @MinLength(1) name: string;
   @IsIn(['CASH', 'BANK', 'WALLET', 'CAPITAL', 'CREDIT'])
   type: 'CASH' | 'BANK' | 'WALLET' | 'CAPITAL' | 'CREDIT';

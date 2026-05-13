@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
+import { ErrorLogFilter } from './modules/error-logs/error-log.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -24,6 +25,11 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  // Global exception filter writes every error response to error_logs so
+  // we can review them from the System → Errors tab. Defaults preserved
+  // for the response shape so existing clients keep working.
+  app.useGlobalFilters(app.get(ErrorLogFilter));
 
   app.setGlobalPrefix('api');
 

@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 
 const TYPES = [
+  'SALARY_ACCRUED',
   'SALARY',
   'ADVANCE',
   'REIMBURSEMENT',
