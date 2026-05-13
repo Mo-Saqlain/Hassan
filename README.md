@@ -616,7 +616,7 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 ## Testing
 
 ```bash
-cd erp-backend && npm test           # 77 tests, ~8 seconds
+cd erp-backend && npm test           # 82 tests, ~6 seconds
 cd erp-backend && npx jest --coverage
 ```
 
@@ -627,7 +627,7 @@ Tests use an isolated in-memory SQLite TypeORM data source per spec (`src/testin
 | Service | Line % | What's covered |
 |---|---:|---|
 | `stock.service` | **100%** | IN/OUT recording, on-hand math, OUT validation, summary, adjustments, listMovements |
-| `pos.service` | 96% | Session lifecycle, cart stacking on re-scan, partial pay, checkout, outbox event |
+| `pos.service` | 96% | Session lifecycle, cart stacking on re-scan, partial-pay receivables, CREDIT-customer guard, accountId attribution, outbox event |
 | `categories.service` | 93% | Tree build, self-parent/cycle prevention, sub-categories, delete |
 | `sales.service` | 91% | Transactional integrity, COGS, discount/paid math, partial pay, outbox enqueue + skipOutbox |
 | `purchases.service` | 91% | Same as sales (purchase side) |
