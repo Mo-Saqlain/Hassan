@@ -70,10 +70,10 @@ export class CashRegisterSession extends BaseEntity {
   @Column({ name: 'opening_transfer_id', nullable: true })
   openingTransferId?: string;
 
-  @Column({ name: 'opened_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'opened_at', type: Date, nullable: true })
   openedAt?: Date;
 
-  @Column({ name: 'closed_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'closed_at', type: Date, nullable: true })
   closedAt?: Date;
 
   @Column({ nullable: true })

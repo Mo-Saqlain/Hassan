@@ -5,8 +5,12 @@ import axios from 'axios';
 // 2. The hostname the page was loaded from, on port 3001 (so visiting from a
 //    phone at http://192.168.x.x:3000 talks to http://192.168.x.x:3001 instead
 //    of the phone's own localhost).
-const fallbackHost =
-  typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+// Electron loads the build via file://, where `window.location.hostname` is
+// the empty string — falling back to that produces `http://:3001/api` which
+// throws `Failed to construct 'URL': Invalid URL`. Force localhost in that case.
+const rawHost =
+  typeof window !== 'undefined' ? window.location.hostname : '';
+const fallbackHost = rawHost && rawHost.length > 0 ? rawHost : 'localhost';
 const baseURL =
   process.env.REACT_APP_API_BASE_URL ?? `http://${fallbackHost}:3001/api`;
 

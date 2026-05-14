@@ -39,7 +39,7 @@ export class UserAccessRequest {
   @Column({ type: 'varchar', default: 'PENDING' })
   status: AccessRequestStatus;
 
-  @Column({ name: 'reviewed_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'reviewed_at', type: Date, nullable: true })
   reviewedAt?: Date;
 
   @Column({ name: 'reviewer_id', nullable: true })

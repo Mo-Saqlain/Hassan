@@ -1,16 +1,15 @@
 # Hassan Electronics ERP — Project Guide
 
-Offline-first ERP + POS for a home-appliances shop ("Hassan Electronics"). Phase 1 covers core ERP (master data, transactions, stock, payments). Phase 2 adds a POS terminal with barcode scanning, customer/supplier ledgers, stock ledger, and four financial statements.
+Offline-first ERP + POS for a single home-appliances retail shop. The same NestJS codebase runs locally against SQLite (desktop install) and centrally against Supabase Postgres (cloud receiver). Outbox events flow from the local node to the cloud every 30 s when configured.
 
 ## Repo layout
 
 ```
-erp-backend/    NestJS API + TypeORM (Postgres via Supabase by default, SQLite fallback)
-erp-frontend/   Create React App + React Router + axios + light/dark themes
-erp-desktop/    Electron wrapper that bundles the backend + frontend offline
-erp_phase_1_detailed_design_document.md   Original spec
-README.md       Functional + technical overview
-.gitignore      Excludes node_modules, .env, *.sqlite, build/, dist/, etc.
+erp-backend/    NestJS 11 + TypeORM 0.3. 30 modules, 41 entities. SQLite (better-sqlite3) by default; Postgres when DATABASE_URL is set.
+erp-frontend/   React 19 + HashRouter + axios + light/dark themes. CRA build system.
+erp-desktop/    Electron 40 wrapper. Spawns the compiled backend as a child process and loads the React build via file://.
+scripts/        make-icons.ps1 — chroma-keys logo.jpeg and emits the favicon + Windows .ico.
+README.md       User-and-dev-facing overview.
 ```
 
 ## Run
@@ -29,74 +28,106 @@ cd erp-frontend && npm run build
 cd erp-desktop  && npm start
 ```
 
+Packaged installer:
+```
+cd erp-desktop && npm run package:win   # → release/Hassan Electronics ERP-Setup-1.0.0.exe
+```
+
 ## Environment
 
 `erp-backend/.env` (gitignored). Either set `DATABASE_URL` for Postgres/Supabase or leave it blank to fall back to SQLite.
 
 ```
 DATABASE_URL=postgresql://postgres.<ref>:<password-url-encoded>@aws-1-<region>.pooler.supabase.com:5432/postgres
-DB_SYNC=true     # auto-create tables on boot (turn off in production)
+DB_SYNC=true     # auto-create schema on boot — Postgres only
 DB_SSL=true
-CLOUD_SYNC_URL=  # optional — points local node at cloud /api/sync/push
+CLOUD_SYNC_URL=  # optional — local node pushes outbox here every 30 s
+PORT=3001        # default
+SQLITE_PATH=     # path to SQLite file when DATABASE_URL is unset; Electron forces <userData>/erp.sqlite
+BACKUP_DIR=      # daily backups land here; Electron forces <userData>/backups
 ```
 
 **Supabase gotchas:**
-- Free-tier projects no longer accept direct IPv4 connections — use the **Session pooler** (`pooler.supabase.com:5432`), NOT the Direct connection or Transaction pooler on `:6543`. Transaction pooler breaks TypeORM's prepared statements.
-- The pooler username is `postgres.<project-ref>`, not plain `postgres`.
-- Special characters in the password must be URL-encoded (`@` → `%40`, etc.).
+- Free-tier projects no longer accept direct IPv4 — use the **Session pooler** (`pooler.supabase.com:5432`), NOT the Direct connection or Transaction pooler on `:6543`. Transaction pooler breaks TypeORM's prepared statements.
+- Pooler username is `postgres.<project-ref>`, not plain `postgres`.
+- URL-encode special characters in the password (`@` → `%40`, etc.).
 
 ## Architecture
 
 ### Backend (NestJS)
 - Module-per-domain under `erp-backend/src/modules/`. Each module owns its entities, DTOs, service, controller.
-- TypeORM with `synchronize: true` while iterating; no migrations yet. Switch to migrations before treating Supabase as production.
+- TypeORM with `synchronize: true` on SQLite; gated by `DB_SYNC=true` on Postgres. No migrations yet — switch before treating Supabase as production.
 - `OutboxModule` owns the local sync queue; `SalesService`/`PurchasesService`/`PosService` enqueue events when `CLOUD_SYNC_URL` is set.
 - `SyncModule` has two halves:
   - **Receiver** (`POST /api/sync/push`): cloud-side. Applies events with idempotency by event ID.
-  - **Worker** (`@Cron` every 30s): local-side. Posts pending outbox entries to `CLOUD_SYNC_URL`.
-- `ReportsModule` is read-only — it touches everyone's entities to compute ledgers + financials. Don't put writes there.
+  - **Worker** (`@Cron` every 30 s): local-side. Posts pending outbox entries to `CLOUD_SYNC_URL`.
+- `ReportsModule` is read-only — it touches every business entity to compute ledgers + financials. Don't put writes there.
+- `AuthGuard` is global (registered in `UsersModule`). Exempt routes: `/auth/login`, `/auth/request-access`, `/health`, `/sync/push`.
 
 ### Frontend (React)
 - **HashRouter** (required so the build works under Electron `file://`). `homepage: "./"` in `package.json`.
-- **API client** at `src/api/client.js` resolves the base URL from `window.location.hostname` so visiting from a phone at `http://192.168.x.x:3000` auto-targets `http://192.168.x.x:3001` instead of the phone's own localhost.
-- **Theming** lives in `src/theme/ThemeContext.js`. `data-theme="dark"` / `"light"` on `<html>` toggles CSS variables defined at the top of `App.css`. Theme bootstrap script in `public/index.html` applies the saved theme before React renders, avoiding flash.
-- **Layout** is responsive: desktop sidebar can be collapsed to a 72px rail; mobile turns it into an off-canvas drawer with a hamburger and backdrop.
-- **Hub pages** are the dominant pattern for grouped CRUD. Don't add new sidebar links for sub-features — they go in the appropriate hub:
-  - `/master` (Master Data) — Items, Categories, Brands, Customers, Suppliers, Stores, Bank/Wallet
-  - `/transactions` (Transactions) — Sales History, Sale Returns, Purchases, Purchase Returns, Receipts, Payments
+- **API client** at `src/api/client.js` resolves the base URL in three layers: build-time `REACT_APP_API_BASE_URL`, then `http://<window.location.hostname>:3001/api`, then `localhost:3001` when hostname is empty (Electron `file://` case — required, otherwise URL constructor throws "Invalid URL").
+- **Theming** lives in `src/theme/ThemeContext.js`. `data-theme="dark"|"light"` on `<html>` toggles CSS variables defined at the top of `tokens.css`. Theme bootstrap script in `public/index.html` applies the saved theme before React renders — no flash.
+- **Layout** is responsive: desktop sidebar can be collapsed to a 56px rail; mobile turns it into an off-canvas drawer.
+- **Hub pages** are the dominant pattern for grouped CRUD. Don't add new sidebar entries for sub-features — add a tab to the existing hub.
+
+### Sidebar (`src/nav/hubs.js`)
+14 entries, in order, each with its own colour token:
+1. Dashboard · 2. POS Terminal · 3. Cash Book · 4. Customer (hub) · 5. Sales (hub) · 6. Supplier (hub) · 7. Purchase (hub) · 8. Item (hub) · 9. Stock (hub) · 10. Employee (hub) · 11. Account (hub) · 12. Users (hub) · 13. Reports · 14. System (hub).
 
 ### Electron
-- `erp-desktop/src/main.js` spawns the compiled backend (`node dist/main.js`) as a child process, pointing `SQLITE_PATH` at Electron's `userData` dir for true offline-first. Polls `/api/health` then loads the React build.
-- Kills the backend on quit.
+- `erp-desktop/src/main.js` spawns the compiled backend (`node dist/main.js` via `ELECTRON_RUN_AS_NODE=1`) as a child process, pointing `SQLITE_PATH` at Electron's `userData` dir and `BACKEND_PORT` at 3001. Polls `/api/health` then loads the React build.
+- Reads `<userData>/config.json` on every launch for `cloudSyncUrl` and `databaseUrl` — the shop owner can wire the install to Supabase without rebuilding.
+- Pushes the user's OS accent colour into the renderer via `did-finish-load` (Windows / macOS only); user override in `localStorage.hassan-accent-color` wins.
+- **Electron pinned to `^40`** because better-sqlite3 v12.10 only ships a prebuilt for `electron-v145` (= Electron 40). Bumping to 41+ either needs a new better-sqlite3 prebuilt or a working MSVC toolchain to compile from source.
+
+### Branding
+- Source: `erp-frontend/logo.jpeg` (HE monogram, white H + blue E on black).
+- `scripts/make-icons.ps1` chroma-keys out the black backdrop and emits transparent `logo192.png` / `logo512.png` / `logo1024.png` plus a multi-resolution `favicon.ico` (16/24/32/48/64/128/256) into `erp-frontend/public/`. The same ICO is copied to `erp-desktop/build-resources/icon.ico` for electron-builder.
+- The transparent logo is rendered on the **Sign in** and **Request access** screens (no chip / backdrop). A theme toggle sits in the top-right of the login card. The logo is **not** rendered anywhere else in the app — only the wordmark.
 
 ## Domain model essentials
 
-- **Items** — unique `sku`, optional unique `barcode`, optional `brand_id`, many-to-many with `categories`. POS lookup matches barcode first, then SKU.
-- **Categories** — self-referencing via `parent_id`. Service prevents self-parenting and cycles (`/categories/tree` returns it pre-built).
+- **Items** — unique `sku` (auto-derived from Model No on collision), optional unique `barcode`, optional `brand_id`, many-to-many with `categories`. POS lookup matches barcode first, then SKU, then model no.
+- **Categories** — self-referencing via `parent_id`. Service prevents self-parenting and cycles.
 - **Sales / Purchases** — header + lines. Service wraps a TypeORM transaction that creates the voucher, lines, and matching `StockMovement` rows atomically. Rollback on stock-insufficient.
 - **Stock** — append-only `stock_movements` ledger. On-hand = `SUM(IN +q vs OUT -q)`. OUT movements throw `BadRequestException` when on-hand would go negative.
 - **Returns** — sale-return → stock IN (goods come back); purchase-return → stock OUT (goods leave).
 - **Payments** — single table, `direction: 'IN' | 'OUT'`. IN = Receipt (RCT-…), OUT = Payment (PMT-…). Filter via `?direction=`.
 - **POS Session** — a cashier session with running `salesTotal`/`salesCount`. `pos_cart_items` is session-scoped working state, cleared on checkout. Re-scanning the same item stacks the existing cart line. Checkout calls `SalesService.create(..., { skipOutbox: true })` then enqueues its own `POS_SALE_CREATED` outbox event.
-- **Reports** — `ReportsService` computes customer/supplier ledgers (running balance), stock ledger (filterable by category/brand/supplier), and four financial statements (income / balance sheet / cash flow / changes in equity). The balance sheet uses an `asOf` filter passed through to `customerLedger`/`supplierLedger`.
+- **Cash register sessions** — one per shop-day, opens with `actual_opening` + (optional) Capital→Cash FundTransfer to cover shortfall. New cash-book entries are blocked client-side once a session is CLOSED.
+- **Fund transfers** — Capital ↔ Cash ↔ Bank ↔ Wallet ↔ Credit. Pure movement of own funds.
+- **Accounts** — five flavours: CASH, BANK, WALLET, CAPITAL, CREDIT.
+- **Reports** — `ReportsService` computes customer/supplier/employee/account ledgers (running balance), stock ledger (filterable by category/brand/supplier), and four financial statements (income / balance sheet / cash flow / changes in equity). The balance sheet's `asOf` filter passes through to `customerLedger`/`supplierLedger`.
 
 ## Sync event types
-- `SALE_CREATED`, `PURCHASE_CREATED` — Phase 1
-- `POS_SALE_CREATED` — Phase 2; treated as `SALE_CREATED` on the cloud receiver (session metadata is stripped before persist)
+
+- `SALE_CREATED`, `PURCHASE_CREATED` — Phase 1 transactions
+- `POS_SALE_CREATED` — Phase 2 POS sale (treated as `SALE_CREATED` on the cloud receiver; session metadata stripped)
 - `POS_SESSION_STARTED`, `POS_SESSION_CLOSED` — audit-only on cloud (no DB writes)
 
 ## Conventions
 
-- **TypeORM column casing**: snake_case column names via `name: 'foo_bar'`, camelCase entity fields. Don't change.
+- **TypeORM column casing**: snake_case in DB via `name: 'foo_bar'`, camelCase entity fields. Don't change.
+- **Dialect-portable date columns**: use `@Column({ type: Date, ... })` (the constructor), NOT `@Column({ type: 'timestamp' })`. The string `'timestamp'` is Postgres-only and crashes better-sqlite3 with `DataTypeNotSupportedError` on boot. `Date` resolves to `datetime` (SQLite) or `timestamp without time zone` (Postgres). The string `'datetime'` is SQLite-only and Postgres rejects it — same trap in reverse.
 - **TypeORM orderBy gotcha**: use the camelCase property in `.orderBy('m.createdAt', ...)` — `.orderBy('m.created_at')` fails on some adapters with `Cannot read properties of undefined (reading 'databaseName')`.
-- **Auto-generated voucher numbers**: `INV-000001`, `BILL-000001`, `SR-000001`, `PR-000001`, `RCT-000001`, `PMT-000001`. Sequence is `count + 1` — not gap-free. Swap for a sequences table if you need strict sequencing.
-- **Validation**: every Create/Update DTO uses class-validator decorators. The global `ValidationPipe` in `main.ts` has `whitelist`, `transform`, and `forbidNonWhitelisted` on — extra fields will throw.
-- **No auth** in Phase 1/2. `userId` on `pos_sessions` is nullable and unwired. Don't bolt on JWT auth without checking with the user first.
+- **Indexes** — every entity carries `@Index` decorators targeting the columns its services actually filter or sort on. 107 indexes across 41 entities. Adding a new query pattern? Add the matching `@Index` to the entity (composite for filter+sort).
+- **Auto-generated voucher numbers**: `INV-000001`, `BILL-000001`, `SR-000001`, `PR-000001`, `RCT-000001`, `PMT-000001`, `TRF-000001`, `PO-000001`. Sequence is `count + 1` — not gap-free. Swap for a sequences table if you need strict sequencing.
+- **Validation**: every Create/Update DTO uses class-validator decorators. The global `ValidationPipe` in `main.ts` has `whitelist`, `transform`, and `forbidNonWhitelisted` on — extra fields throw.
+- **Auth**: opaque server-issued tokens (not JWT), 12-hour sliding window, sent as `Authorization: Bearer <token>`. The `AuthGuard` is global; mark public endpoints with `@Public()`.
 - **Service-to-service deps**: `OutboxService` is the only thing both sales/purchases/POS and the sync push worker depend on. Don't recreate this by making `SalesModule` import `SyncModule` — that's circular.
+- **Audit logging** is done by `AuditSubscriber` (a TypeORM `EntitySubscriber`), not DB triggers. Cross-DB safe.
+
+## UI direction
+
+- **Flat Windows 10** — no border-radius anywhere, no glass / blur / aurora / gradients on chrome, no transforms or hover animations. Solid surfaces with 1px borders. Lightweight `color` / `background` / `border` transitions only.
+- **Segoe UI Variable** + Segoe UI fallback for text, **Cascadia Code** / Consolas for numbers / SKUs / refs. No web fonts — system stack only.
+- **Sidebar icons** carry a tinted chip in each entry's own `--nav-c` token; active item paints a 3 px accent strip on the left edge.
+- **HE logo** renders only on `/login` and `/request-access` (transparent, no chip backdrop — the user explicitly rejected the chip approach; see memory).
 
 ## Testing
 
-Backend has 74 Jest tests under `src/modules/*/*.spec.ts` covering the high-value services:
+Backend has 81 Jest tests under `src/modules/*/*.spec.ts` covering the high-value services:
 
 ```
 cd erp-backend && npm test               # full suite (~6s)
@@ -111,18 +142,23 @@ Untested (intentional): `accounts`, `brands`, `customers`, `suppliers`, `stores`
 
 | Task | Where |
 |---|---|
-| Add a new master-data entity | Backend module under `src/modules/`, then a tile + panel in `erp-frontend/src/pages/MasterData.js`. **Not** a new sidebar route. |
-| Add a transactional flow | Backend module + dedicated frontend page. Wire it as a tile inside `Transactions.js`, **not** a new sidebar entry. |
+| Add a master-data entity | Backend module under `src/modules/`, then a tab inside the appropriate hub in `nav/hubs.js`. **Not** a new sidebar entry. |
+| Add a transactional flow | Backend module + a dedicated frontend page wired as a tab inside the relevant hub (Sales, Purchase, Employee, etc.). |
 | Add a sync event type | Add to `SyncService.handleEvent` switch (cloud side) and call `outbox.enqueue()` at the local origin. |
-| Add a new report | Add a method on `ReportsService`, a route in `ReportsController`, and consume it in `Financials.js` (new tab) or a new page. |
-| Change DB schema | Edit the entity; TypeORM `synchronize: true` will apply in dev. For Postgres production write a migration. |
-| Wipe all data | The one-shot `wipe-data.js` script was deleted after use — rewrite if needed: TRUNCATE all 22 business tables with RESTART IDENTITY CASCADE. |
+| Add a new report | Add a method on `ReportsService`, a route in `ReportsController`, then consume it in `Financials.js` (new tab) or a new page. |
+| Change DB schema | Edit the entity; TypeORM `synchronize: true` will apply in dev / SQLite. For Postgres production set `DB_SYNC=true` once or write a migration. |
+| Update favicon / app icon | Replace `erp-frontend/logo.jpeg`, then run `scripts/make-icons.ps1` from the repo root. Regenerates PNGs + ICOs. |
+| Build a desktop installer | `cd erp-desktop && npm run package:win` → `release/Hassan Electronics ERP-Setup-1.0.0.exe` (~115 MB, per-user NSIS, unsigned). |
 
 ## Don'ts
 
-- Don't add separate sidebar links for master-data entities — they go in the Master Data tile grid (see `feedback_master_data_ui.md` in memory).
-- Don't add separate sidebar links for transaction types — they go in the Transactions hub tile grid.
-- Don't make `SalesModule` or `PurchasesModule` depend on `SyncModule` — use `OutboxModule` instead.
+- Don't add separate sidebar entries for master-data entities — they go as tabs inside the Customer / Supplier / Item / Account / Stock / Employee hubs.
+- Don't add separate sidebar entries for transaction types — they go as tabs inside the relevant hub (Sales History + Returns under Sales; Purchases + Returns under Purchase; etc.).
+- Don't make `SalesModule` or `PurchasesModule` depend on `SyncModule` — use `OutboxModule` instead. Circular.
 - Don't switch the frontend back to BrowserRouter — HashRouter is required for the Electron `file://` build.
 - Don't put writes in `ReportsService` — it's read-only.
-- Don't bring back the manual "+ New Sale" form on the Sales page — sales are POS-driven now; that page is read-only history.
+- Don't bring back the manual "+ New Sale" form on the Sales page — sales are POS-driven; that page is read-only history.
+- Don't use `@Column({ type: 'timestamp' })` or `@Column({ type: 'datetime' })` — both crash one of the two supported dialects. Use `@Column({ type: Date })`.
+- Don't render the HE logo with a black chip / coloured backdrop anywhere. Transparent only.
+- Don't bump Electron past `^40` unless better-sqlite3 publishes a prebuilt for the new ABI, or the build host has MSVC Build Tools installed.
+- Don't introduce DB triggers or stored procedures. Use TypeORM `EntitySubscriber` for cross-cutting concerns (already done for audit logs).

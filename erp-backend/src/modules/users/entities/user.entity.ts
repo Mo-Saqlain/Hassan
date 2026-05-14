@@ -42,10 +42,10 @@ export class User {
   @Column({ name: 'session_token', nullable: true, unique: true })
   sessionToken?: string;
 
-  @Column({ name: 'session_expires_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'session_expires_at', type: Date, nullable: true })
   sessionExpiresAt?: Date;
 
-  @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'last_login_at', type: Date, nullable: true })
   lastLoginAt?: Date;
 
   @CreateDateColumn({ name: 'created_at' })
