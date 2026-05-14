@@ -360,40 +360,97 @@ function LoginBell() {
 
 /**
  * Signed-in user chip in the topbar — shows the username, role hint, and a
- * Logout button.
+ * Logout button. The Logout button shows a confirmation modal first so an
+ * accidental tap on a touch screen / sleeping POS terminal doesn't kick
+ * the cashier out mid-sale.
  */
 function UserChip() {
   const { user, logout } = useAuth();
+  const [confirming, setConfirming] = useState(false);
   if (!user) return null;
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '3px 10px',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 0,
-        fontSize: 12,
-      }}
-    >
-      <Icon name="user" size={14} />
-      <span>
-        <strong>{user.username}</strong>
-        {isSuperuser(user) && (
-          <span className="muted" style={{ marginLeft: 4 }}>· admin</span>
-        )}
-      </span>
-      <button
-        type="button"
-        className="btn btn-sm btn-ghost"
-        onClick={logout}
-        style={{ padding: '2px 8px' }}
-        title="Sign out"
+    <>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '3px 10px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 0,
+          fontSize: 12,
+        }}
       >
-        Logout
-      </button>
+        <Icon name="user" size={14} />
+        <span>
+          <strong>{user.username}</strong>
+          {isSuperuser(user) && (
+            <span className="muted" style={{ marginLeft: 4 }}>· admin</span>
+          )}
+        </span>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost"
+          onClick={() => setConfirming(true)}
+          style={{ padding: '2px 8px' }}
+          title="Sign out"
+        >
+          Logout
+        </button>
+      </div>
+      {confirming && (
+        <LogoutConfirm
+          username={user.username}
+          onCancel={() => setConfirming(false)}
+          onConfirm={async () => {
+            setConfirming(false);
+            await logout();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function LogoutConfirm({ username, onCancel, onConfirm }) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: 'min(380px, 92vw)' }}
+      >
+        <h3 style={{ marginTop: 0 }}>Sign out?</h3>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+          You're about to sign <strong>{username}</strong> out of Hassan
+          Electronics ERP. Any unsaved work on the current page will be lost.
+        </p>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 8,
+            marginTop: 16,
+          }}
+        >
+          <button
+            type="button"
+            className="btn"
+            onClick={onCancel}
+            autoFocus
+          >
+            Stay signed in
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={onConfirm}
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

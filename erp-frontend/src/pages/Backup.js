@@ -163,7 +163,7 @@ export default function Backup() {
           below. If the shop is closed at that hour, opening the app later in the
           day will surface a reminder banner.
         </div>
-        <div className="form-row" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
+        <div className="form-row" style={{ marginBottom: 0, alignItems: 'flex-start' }}>
           <div>
             <label>Daily backup hour (0–23)</label>
             <input
@@ -178,6 +178,10 @@ export default function Backup() {
             </div>
           </div>
           <div>
+            {/* Invisible label keeps the button on the same horizontal row
+                as the number input above (instead of being pushed down by
+                the hint line below the input). */}
+            <label aria-hidden style={{ visibility: 'hidden' }}>&nbsp;</label>
             <button
               className="btn btn-primary"
               disabled={busy === 'schedule'}
@@ -255,6 +259,7 @@ function RestoreSection({ onRestored }) {
   const [fileName, setFileName] = useState('');
   const [snapshot, setSnapshot] = useState(null);
   const [confirm, setConfirm] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
@@ -291,6 +296,10 @@ function RestoreSection({ onRestored }) {
       setError('Type RESTORE in the confirmation box to proceed.');
       return;
     }
+    if (!password) {
+      setError('Enter your account password to authorise the restore.');
+      return;
+    }
     setBusy(true);
     setError(null);
     setResult(null);
@@ -298,9 +307,11 @@ function RestoreSection({ onRestored }) {
       const r = await api.post('/backup/restore', {
         confirm: 'RESTORE',
         snapshot,
+        password,
       });
       setResult(r.data);
       setConfirm('');
+      setPassword('');
       setSnapshot(null);
       setFileName('');
       if (fileInput.current) fileInput.current.value = '';
@@ -320,11 +331,13 @@ function RestoreSection({ onRestored }) {
       <div className="alert alert-error" style={{ marginBottom: 12 }}>
         <strong>Destructive:</strong> restoring wipes every business table
         (sales, purchases, payments, items, customers, …) and replays the
-        chosen snapshot. The current Backups history itself is kept so you
-        can roll forward again if needed.
+        chosen snapshot. Before the wipe runs we automatically save a
+        <strong> Pre-restore safety snapshot</strong> of your current DB
+        as an AUTO backup, so you can roll back if needed. The Backups
+        history itself is kept across restores.
       </div>
 
-      <div className="form-row" style={{ alignItems: 'flex-end' }}>
+      <div className="form-row" style={{ alignItems: 'flex-start' }}>
         <div>
           <label>Backup file (.json)</label>
           <input
@@ -358,9 +371,21 @@ function RestoreSection({ onRestored }) {
           />
         </div>
         <div>
+          <label>Your account password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            placeholder="••••••••"
+          />
+        </div>
+        <div>
+          {/* Spacer label keeps the button on the same row as the inputs. */}
+          <label aria-hidden style={{ visibility: 'hidden' }}>&nbsp;</label>
           <button
             className="btn btn-danger"
-            disabled={busy || !snapshot || confirm !== 'RESTORE'}
+            disabled={busy || !snapshot || confirm !== 'RESTORE' || !password}
             onClick={run}
           >
             {busy ? 'Restoring…' : 'Restore now'}
@@ -374,6 +399,13 @@ function RestoreSection({ onRestored }) {
           ✓ Restored {result.totalRows.toLocaleString()} rows across{' '}
           {Object.keys(result.tableCounts).length} tables at{' '}
           {new Date(result.completedAt).toLocaleString()}.
+          {result.preRestoreBackup && (
+            <div style={{ marginTop: 4, fontSize: 12 }}>
+              Your previous state was saved as{' '}
+              <strong>{result.preRestoreBackup.fileName}</strong> — use it
+              from the History list below if you need to roll back.
+            </div>
+          )}
         </div>
       )}
     </div>

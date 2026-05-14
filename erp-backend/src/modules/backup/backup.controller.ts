@@ -7,11 +7,15 @@ import {
   ParseUUIDPipe,
   Post,
   Res,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { BackupService } from './backup.service';
 import { SetScheduleDto } from './dto/set-schedule.dto';
 import { RestoreDto } from './dto/restore.dto';
+import { CurrentUser } from '../users/auth.decorators';
+import { User } from '../users/entities/user.entity';
+import { verifyPassword } from '../users/password.util';
 
 @Controller('backup')
 export class BackupController {
@@ -75,10 +79,31 @@ export class BackupController {
 
   /**
    * Replay a backup JSON into the database. Destructive: wipes every
-   * tracked table first. The caller must pass `confirm: "RESTORE"`.
+   * tracked table first.
+   *
+   * Two safety gates:
+   *   1. `confirm` must literally equal "RESTORE".
+   *   2. The caller re-supplies their current account password — we
+   *      verify it against the signed-in user, so a left-open session
+   *      isn't enough to nuke the shop's data.
+   *
+   * Before applying the snapshot the service also auto-creates a
+   * pre-restore snapshot of the current DB ("AUTO" trigger) so the
+   * action is reversible.
    */
   @Post('restore')
-  restore(@Body() dto: RestoreDto) {
-    return this.service.restoreFromSnapshot(dto.snapshot, dto.confirm);
+  async restore(
+    @Body() dto: RestoreDto,
+    @CurrentUser() user: User | undefined,
+  ) {
+    if (!user) throw new UnauthorizedException();
+    if (!verifyPassword(dto.password, user.passwordHash)) {
+      throw new UnauthorizedException(
+        'Password did not match — restore aborted. Please re-enter your account password.',
+      );
+    }
+    return this.service.restoreFromSnapshot(dto.snapshot, dto.confirm, {
+      actorUsername: user.username,
+    });
   }
 }

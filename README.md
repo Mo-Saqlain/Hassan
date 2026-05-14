@@ -121,7 +121,7 @@ Snapshot every business table (sales, purchases, payments, customers, items, sto
 - **Why JSON?** Portable across DB engines (the same file restores into either SQLite or Postgres), human-readable so you can open it in any editor, and no external binary like `pg_dump`/`sqlite3` is required on the cashier PC. Downside is bigger files than a binary dump — irrelevant at shop scale.
 - **Auto daily backup** — `BackupScheduler` ticks hourly and creates a snapshot if (a) the configured hour matches the current hour AND (b) no backup has already been taken today. Default hour: **20 (8 PM)**, configurable through the UI without restarting.
 - **Manual snapshot** — sidebar → System → Backups → **"💾 Save backup now"** triggers a manual snapshot stored on the server. **"⬇ Download snapshot"** generates a snapshot in-memory and pushes it straight to the browser as a download — no file persisted server-side, useful when you want a copy on a USB stick without leaving traces on the till.
-- **Restore** — same Backups page has a 🔥 *Restore from backup* card. Pick any `.json` backup file, type `RESTORE` to confirm, and the backend wipes every business table and replays the snapshot inside a single transaction with FK enforcement temporarily disabled (`PRAGMA foreign_keys = OFF` on SQLite, `SET session_replication_role = 'replica'` on Postgres). The `backups` history itself is preserved across restores. Body limit is raised to **100 MB** in `main.ts` so multi-megabyte snapshots aren't rejected.
+- **Restore** — same Backups page has a 🔥 *Restore from backup* card. Pick any `.json` backup file, type `RESTORE` to confirm, **re-enter your account password** (verified against the signed-in user, so a left-open session isn't enough to nuke the shop's data), and the backend will (1) auto-create a **Pre-restore safety snapshot** of the current DB as an `AUTO` backup that's reversible, then (2) wipe every business table and replay the chosen snapshot inside a single transaction with FK enforcement temporarily disabled (`PRAGMA foreign_keys = OFF` on SQLite, `SET session_replication_role = 'replica'` on Postgres). The `backups` history itself is preserved across restores. Body limit is raised to **100 MB** in `main.ts` so multi-megabyte snapshots aren't rejected.
 - **Overdue prompt** — every page checks `/api/backup/status` on mount and polls every 5 minutes. If today's backup hasn't been taken and the scheduled hour has passed, a red banner appears at the top of the main pane with a one-click link to the Backups page. Dismissible per session.
 - **Backup history** — Backups page lists the last 200 backups with file name, source (AUTO/MANUAL), size, notes, and per-row Download / Delete actions.
 - **Storage location** — defaults to `erp-backend/backups/` in dev; Electron points `BACKUP_DIR` at `<userData>/backups` so backups travel with the desktop install. Path is shown in the Status card.
@@ -143,6 +143,7 @@ The app is now gated by a sign-in screen. Two roles only: **SUPERUSER** and **US
 - **Login screen** — a clean centred card with sign-in + a "Request access" button that opens a sign-up form (desired username, full name, optional phone/email/reason). Submitting **does not create a user** — it creates a `user_access_requests` row that the superuser must review.
 - **Superuser-only**: creating users, resetting other users' passwords, enabling/disabling accounts, approving/rejecting access requests, plus the **Audit log** and **Error log** tabs. Regular users can still take **backups** and use the rest of the ERP.
 - **Login bell** in the topbar (superuser only) — polls every 30s and shows a badge with the count of pending access requests + unseen logins. Opening the panel marks logins as seen.
+- **Logout confirmation** — clicking *Logout* in the topbar opens a small modal asking "Sign out?" before actually clearing the session, so an accidental touch on the POS terminal can't kick a cashier mid-sale.
 - **Users hub** — its own sidebar entry (between Account and Reports) with a four-tab strip: **Info** (admin: CRUD + enable/disable/delete), **Allow Access** (admin: approve/reject pending access requests), **Recent Login** (admin: last 200 sign-ins), **Change Password** (everyone changes their own; admin gets an extra card to reset any other user's password too). The first three tabs are filtered out for regular users by [HubFrame](erp-frontend/src/components/HubFrame.js); the sidebar entry's `defaultTo` lands non-admins on Change Password directly.
 - **Backups don't touch users** — `users`, `user_access_requests`, and `user_login_events` are excluded from both `dumpAll()` and `restoreFromSnapshot()` in [backup.service.ts](erp-backend/src/modules/backup/backup.service.ts). Restoring a tampered backup cannot inject a fake superuser, cannot replay leaked password hashes, and cannot wipe the existing user list — the boot-time seed re-creates `admin` only if the table is somehow empty.
 - **Last-superuser guard** — the service refuses to remove, demote, or deactivate the only remaining active SUPERUSER, so the app can never end up unmanageable.
@@ -187,6 +188,7 @@ Coverage:
 - **Responsive** — sidebar becomes a fixed off-canvas drawer ≤ 860px (`.app[data-nav="open"]` toggles); grids collapse, tables get horizontal scroll, POS stacks vertically, cart rows reflow.
 - **Status chips** — semantic-color filled rectangles, six variants (`chip-success`, `chip-warn`, `chip-danger`, `chip-info`, `chip-violet`, neutral). Used for payment states, low-stock badges, session status.
 - **Fonts** — Segoe UI Variable / Segoe UI system stack (no web fonts to download); Cascadia Code / Consolas for numbers, voucher refs, SKUs.
+- **OS accent colour (Electron only)** — on Windows / macOS the desktop wrapper reads the user's Personalisation accent colour via `systemPreferences.getAccentColor()` and injects it into the renderer as `--primary` / `--primary-hover` / `--primary-soft` / `--info` / `--border-glow` on every page load and on the `accent-color-changed` event. The whole UI (buttons, hub tabs, active sidebar item, focus rings, balance-sheet net-income row) re-themes live without a restart. In the browser build the default Windows blue (`#0078d4` light, `#4cc2ff` dark) is used.
 
 ---
 
@@ -620,7 +622,9 @@ GET    /backup/schedule            # → { hour }
 POST   /backup/schedule { hour }   # change the daily backup hour (0–23)
 GET    /backup/:id/download        # stream a previously-saved backup file
 DELETE /backup/:id                 # remove a backup file from disk and history
-POST   /backup/restore             # wipe + replay { confirm: "RESTORE", snapshot }
+POST   /backup/restore             # wipe + replay { confirm: "RESTORE", snapshot, password }
+                                   #   — password is re-verified against the signed-in user
+                                   #   — auto-creates a Pre-restore safety snapshot first
 ```
 
 ### Health

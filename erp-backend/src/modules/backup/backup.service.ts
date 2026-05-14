@@ -271,6 +271,7 @@ export class BackupService {
   async restoreFromSnapshot(
     snapshot: { version?: number; data: Record<string, any[]> },
     confirm: string,
+    opts: { actorUsername?: string } = {},
   ) {
     if (confirm !== 'RESTORE') {
       throw new BadRequestException(
@@ -280,6 +281,33 @@ export class BackupService {
     if (!snapshot || typeof snapshot !== 'object' || !snapshot.data) {
       throw new BadRequestException(
         'Invalid snapshot — expected { version, data }.',
+      );
+    }
+
+    // Safety net — before we touch the live tables, persist the
+    // *current* state to disk as an AUTO backup. If the replay later
+    // fails (or the user immediately regrets the action) they can
+    // restore this pre-restore snapshot to get back to where they were.
+    // Logged + best-effort: if the snapshot itself errors we still
+    // abort the restore (caller's data is intact at this point).
+    let preRestoreBackup: Backup | null = null;
+    try {
+      preRestoreBackup = await this.createBackup(
+        'AUTO',
+        opts.actorUsername
+          ? `Pre-restore safety snapshot (taken by ${opts.actorUsername})`
+          : 'Pre-restore safety snapshot',
+      );
+      this.logger.log(
+        `Pre-restore safety snapshot saved as ${preRestoreBackup.fileName}`,
+      );
+    } catch (e: any) {
+      this.logger.error(
+        `Could not create pre-restore safety snapshot: ${e.message}`,
+      );
+      throw new BadRequestException(
+        'Could not create a pre-restore safety snapshot — restore aborted to protect existing data. ' +
+          (e.message ?? ''),
       );
     }
 
@@ -388,6 +416,13 @@ export class BackupService {
         totalRows,
         tableCounts: counts,
         completedAt: new Date().toISOString(),
+        preRestoreBackup: preRestoreBackup
+          ? {
+              id: preRestoreBackup.id,
+              fileName: preRestoreBackup.fileName,
+              sizeBytes: preRestoreBackup.sizeBytes,
+            }
+          : null,
       };
     });
   }

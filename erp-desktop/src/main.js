@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -121,6 +121,73 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // Once the renderer is ready, push the OS accent colour into the page
+  // so the ERP picks up the user's Personalisation choice instead of the
+  // hard-coded Windows blue. Re-pushes on accent-color-changed so the
+  // UI stays in sync if the user changes their theme while the app is
+  // running.
+  mainWindow.webContents.on('did-finish-load', applyOsAccentColor);
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    try {
+      systemPreferences.on('accent-color-changed', applyOsAccentColor);
+    } catch {
+      /* not all electron versions / platforms emit this — best effort */
+    }
+  }
+}
+
+/**
+ * Read the OS accent colour (Windows / macOS) and inject it as the ERP's
+ * `--primary` CSS variable plus a few derived hover/pressed shades and a
+ * matching focus-ring rgba. Falls back silently on Linux / unsupported
+ * builds where `getAccentColor()` isn't available.
+ */
+function applyOsAccentColor() {
+  if (!mainWindow) return;
+  let accent;
+  try {
+    accent = systemPreferences.getAccentColor();
+  } catch {
+    return;
+  }
+  if (!accent || typeof accent !== 'string') return;
+  // Windows returns AARRGGBB; macOS returns RRGGBB. Strip alpha if present.
+  const hex = accent.length === 8 ? accent.slice(2) : accent;
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return;
+  const primary = `#${hex.toLowerCase()}`;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  // Hover = mix 12% black, pressed = mix 25% black, soft = 18% alpha tint.
+  const mix = (n, pct) => Math.max(0, Math.min(255, Math.round(n * (1 - pct))));
+  const hover = `#${[mix(r, 0.12), mix(g, 0.12), mix(b, 0.12)]
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')}`;
+  const pressed = `#${[mix(r, 0.25), mix(g, 0.25), mix(b, 0.25)]
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')}`;
+  const soft = `rgba(${r}, ${g}, ${b}, 0.18)`;
+  // Pick a readable foreground for the accent fill (Windows uses
+  // luminance for the same purpose so e.g. a pale yellow accent gets
+  // dark text instead of unreadable white).
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const fg = luminance > 0.6 ? '#1f1f1f' : '#ffffff';
+
+  const js = `
+    (function () {
+      const root = document.documentElement;
+      root.style.setProperty('--primary', '${primary}');
+      root.style.setProperty('--primary-hover', '${hover}');
+      root.style.setProperty('--primary-soft', '${soft}');
+      root.style.setProperty('--primary-fg', '${fg}');
+      root.style.setProperty('--info', '${primary}');
+      root.style.setProperty('--border-glow', '${primary}');
+      root.style.setProperty('--accent-pressed', '${pressed}');
+      root.setAttribute('data-os-accent', '${primary}');
+    })();
+  `;
+  mainWindow.webContents.executeJavaScript(js).catch(() => {});
 }
 
 app.whenReady().then(async () => {

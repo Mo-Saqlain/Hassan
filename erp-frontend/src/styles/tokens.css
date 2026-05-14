@@ -219,17 +219,25 @@ h3 { font-size: 15px; }
 .btn:active { background: var(--chip-bg-hover); }
 .btn:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
 
+/* `--primary` defaults to Windows blue but is overridden by the Electron
+   shell to the user's chosen Personalisation accent colour (see
+   erp-desktop/src/main.js applyOsAccentColor). All accent uses below
+   resolve through CSS variables so a single override re-themes the UI. */
 .btn-primary {
-  background: var(--info);
-  color: #ffffff;
-  border-color: var(--info);
+  background: var(--primary);
+  color: var(--primary-fg, #ffffff);
+  border-color: var(--primary);
 }
 .btn-primary::after { content: none; }
-.btn-primary:hover { background: #106ebe; border-color: #106ebe; color: #ffffff; }
-.btn-primary:active { background: #005a9e; border-color: #005a9e; }
-[data-theme="dark"] .btn-primary { background: #4cc2ff; color: #1f1f1f; border-color: #4cc2ff; }
-[data-theme="dark"] .btn-primary:hover { background: #62cdff; border-color: #62cdff; }
-[data-theme="dark"] .btn-primary:active { background: #2188cc; border-color: #2188cc; color: #ffffff; }
+.btn-primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: var(--primary-fg, #ffffff);
+}
+.btn-primary:active {
+  background: var(--accent-pressed, var(--primary-hover));
+  border-color: var(--accent-pressed, var(--primary-hover));
+}
 
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-soft); }
 .btn-ghost:hover { background: var(--surface-hover); color: var(--text); border-color: transparent; }
