@@ -23,7 +23,6 @@ export default function Brand({ onToggleRail, rail }) {
       </button>
       <div className="brand-text">
         <div className="brand-name">Hassan Electronics</div>
-        <div className="brand-sub">Home Appliances · ERP</div>
       </div>
     </div>
   );

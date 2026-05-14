@@ -16,6 +16,10 @@ export type PaymentMethod = 'CASH' | 'CARD' | 'BANK' | 'CREDIT';
 
 @Entity('sales')
 @Index(['invoiceNo'], { unique: true })
+@Index(['customerId'])
+@Index(['customerId', 'createdAt'])
+@Index(['storeId'])
+@Index(['createdAt'])
 export class Sale extends BaseEntity {
   @Column({ name: 'invoice_no' })
   invoiceNo: string;

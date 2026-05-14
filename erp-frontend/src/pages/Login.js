@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import Brand from '../components/Brand';
+import Logo from '../components/Logo';
+import ThemeToggle from '../components/ThemeToggle';
 
 export default function Login() {
   const { login } = useAuth();
@@ -31,9 +32,12 @@ export default function Login() {
 
   return (
     <div className="login-shell">
-      <div className="login-card">
+      <div className="login-card" style={{ position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 10, right: 10 }}>
+          <ThemeToggle />
+        </div>
         <div className="login-brand">
-          <Brand rail={false} onToggleRail={() => {}} />
+          <Logo size={72} />
         </div>
 
         {mode === 'login' ? (

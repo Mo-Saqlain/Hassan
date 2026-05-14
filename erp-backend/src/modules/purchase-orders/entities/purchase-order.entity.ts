@@ -15,6 +15,8 @@ export type PurchaseOrderStatus = 'DRAFT' | 'SENT' | 'RECEIVED' | 'CANCELLED';
 @Entity('purchase_orders')
 @Index(['poNo'], { unique: true })
 @Index(['status'])
+@Index(['supplierId'])
+@Index(['orderDate'])
 export class PurchaseOrder extends BaseEntity {
   @Column({ name: 'po_no' })
   poNo: string;

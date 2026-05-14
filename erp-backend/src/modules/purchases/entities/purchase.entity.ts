@@ -13,6 +13,10 @@ import { PurchaseItem } from './purchase-item.entity';
 
 @Entity('purchases')
 @Index(['billNo'], { unique: true })
+@Index(['supplierId'])
+@Index(['supplierId', 'createdAt'])
+@Index(['storeId'])
+@Index(['createdAt'])
 export class Purchase extends BaseEntity {
   @Column({ name: 'bill_no' })
   billNo: string;

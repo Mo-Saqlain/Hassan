@@ -20,6 +20,9 @@ export type CashCategory =
 
 @Entity('cash_entries')
 @Index(['entryDate'])
+@Index(['accountId'])
+@Index(['counterpartyAccountId'])
+@Index(['direction'])
 export class CashEntry extends BaseEntity {
   @Column({ name: 'entry_date', type: 'date' })
   entryDate: string;

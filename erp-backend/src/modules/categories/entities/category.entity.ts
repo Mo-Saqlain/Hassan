@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -8,6 +9,7 @@ import {
 import { BaseEntity } from '../../../common/entities/base.entity';
 
 @Entity('categories')
+@Index(['parentId'])
 export class Category extends BaseEntity {
   @Column()
   name: string;

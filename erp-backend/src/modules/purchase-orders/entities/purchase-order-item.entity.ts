@@ -1,9 +1,11 @@
-import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 import { Item } from '../../items/entities/item.entity';
 import { PurchaseOrder } from './purchase-order.entity';
 
 @Entity('purchase_order_items')
+@Index(['purchaseOrderId'])
+@Index(['itemId'])
 export class PurchaseOrderItem extends BaseEntity {
   @Column({ name: 'purchase_order_id' })
   purchaseOrderId: string;

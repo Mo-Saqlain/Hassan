@@ -179,16 +179,20 @@ Coverage:
 | Financial Statements (all 4 tabs) | Flattened {Item, Amount} rows of every line in the statement |
 
 ### 12. UX / UI
-- **Branded** — "Hassan Electronics · Home Appliances" with custom logo mark
+- **Branded** — "Hassan Electronics · Home Appliances". The custom **HE** monogram is the application icon (browser favicon, Windows Start Menu / Taskbar / Explorer thumbnail). Source PNG lives at [erp-frontend/logo.jpeg](erp-frontend/logo.jpeg); the helper [scripts/make-icons.ps1](scripts/make-icons.ps1) chroma-keys out the black backdrop, resizes to 192/512/1024 PNGs, and packs a multi-resolution `.ico` into both [erp-frontend/public/favicon.ico](erp-frontend/public/favicon.ico) and [erp-desktop/build-resources/icon.ico](erp-desktop/build-resources/icon.ico). The transparent monogram is rendered on the **Sign in** and **Request access** screens above the heading — with no backdrop / chip, since the white half of the mark is intentional. A dark/light theme toggle sits in the top-right of the login card so the user can flip themes before signing in.
 - **Light & Dark theme** — toggle in the sidebar footer; preference persisted in `localStorage`, initial theme honours `prefers-color-scheme`. No flash on load (theme bootstrap script in `index.html` runs before React).
 - **Flat Windows 10-inspired design** — `tokens.css` + `app.css` ([src/styles/](erp-frontend/src/styles/)) hold every variable. Solid surfaces, sharp 90° corners everywhere (no border-radius), 1px borders, no glass / blur / aurora / glow / animation. Lightweight `color` / `background` / `border` transitions only. `content-visibility: auto` on long tables. Built for low-end hardware while keeping the modern ERP feel.
-- **Coloured sidebar icons** — every nav item gets a tinted square chip in its own `--nav-c` token (Dashboard blue, POS red, Catalogue violet, Transactions teal, Cash green, Stock orange, Ledgers teal, Reports violet, System grey). Active item paints a 3px accent strip on the left edge of the row.
+- **Coloured sidebar icons** — every nav item gets a tinted square chip in its own `--nav-c` token. Each of the 14 sidebar entries owns a distinct Fluent-palette hue so they're individually recognisable at a glance: Dashboard blue, POS red, Cash Book forest-green, Customer teal, Sales magenta, Supplier burnt-orange, Purchase lavender, Item sky-blue, Stock moss-green, Employee indigo, Account amber, Users cyan, Reports deep-purple, System grey. Active item paints a 3px accent strip on the left edge of the row.
 - **Sticky topbar** — 44px tall, solid surface. Global search input on the left, login bell + user chip + theme toggle on the right. Hamburger appears on the left ≤ 860px to open the off-canvas sidebar.
 - **Collapsible sidebar rail** — the brand chip at the top of the sidebar doubles as the rail toggle: click it to collapse the desktop sidebar to a 56px icon-only rail; click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). Disabled on mobile (≤860px), where the off-canvas drawer pattern is used instead.
 - **Responsive** — sidebar becomes a fixed off-canvas drawer ≤ 860px (`.app[data-nav="open"]` toggles); grids collapse, tables get horizontal scroll, POS stacks vertically, cart rows reflow.
 - **Status chips** — semantic-color filled rectangles, six variants (`chip-success`, `chip-warn`, `chip-danger`, `chip-info`, `chip-violet`, neutral). Used for payment states, low-stock badges, session status.
 - **Fonts** — Segoe UI Variable / Segoe UI system stack (no web fonts to download); Cascadia Code / Consolas for numbers, voucher refs, SKUs.
-- **OS accent colour (Electron only)** — on Windows / macOS the desktop wrapper reads the user's Personalisation accent colour via `systemPreferences.getAccentColor()` and injects it into the renderer as `--primary` / `--primary-hover` / `--primary-soft` / `--info` / `--border-glow` on every page load and on the `accent-color-changed` event. The whole UI (buttons, hub tabs, active sidebar item, focus rings, balance-sheet net-income row) re-themes live without a restart. In the browser build the default Windows blue (`#0078d4` light, `#4cc2ff` dark) is used.
+- **Accent colour — three-layer resolution** (highest priority first):
+  1. **User pick** — `System → Accent` (last tab on the System hub strip) presents two explicit modes as a radio-style pair of cards: **Follow Windows accent** (auto-syncs with Windows/macOS Personalisation) and **Use custom accent** (9 Win10-style preset swatches, an HTML5 colour input, and a hex text field). The custom-mode choice persists in `localStorage` under `hassan-accent-color` and is applied **before the first paint** via [erp-frontend/src/theme/accent.js](erp-frontend/src/theme/accent.js) so there's no flash of the old colour on cold load. The "Follow Windows accent" card is disabled outside the Electron wrapper.
+  2. **OS accent (Electron only)** — on Windows / macOS the desktop wrapper reads `systemPreferences.getAccentColor()` and pushes it into the renderer on every page load and on `accent-color-changed`. The injected JS bails if the localStorage user override is present, so a user pick always wins.
+  3. **Default Windows blue** — `#0078d4` light, `#4cc2ff` dark (defined in [App.css](erp-frontend/src/App.css)).
+  Every accent surface (primary buttons, hub-tab underline, active sidebar strip, focus rings, balance-sheet net-income row, etc.) resolves through `var(--primary)` / `var(--info)`, plus `--primary-hover` (12% darker), `--primary-soft` (18% alpha tint for chip fills), `--accent-pressed` (25% darker), and `--primary-fg` (auto-picked white or `#1f1f1f` for AAA contrast). One root-variable change re-themes the whole UI.
 
 ---
 
@@ -345,7 +349,7 @@ The sidebar is a flat list — one entry per domain — and the sub-pages of eac
 | Account | `/accounts` | Info · Transfers · Ledger |
 | Users | `/users-change-password` | **Info*** · **Allow Access*** · **Recent Login*** · Change Password (*=superuser-only) |
 | Reports | `/financials` | — |
-| System | `/backup` | Backups · **Audit*** · **Errors*** (*=superuser-only) |
+| System | `/backup` | Backups · **Audit*** · **Errors*** · Accent (*=superuser-only) |
 
 Routing-wise the hubs are layout routes wired in [erp-frontend/src/App.js](erp-frontend/src/App.js) with `<HubFrame title subtitle tabs />` around the matched child route ([erp-frontend/src/components/HubFrame.js](erp-frontend/src/components/HubFrame.js)). The hub definitions (label, default route, tabs) live in a single source of truth at [erp-frontend/src/nav/hubs.js](erp-frontend/src/nav/hubs.js).
 
@@ -402,12 +406,64 @@ cd erp-backend  && npm run build && node dist/main.js   # or npm run start:prod
 cd erp-frontend && npm run build   # static build/ directory
 ```
 
-### Desktop (Electron)
+### Desktop (Electron — dev / unpackaged)
 ```bash
 # After building both above:
 cd erp-desktop && npm start
 ```
 Electron spawns the compiled NestJS backend as a child process pointing at `<userData>/erp.sqlite`, then opens the React build.
+
+### Desktop (Electron — packaged installer)
+
+The desktop wrapper is fully self-contained: it bundles the compiled backend, the React build, and the backend's `node_modules` (including the native `better-sqlite3` binary rebuilt against Electron's Node ABI). The shop PC needs **no** prior Node.js install.
+
+```bash
+cd erp-desktop
+npm install             # also pulls electron, electron-builder, @electron/rebuild
+npm run package:win     # Windows NSIS installer  →  erp-desktop/release/
+npm run package:mac     # macOS .dmg (universal arch)
+npm run package:linux   # Linux AppImage (x64)
+npm run package         # build for the current platform
+```
+
+`npm run prepackage` runs ahead of every `package:*` script. It:
+1. Compiles the backend (`erp-backend`) and the frontend (`erp-frontend`).
+2. **Materialises a production-only `erp-desktop/backend-staging/`** by copying `package.json` + `package-lock.json` from `erp-backend` and running `npm ci --omit=dev --ignore-scripts` there. That trims node_modules from ~140 MB / 470 packages to ~30 MB / 260 packages — Jest, Webpack, ESLint, TypeScript and the rest of the dev tree never enter the installer. (`extraResources` reads from `backend-staging/`, not the live dev tree, so the dev workflow stays untouched.) The staging dir is gitignored.
+3. Runs `@electron/rebuild` against `backend-staging/node_modules` so `better-sqlite3` is built for Electron's bundled Node, not your system Node — without this the packaged app fails at first launch with `NODE_MODULE_VERSION` errors.
+
+> **Electron version pin.** `erp-desktop/package.json` pins `electron` to `^40.0.0`. better-sqlite3 12.x publishes Electron prebuilts only through Electron 40 (ABI `electron-v145`); newer Electron majors (41+) force a source compile via node-gyp, which fails on machines without MSVC Build Tools. If you bump Electron, either (a) wait for a better-sqlite3 release with a matching prebuilt, or (b) install "Build Tools for Visual Studio 2022" with the **Desktop development with C++** workload so node-gyp can compile from source.
+
+The installer drops:
+- The Electron shell (asar).
+- `resources/backend/{dist,node_modules,package.json}` — the NestJS API the shell launches at startup.
+- `resources/frontend/build/` — the React build the shell loads via `file://`.
+
+On Windows the NSIS installer is **per-user** (no admin rights required), creates a Desktop + Start-menu shortcut, and lets the user pick the install directory.
+
+#### Offline-first + Supabase background sync
+
+The packaged app is fully offline-first: when the cashier loses internet, sales and purchases keep going into the local SQLite, queued in the `outbox` table. The `SyncModule` cron tries to push the outbox to `CLOUD_SYNC_URL` every 30 seconds. The cloud receiver is **another instance of this same NestJS backend** deployed against Supabase Postgres — it applies events idempotently (duplicate event IDs return `DUPLICATE`, never re-applied). So Supabase is always eventually-consistent with what the shop did, with no special online-mode in the cashier UI.
+
+To wire the desktop install to your Supabase-backed cloud receiver, drop a `config.json` into the user-data directory after install:
+
+- **Windows:** `%APPDATA%/erp-desktop/config.json`
+- **macOS:** `~/Library/Application Support/erp-desktop/config.json`
+- **Linux:** `~/.config/erp-desktop/config.json`
+
+```json
+{
+  "cloudSyncUrl": "https://your-cloud-host.example.com/api/sync/push",
+  "databaseUrl": ""
+}
+```
+
+(See [erp-desktop/build-resources/config.example.json](erp-desktop/build-resources/config.example.json).)
+
+Both keys are optional:
+- `cloudSyncUrl` blank → the outbox queues forever, no sync attempted. Pure-local install.
+- `databaseUrl` set to a Supabase Session-Pooler URL → the local backend writes **directly** to Supabase instead of SQLite (online-only deployment; not the typical retail use case).
+
+The Electron main process reads `config.json` on every launch and injects the values as `CLOUD_SYNC_URL` / `DATABASE_URL` env vars into the spawned backend. No re-install needed when the cloud URL changes.
 
 ---
 
@@ -668,6 +724,7 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 | `/users-allow-access` | Users hub → **Allow Access** (superuser only — pending access requests) |
 | `/users-recent-login` | Users hub → **Recent Login** (superuser only — sign-in events) |
 | `/users-change-password` | Users hub → **Change Password** (everyone changes own; admin can also reset others) |
+| `/settings` | System hub → **Settings** — accent colour picker (presets + custom + Use OS accent + Reset) |
 | `/login` | Sign-in screen (also hosts the "Request access" sign-up form) |
 | `/print/sale/:id`, `/print/purchase/:id` | Print-friendly invoice/bill |
 
@@ -731,5 +788,14 @@ Untested (intentional): thin CRUD services for `accounts`, `brands`, `customers`
 - **Cash register sessions** — open one per shop-day. Opening flow optionally books a FundTransfer atomically (Capital → Cash to cover shortfall). New cash-book entries are blocked client-side once a session is CLOSED.
 - **Profit accounting** — `netIncome` is the trading result; `adjustedNetIncome = netIncome + incentive awards in period`. The Statement of Changes in Equity reconciles against `adjustedNetIncome`.
 - **No migrations yet** — `synchronize: true`. Replace with TypeORM migrations before treating Supabase as production
+- **Indexes** — every hot-path query column carries an entity-level `@Index` decorator. TypeORM creates the matching index on both SQLite and Supabase Postgres at boot (because `synchronize: true`), so the local desktop install and the cloud receiver get the same coverage with no manual SQL. Indexed columns by table:
+  - `sales`, `purchases`, `sale_returns`, `purchase_returns` — `(customer_id|supplier_id, created_at)` composite for ledger range scans, plus single-column indexes on each FK and `created_at`
+  - `payments` — `(direction, customer_id)` and `(direction, supplier_id)` composites for `allCustomerBalances` / `allSupplierBalances`, plus `account_id`
+  - `stock_movements` — `(item_id, store_id)` composite for on-hand queries; `(reference_type, reference_id)` to trace back to source vouchers
+  - `employee_transactions` — `(employee_id, transaction_date)` and `(employee_id, type)` for salary-accrual and ledger queries
+  - `sync_queue` — `(status, created_at)` composite for the 30s outbox worker poll
+  - `pos_cart_items` — `(session_id, item_id)` for the "stack existing line" lookup on every scan
+  - `audit_logs` — `(entity_type, entity_id)` to retrieve a row's full audit trail
+  - Items, line tables, fund transfers, cash entries, damaged goods, incentive targets, POS sessions, user login events, user access requests — single-column indexes on every FK and the date/status columns the services filter on
 
 See [CLAUDE.md](./CLAUDE.md) for the AI-assistant guide with deeper conventions and "don'ts".

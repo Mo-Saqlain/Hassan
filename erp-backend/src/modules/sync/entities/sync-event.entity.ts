@@ -4,6 +4,8 @@ export type SyncEventStatus = 'PROCESSED' | 'FAILED' | 'DUPLICATE';
 
 @Entity('sync_events')
 @Index(['type'])
+@Index(['receivedAt'])
+@Index(['status'])
 export class SyncEvent {
   // Client-supplied UUID — also serves as idempotency key.
   @PrimaryColumn('uuid')

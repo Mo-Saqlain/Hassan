@@ -867,10 +867,10 @@ tr:last-child td { border-bottom: none; }
 }
 
 .login-brand {
-  margin: -8px 0 18px;
+  display: flex;
+  justify-content: center;
+  margin: -4px 0 14px;
 }
-.login-brand .brand-toggle { display: none; }
-.login-brand .brand-text .brand-name { font-size: 18px; }
 
 .login-card h1 {
   margin: 0 0 8px;

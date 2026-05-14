@@ -25,6 +25,9 @@ export type DamageStatus =
 @Entity('damaged_goods')
 @Index(['status'])
 @Index(['voucherNo'], { unique: true })
+@Index(['itemId'])
+@Index(['storeId'])
+@Index(['reportedOn'])
 export class DamagedGood extends BaseEntity {
   @Column({ name: 'voucher_no' })
   voucherNo: string;

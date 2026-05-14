@@ -22,7 +22,7 @@ export const HUBS = {
     title: 'Customers',
     subtitle: 'Customer info, receipts received, and per-customer ledger.',
     icon: 'user',
-    colorVar: '--nav-ledger',
+    colorVar: '--nav-customer',
     defaultTo: '/customers',
     paths: ['/customers', '/receipts', '/customer-ledger'],
     tabs: [
@@ -36,7 +36,7 @@ export const HUBS = {
     title: 'Sales',
     subtitle: 'Posted invoices and sale returns.',
     icon: 'receipt',
-    colorVar: '--nav-pos',
+    colorVar: '--nav-sales',
     defaultTo: '/sales',
     paths: ['/sales', '/sale-returns'],
     tabs: [
@@ -49,7 +49,7 @@ export const HUBS = {
     title: 'Suppliers',
     subtitle: 'Supplier info, brands, money out, incentives, and ledger.',
     icon: 'package',
-    colorVar: '--nav-stock',
+    colorVar: '--nav-supplier',
     defaultTo: '/suppliers',
     paths: ['/suppliers', '/brands', '/payments', '/incentives', '/supplier-ledger'],
     tabs: [
@@ -65,7 +65,7 @@ export const HUBS = {
     title: 'Purchases',
     subtitle: 'Orders raised, bills posted, and purchase returns.',
     icon: 'package',
-    colorVar: '--nav-master',
+    colorVar: '--nav-purchase',
     defaultTo: '/purchases',
     paths: ['/purchase-orders', '/purchases', '/purchase-returns'],
     tabs: [
@@ -79,7 +79,7 @@ export const HUBS = {
     title: 'Items',
     subtitle: 'Item catalogue and category tree.',
     icon: 'package',
-    colorVar: '--nav-tx',
+    colorVar: '--nav-item',
     defaultTo: '/items',
     paths: ['/items', '/categories'],
     tabs: [
@@ -108,7 +108,7 @@ export const HUBS = {
     title: 'Employees',
     subtitle: 'Staff roster, attendance, payments, incentive rules, and ledger.',
     icon: 'users',
-    colorVar: '--nav-pos',
+    colorVar: '--nav-employee',
     defaultTo: '/employees',
     paths: [
       '/employees',
@@ -130,7 +130,7 @@ export const HUBS = {
     title: 'Accounts',
     subtitle: 'Cash, bank, wallet, capital, and credit accounts plus transfers.',
     icon: 'bank',
-    colorVar: '--nav-cash',
+    colorVar: '--nav-account',
     defaultTo: '/accounts',
     paths: ['/accounts', '/fund-transfers', '/account-ledger'],
     tabs: [
@@ -145,7 +145,7 @@ export const HUBS = {
     subtitle:
       'User accounts, access requests, sign-in history, and passwords.',
     icon: 'users',
-    colorVar: '--nav-system',
+    colorVar: '--nav-users',
     defaultTo: '/users-change-password',
     paths: [
       '/users',
@@ -176,17 +176,18 @@ export const HUBS = {
   system: {
     label: 'System',
     title: 'System',
-    subtitle: 'Backups, audit trail, and runtime error / exception log.',
+    subtitle: 'Backups, audit trail, accent colour, and runtime error log.',
     icon: 'backup',
     colorVar: '--nav-system',
     defaultTo: '/backup',
-    paths: ['/backup', '/audit-log', '/error-log'],
+    paths: ['/backup', '/audit-log', '/error-log', '/accent'],
     tabs: [
       { to: '/backup', label: 'Backups', icon: 'backup' },
       // `superuserOnly` tabs are stripped from the strip in HubFrame for
       // regular users so they don't see (or 403) those pages.
       { to: '/audit-log', label: 'Audit', icon: 'ledger', superuserOnly: true },
       { to: '/error-log', label: 'Errors', icon: 'packageX', superuserOnly: true },
+      { to: '/accent', label: 'Accent', icon: 'sparkles' },
     ],
   },
 };
@@ -197,7 +198,7 @@ const { system: SYSTEM_HUB, ...HUBS_WITHOUT_SYSTEM } = HUBS;
 export const SIDEBAR = [
   { to: '/', label: 'Dashboard', end: true, icon: 'dashboard', colorVar: '--nav-dashboard' },
   { to: '/pos', label: 'POS Terminal', icon: 'pos', colorVar: '--nav-pos' },
-  { to: '/cash-register', label: 'Cash Book', icon: 'cash', colorVar: '--nav-cash' },
+  { to: '/cash-register', label: 'Cash Book', icon: 'cash', colorVar: '--nav-cashbook' },
   // Operational hubs (customer / sales / supplier / purchase / item / stock /
   // employee / account)
   ...Object.values(HUBS_WITHOUT_SYSTEM).map((h) => ({

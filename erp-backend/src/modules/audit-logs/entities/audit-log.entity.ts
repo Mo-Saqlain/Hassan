@@ -17,6 +17,7 @@ export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE';
 @Entity('audit_logs')
 @Index(['entityType'])
 @Index(['createdAt'])
+@Index(['entityType', 'entityId'])
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;

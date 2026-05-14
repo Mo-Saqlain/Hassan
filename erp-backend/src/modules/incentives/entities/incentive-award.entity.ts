@@ -1,4 +1,4 @@
-import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 import { IncentiveTarget } from './incentive-target.entity';
 
@@ -8,6 +8,8 @@ import { IncentiveTarget } from './incentive-target.entity';
  * awards in a period to gross profit to produce "Adjusted Net Profit".
  */
 @Entity('incentive_awards')
+@Index(['targetId'])
+@Index(['awardedOn'])
 export class IncentiveAward extends BaseEntity {
   @Column({ name: 'target_id', nullable: true })
   targetId?: string;

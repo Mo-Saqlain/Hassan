@@ -3,6 +3,13 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
+import { applyAccent, getStoredAccent } from './theme/accent';
+
+// Honour the user's saved accent colour before the first paint — keeps
+// buttons / tabs / focus rings the right shade on cold load instead of
+// flashing the default Windows blue first.
+const storedAccent = getStoredAccent();
+if (storedAccent) applyAccent(storedAccent);
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

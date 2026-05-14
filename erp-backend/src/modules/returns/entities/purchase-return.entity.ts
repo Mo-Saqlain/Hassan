@@ -14,6 +14,9 @@ import { PurchaseReturnItem } from './purchase-return-item.entity';
 
 @Entity('purchase_returns')
 @Index(['returnNo'], { unique: true })
+@Index(['supplierId'])
+@Index(['purchaseId'])
+@Index(['createdAt'])
 export class PurchaseReturn extends BaseEntity {
   @Column({ name: 'return_no' })
   returnNo: string;

@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -14,6 +15,8 @@ export type AccessRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
  * password) or rejects it. No row is ever auto-promoted to a real user.
  */
 @Entity('user_access_requests')
+@Index(['status'])
+@Index(['createdAt'])
 export class UserAccessRequest {
   @PrimaryGeneratedColumn('uuid')
   id: string;

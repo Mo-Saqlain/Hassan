@@ -1,15 +1,100 @@
 {
   "name": "erp-desktop",
   "version": "1.0.0",
-  "description": "ERP Phase 1 desktop wrapper (Electron) - bundles the local NestJS backend and React frontend.",
+  "description": "Hassan Electronics ERP — Electron desktop wrapper. Bundles the local NestJS backend (offline-first SQLite) and React frontend; pushes outbox events to a deployed cloud backend / Supabase when online.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "set ERP_DESKTOP_DEV=1&& electron ."
+    "dev": "set ERP_DESKTOP_DEV=1&& electron .",
+    "prepackage": "node scripts/prepare-resources.js",
+    "package:win": "npm run prepackage && electron-builder --win --x64",
+    "package:mac": "npm run prepackage && electron-builder --mac --x64 --arm64",
+    "package:linux": "npm run prepackage && electron-builder --linux --x64",
+    "package": "npm run prepackage && electron-builder",
+    "postinstall": "node scripts/postinstall.js"
   },
   "private": true,
   "type": "commonjs",
   "devDependencies": {
-    "electron": "^42.0.1"
+    "@electron/rebuild": "^3.7.0",
+    "electron": "^40.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.hassanelectronics.erp",
+    "productName": "Hassan Electronics ERP",
+    "copyright": "Copyright © 2026 Hassan Electronics",
+    "directories": {
+      "buildResources": "build-resources",
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend-staging/dist",
+        "to": "backend/dist",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "backend-staging/node_modules",
+        "to": "backend/node_modules",
+        "filter": ["**/*", "!**/.bin/**", "!**/.cache/**"]
+      },
+      {
+        "from": "backend-staging/package.json",
+        "to": "backend/package.json"
+      },
+      {
+        "from": "../erp-frontend/build",
+        "to": "frontend/build",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "icon": "build-resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Hassan Electronics ERP"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        }
+      ],
+      "category": "public.app-category.business",
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Office",
+      "artifactName": "${productName}-${version}.${ext}"
+    }
   }
 }

@@ -34,6 +34,9 @@ export type EmployeeTransactionType =
 @Entity('employee_transactions')
 @Index(['employeeId'])
 @Index(['voucherNo'], { unique: true })
+@Index(['employeeId', 'transactionDate'])
+@Index(['employeeId', 'type'])
+@Index(['transactionDate'])
 export class EmployeeTransaction extends BaseEntity {
   @Column({ name: 'voucher_no' })
   voucherNo: string;

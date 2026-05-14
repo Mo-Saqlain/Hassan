@@ -13,6 +13,9 @@ export type PosSessionStatus = 'ACTIVE' | 'CLOSED';
 
 @Entity('pos_sessions')
 @Index(['status'])
+@Index(['userId'])
+@Index(['storeId'])
+@Index(['startedAt'])
 export class PosSession {
   @PrimaryGeneratedColumn('uuid')
   id: string;

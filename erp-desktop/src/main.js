@@ -12,15 +12,41 @@ let backendProcess = null;
 let mainWindow = null;
 
 function backendEntry() {
+  // When packaged (`app.isPackaged`) the compiled backend is unpacked into
+  // `<resources>/backend/dist`. In dev we still point at the sibling
+  // workspace folder so `npm run dev` keeps working without a rebuild.
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'backend', 'dist', 'main.js');
+  }
   return path.resolve(__dirname, '..', '..', 'erp-backend', 'dist', 'main.js');
 }
 
 function frontendBuild() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'frontend', 'build', 'index.html');
+  }
   return path.resolve(__dirname, '..', '..', 'erp-frontend', 'build', 'index.html');
 }
 
 function frontendDevUrl() {
   return process.env.ERP_FRONTEND_DEV_URL || 'http://localhost:3000';
+}
+
+/**
+ * Load user-editable runtime config from `<userData>/config.json`. The
+ * shop owner can set `cloudSyncUrl`, `databaseUrl`, etc. without having
+ * to re-install the app. Returns `{}` if the file is missing or invalid.
+ */
+function readUserConfig() {
+  try {
+    const file = path.join(app.getPath('userData'), 'config.json');
+    if (!fs.existsSync(file)) return {};
+    const raw = fs.readFileSync(file, 'utf8');
+    return JSON.parse(raw) || {};
+  } catch (e) {
+    console.warn('[erp-desktop] could not read user config:', e.message);
+    return {};
+  }
 }
 
 function startBackend() {
@@ -35,13 +61,38 @@ function startBackend() {
   }
 
   const sqlitePath = path.join(app.getPath('userData'), 'erp.sqlite');
+  const userCfg = readUserConfig();
+
+  // Cloud-sync URL precedence:
+  //   1. process.env.CLOUD_SYNC_URL  — useful for ad-hoc testing
+  //   2. <userData>/config.json `cloudSyncUrl` — what the installer ships;
+  //      the shop owner can edit this without re-installing
+  //   3. unset — the worker stays idle and outbox events queue up locally
+  const cloudSyncUrl =
+    process.env.CLOUD_SYNC_URL || userCfg.cloudSyncUrl || '';
+  // Same idea for DATABASE_URL — set this to a Supabase Session-Pooler
+  // URL and the backend will skip SQLite and run against Supabase directly.
+  const databaseUrl = process.env.DATABASE_URL || userCfg.databaseUrl || '';
+
+  const env = {
+    ...process.env,
+    PORT: String(BACKEND_PORT),
+    SQLITE_PATH: sqlitePath,
+    BACKUP_DIR: path.join(app.getPath('userData'), 'backups'),
+    // Make Electron's executable behave as plain Node when launched as a
+    // child process — required to run the NestJS backend script under the
+    // packaged Electron runtime.
+    ELECTRON_RUN_AS_NODE: '1',
+  };
+  if (cloudSyncUrl) env.CLOUD_SYNC_URL = cloudSyncUrl;
+  if (databaseUrl) {
+    env.DATABASE_URL = databaseUrl;
+    env.DB_SSL = env.DB_SSL || 'true';
+    env.DB_SYNC = env.DB_SYNC || 'true';
+  }
 
   backendProcess = spawn(process.execPath, [entry], {
-    env: {
-      ...process.env,
-      PORT: String(BACKEND_PORT),
-      SQLITE_PATH: sqlitePath,
-    },
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -174,9 +225,18 @@ function applyOsAccentColor() {
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   const fg = luminance > 0.6 ? '#1f1f1f' : '#ffffff';
 
+  // `data-os-accent` is set unconditionally so the Settings page can
+  // surface a "Use OS accent" button even when the user has overridden
+  // the accent. The CSS-variable overrides, on the other hand, are
+  // only applied when the user has NOT picked their own colour — the
+  // localStorage entry written by the Settings page wins.
   const js = `
     (function () {
       const root = document.documentElement;
+      root.setAttribute('data-os-accent', '${primary}');
+      try {
+        if (localStorage.getItem('hassan-accent-color')) return;
+      } catch (_) { /* ignore */ }
       root.style.setProperty('--primary', '${primary}');
       root.style.setProperty('--primary-hover', '${hover}');
       root.style.setProperty('--primary-soft', '${soft}');
@@ -184,7 +244,6 @@ function applyOsAccentColor() {
       root.style.setProperty('--info', '${primary}');
       root.style.setProperty('--border-glow', '${primary}');
       root.style.setProperty('--accent-pressed', '${pressed}');
-      root.setAttribute('data-os-accent', '${primary}');
     })();
   `;
   mainWindow.webContents.executeJavaScript(js).catch(() => {});

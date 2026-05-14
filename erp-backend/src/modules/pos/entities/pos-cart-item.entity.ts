@@ -17,6 +17,7 @@ import { PosSession } from './pos-session.entity';
  */
 @Entity('pos_cart_items')
 @Index(['sessionId'])
+@Index(['sessionId', 'itemId'])
 export class PosCartItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;

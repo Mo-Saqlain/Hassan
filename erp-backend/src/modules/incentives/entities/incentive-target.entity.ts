@@ -1,4 +1,4 @@
-import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 import { Item } from '../../items/entities/item.entity';
 import { Brand } from '../../brands/entities/brand.entity';
@@ -13,6 +13,12 @@ export type IncentiveBasis = 'ITEM' | 'BRAND';
  * must include the incentive bucket alongside gross margin.
  */
 @Entity('incentive_targets')
+@Index(['basis'])
+@Index(['itemId'])
+@Index(['brandId'])
+@Index(['supplierId'])
+@Index(['isActive'])
+@Index(['periodStart', 'periodEnd'])
 export class IncentiveTarget extends BaseEntity {
   @Column()
   name: string;

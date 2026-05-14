@@ -14,6 +14,9 @@ export type StockReferenceType =
 @Entity('stock_movements')
 @Index(['itemId'])
 @Index(['storeId'])
+@Index(['itemId', 'storeId'])
+@Index(['referenceType', 'referenceId'])
+@Index(['createdAt'])
 export class StockMovement extends BaseEntity {
   @Column({ name: 'item_id' })
   itemId: string;

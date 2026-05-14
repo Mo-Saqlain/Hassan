@@ -1,9 +1,11 @@
-import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 import { Item } from '../../items/entities/item.entity';
 import { StockTransfer } from './stock-transfer.entity';
 
 @Entity('stock_transfer_items')
+@Index(['stockTransferId'])
+@Index(['itemId'])
 export class StockTransferItem extends BaseEntity {
   @Column({ name: 'stock_transfer_id' })
   stockTransferId: string;

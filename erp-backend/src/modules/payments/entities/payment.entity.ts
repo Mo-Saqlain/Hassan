@@ -9,6 +9,12 @@ export type PaymentDirection = 'IN' | 'OUT';
 
 @Entity('payments')
 @Index(['voucherNo'], { unique: true })
+@Index(['direction', 'customerId'])
+@Index(['direction', 'supplierId'])
+@Index(['accountId'])
+@Index(['customerId'])
+@Index(['supplierId'])
+@Index(['createdAt'])
 export class Payment extends BaseEntity {
   @Column({ name: 'voucher_no' })
   voucherNo: string;

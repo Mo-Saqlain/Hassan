@@ -7,16 +7,23 @@
    ============================================================ */
 
 :root {
-  /* ── Sidebar nav chip colors (intentionally colorful) ── */
-  --nav-dashboard:   #0078d4;
-  --nav-pos:         #c50f1f;
-  --nav-master:      #8764b8;
-  --nav-tx:          #0e7090;
-  --nav-cash:        #498205;
-  --nav-stock:       #ca5010;
-  --nav-ledger:      #038387;
-  --nav-reports:     #5c2e91;
-  --nav-system:      #5d5a58;
+  /* ── Sidebar nav chip colors — one distinct hue per entry,
+       sampled from the Windows 10/Fluent personalization palette
+       so each sidebar icon is visually distinguishable at a glance. ── */
+  --nav-dashboard:   #0078d4;   /* Blue           */
+  --nav-pos:         #c50f1f;   /* Brick Red      */
+  --nav-cashbook:    #107c10;   /* Forest Green   */
+  --nav-customer:    #038387;   /* Teal           */
+  --nav-sales:       #e3008c;   /* Magenta        */
+  --nav-supplier:    #ca5010;   /* Burnt Orange   */
+  --nav-purchase:    #8764b8;   /* Lavender       */
+  --nav-item:        #0099bc;   /* Sky Blue       */
+  --nav-stock:       #498205;   /* Moss Green     */
+  --nav-employee:    #6b69d6;   /* Indigo         */
+  --nav-account:     #bf6b00;   /* Amber          */
+  --nav-users:       #00b7c3;   /* Cyan           */
+  --nav-reports:     #5c2e91;   /* Deep Purple    */
+  --nav-system:      #5d5a58;   /* Gray           */
 
   /* ── Brand spectrum kept for inline SVG chart gradients ── */
   --violet-500: #5c2e91;

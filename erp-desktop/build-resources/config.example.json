@@ -1,0 +1,6 @@
+{
+  "_comment_": "Sample <userData>/config.json — copy to %APPDATA%/erp-desktop/config.json (Windows) or ~/Library/Application Support/erp-desktop/config.json (macOS) and edit. Both keys are optional; leaving them blank keeps the app fully offline with no cloud sync.",
+
+  "cloudSyncUrl": "https://hassan-erp-cloud.example.com/api/sync/push",
+  "databaseUrl": ""
+}

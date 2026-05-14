@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   JoinTable,
   ManyToMany,
@@ -11,6 +12,10 @@ import { Brand } from '../../brands/entities/brand.entity';
 import { Category } from '../../categories/entities/category.entity';
 
 @Entity('items')
+@Index(['brandId'])
+@Index(['name'])
+@Index(['modelNo'])
+@Index(['isActive'])
 export class Item extends BaseEntity {
   @Column()
   name: string;

@@ -13,6 +13,8 @@ import {
  */
 @Entity('user_login_events')
 @Index(['createdAt'])
+@Index(['userId'])
+@Index(['seenByAdmin'])
 export class UserLoginEvent {
   @PrimaryGeneratedColumn('uuid')
   id: string;

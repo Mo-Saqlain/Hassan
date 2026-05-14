@@ -11,6 +11,8 @@ import { Account } from '../../accounts/entities/account.entity';
 @Entity('fund_transfers')
 @Index(['transferNo'], { unique: true })
 @Index(['transferDate'])
+@Index(['fromAccountId'])
+@Index(['toAccountId'])
 export class FundTransfer extends BaseEntity {
   @Column({ name: 'transfer_no' })
   transferNo: string;

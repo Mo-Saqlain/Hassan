@@ -323,39 +323,57 @@ export class ReportsService {
   }
 
   /**
-   * All customers with their current A/R balance.
+   * All customers with their A/R balance.
    *
    * Batched: instead of running `customerLedger` per customer (4 queries each
    * → 4N+1), we run four GROUP-BY-customer aggregates and combine in JS.
    * Mirrors the same +debit / -credit math as `customerLedger`:
    *   balance = opening + sales.net − sales.paid − returns.total − receipts.amount
+   *
+   * `asOf` (optional) restricts every aggregate to rows created on or before
+   * the cutoff — used by `balanceSheet` for the "as of date X" view without
+   * fanning out a per-customer ledger query.
    */
-  async allCustomerBalances() {
+  async allCustomerBalances(asOf?: Date) {
     const list = await this.customers.find({ order: { name: 'ASC' } });
     if (list.length === 0) return [];
 
+    const applyAsOf = <T extends { andWhere(...args: any[]): T }>(
+      qb: T,
+      column: string,
+    ): T => (asOf ? qb.andWhere(`${column} <= :asOf`, { asOf }) : qb);
+
     const [saleSums, returnSums, receiptSums] = await Promise.all([
-      this.sales
-        .createQueryBuilder('s')
-        .select('s.customer_id', 'cid')
-        .addSelect('COALESCE(SUM(s.net_amount), 0)', 'net')
-        .addSelect('COALESCE(SUM(s.paid_amount), 0)', 'paid')
-        .where('s.customer_id IS NOT NULL')
+      applyAsOf(
+        this.sales
+          .createQueryBuilder('s')
+          .select('s.customer_id', 'cid')
+          .addSelect('COALESCE(SUM(s.net_amount), 0)', 'net')
+          .addSelect('COALESCE(SUM(s.paid_amount), 0)', 'paid')
+          .where('s.customer_id IS NOT NULL'),
+        's.created_at',
+      )
         .groupBy('s.customer_id')
         .getRawMany(),
-      this.saleReturns
-        .createQueryBuilder('r')
-        .select('r.customer_id', 'cid')
-        .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
-        .where('r.customer_id IS NOT NULL')
+      applyAsOf(
+        this.saleReturns
+          .createQueryBuilder('r')
+          .select('r.customer_id', 'cid')
+          .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
+          .where('r.customer_id IS NOT NULL'),
+        'r.created_at',
+      )
         .groupBy('r.customer_id')
         .getRawMany(),
-      this.payments
-        .createQueryBuilder('p')
-        .select('p.customer_id', 'cid')
-        .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
-        .where('p.direction = :d', { d: 'IN' })
-        .andWhere('p.customer_id IS NOT NULL')
+      applyAsOf(
+        this.payments
+          .createQueryBuilder('p')
+          .select('p.customer_id', 'cid')
+          .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
+          .where('p.direction = :d', { d: 'IN' })
+          .andWhere('p.customer_id IS NOT NULL'),
+        'p.created_at',
+      )
         .groupBy('p.customer_id')
         .getRawMany(),
     ]);
@@ -490,38 +508,56 @@ export class ReportsService {
   }
 
   /**
-   * All suppliers with their current A/P balance.
+   * All suppliers with their A/P balance.
    *
    * Batched: same approach as `allCustomerBalances`. Mirrors `supplierLedger`'s
    * +credit / -debit math:
    *   balance = opening + purchases.net − purchases.paid − returns.total − payments.amount
+   *
+   * `asOf` (optional) restricts every aggregate to rows created on or before
+   * the cutoff — used by `balanceSheet` for the "as of date X" view without
+   * fanning out a per-supplier ledger query.
    */
-  async allSupplierBalances() {
+  async allSupplierBalances(asOf?: Date) {
     const list = await this.suppliers.find({ order: { name: 'ASC' } });
     if (list.length === 0) return [];
 
+    const applyAsOf = <T extends { andWhere(...args: any[]): T }>(
+      qb: T,
+      column: string,
+    ): T => (asOf ? qb.andWhere(`${column} <= :asOf`, { asOf }) : qb);
+
     const [purchaseSums, returnSums, paymentSums] = await Promise.all([
-      this.purchases
-        .createQueryBuilder('p')
-        .select('p.supplier_id', 'sid')
-        .addSelect('COALESCE(SUM(p.net_amount), 0)', 'net')
-        .addSelect('COALESCE(SUM(p.paid_amount), 0)', 'paid')
-        .where('p.supplier_id IS NOT NULL')
+      applyAsOf(
+        this.purchases
+          .createQueryBuilder('p')
+          .select('p.supplier_id', 'sid')
+          .addSelect('COALESCE(SUM(p.net_amount), 0)', 'net')
+          .addSelect('COALESCE(SUM(p.paid_amount), 0)', 'paid')
+          .where('p.supplier_id IS NOT NULL'),
+        'p.created_at',
+      )
         .groupBy('p.supplier_id')
         .getRawMany(),
-      this.purchaseReturns
-        .createQueryBuilder('r')
-        .select('r.supplier_id', 'sid')
-        .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
-        .where('r.supplier_id IS NOT NULL')
+      applyAsOf(
+        this.purchaseReturns
+          .createQueryBuilder('r')
+          .select('r.supplier_id', 'sid')
+          .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
+          .where('r.supplier_id IS NOT NULL'),
+        'r.created_at',
+      )
         .groupBy('r.supplier_id')
         .getRawMany(),
-      this.payments
-        .createQueryBuilder('p')
-        .select('p.supplier_id', 'sid')
-        .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
-        .where('p.direction = :d', { d: 'OUT' })
-        .andWhere('p.supplier_id IS NOT NULL')
+      applyAsOf(
+        this.payments
+          .createQueryBuilder('p')
+          .select('p.supplier_id', 'sid')
+          .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
+          .where('p.direction = :d', { d: 'OUT' })
+          .andWhere('p.supplier_id IS NOT NULL'),
+        'p.created_at',
+      )
         .groupBy('p.supplier_id')
         .getRawMany(),
     ]);
@@ -976,15 +1012,14 @@ export class ReportsService {
   async balanceSheet(asOf?: string) {
     const asOfDate = asOf ? new Date(asOf) : new Date();
 
-    // Run the five reads we need to even start (accounts, items, customers,
-    // suppliers, the per-account payment sums) in parallel. Each sub-result
-    // is in turn computed without per-row N+1.
-    const [accounts, items, customers, suppliers, paySums, transferDelta, saleAcctSums] =
+    // Run the parallel reads we need to even start (accounts, items, the
+    // per-account payment sums, transfer deltas, account-attributed sales).
+    // Customer/supplier lists are fetched inside the batched balance helpers
+    // below so we don't pull them twice.
+    const [accounts, items, paySums, transferDelta, saleAcctSums] =
       await Promise.all([
         this.accounts.find(),
         this.items.find(),
-        this.customers.find(),
-        this.suppliers.find(),
         this.payments
           .createQueryBuilder('p')
           .select('p.account_id', 'aid')
@@ -1059,20 +1094,19 @@ export class ReportsService {
       inventory += qty * Number(it.purchasePrice);
     }
 
-    // A/R and A/P: customer + supplier ledgers fanned out concurrently. The
-    // per-party ledger queries are still N+1, but at least they're parallel
-    // now. Future work: a fully batched as-of variant of
-    // allCustomerBalances/allSupplierBalances.
+    // A/R and A/P: one batched GROUP-BY query per side instead of running
+    // customerLedger/supplierLedger per entity. With ~200 customers + ~50
+    // suppliers this collapses ~900 queries into 6.
     const [arBalances, apBalances] = await Promise.all([
-      Promise.all(customers.map((c) => this.customerLedger(c.id, asOfDate))),
-      Promise.all(suppliers.map((s) => this.supplierLedger(s.id, asOfDate))),
+      this.allCustomerBalances(asOfDate),
+      this.allSupplierBalances(asOfDate),
     ]);
     const accountsReceivable = arBalances.reduce(
-      (s, l) => s + Number(l.closingBalance),
+      (s, c) => s + Number(c.balance),
       0,
     );
     const accountsPayable = apBalances.reduce(
-      (s, l) => s + Number(l.closingBalance),
+      (s, sp) => s + Number(sp.balance),
       0,
     );
 

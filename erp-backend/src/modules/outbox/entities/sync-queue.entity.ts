@@ -15,6 +15,8 @@ export type SyncQueueStatus = 'PENDING' | 'SYNCED' | 'FAILED';
  */
 @Entity('sync_queue')
 @Index(['status'])
+@Index(['status', 'createdAt'])
+@Index(['type'])
 export class SyncQueueEntry {
   @PrimaryGeneratedColumn('uuid')
   id: string;
