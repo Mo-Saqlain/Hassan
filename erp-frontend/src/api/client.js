@@ -20,12 +20,61 @@ export const api = axios.create({
  *  Content-Disposition header. */
 export const apiBaseUrl = () => baseURL;
 
+// ─────────────── Auth token plumbing ─────────────────────────────────
+// `AuthContext` calls `setAuthToken(token)` after login/logout and on
+// page boot so every subsequent request carries `Authorization: Bearer
+// <token>`. Stored in a module-level closure so it's available the
+// instant the very first request fires (including the auth-check on
+// page load).
+const TOKEN_KEY = 'hassan-auth-token';
+let authToken = null;
+try {
+  authToken = localStorage.getItem(TOKEN_KEY);
+} catch {
+  /* SSR / private-mode fallback — token will be set by login() */
+}
+
+export function setAuthToken(token) {
+  authToken = token || null;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+api.interceptors.request.use((cfg) => {
+  if (authToken) {
+    cfg.headers = cfg.headers || {};
+    cfg.headers.Authorization = `Bearer ${authToken}`;
+  }
+  return cfg;
+});
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {
     const msg =
       err.response?.data?.message ?? err.message ?? 'Unknown error';
     err.uiMessage = Array.isArray(msg) ? msg.join(', ') : String(msg);
+    // 401 = token rejected. Clear it so the next render kicks the user
+    // back to the login screen — but avoid a redirect loop on the login
+    // form itself.
+    if (err.response?.status === 401 && authToken) {
+      setAuthToken(null);
+      try {
+        localStorage.removeItem('hassan-auth-user');
+      } catch {
+        /* ignore */
+      }
+      if (typeof window !== 'undefined') {
+        const path = window.location.hash || '';
+        if (!path.includes('#/login')) {
+          window.location.hash = '#/login';
+        }
+      }
+    }
     return Promise.reject(err);
   },
 );

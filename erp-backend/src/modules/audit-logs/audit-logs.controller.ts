@@ -1,7 +1,9 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { AuditLogsService } from './audit-logs.service';
 import { AuditAction } from './entities/audit-log.entity';
+import { SuperuserOnly } from '../users/auth.decorators';
 
+@SuperuserOnly()
 @Controller('audit-logs')
 export class AuditLogsController {
   constructor(private readonly service: AuditLogsService) {}

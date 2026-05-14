@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import Icon from './Icon';
+import { isSuperuser, useAuth } from '../auth/AuthContext';
 
 /**
  * Layout route used by domain hubs (Customer, Supplier, Sales, …). Renders
@@ -9,8 +10,16 @@ import Icon from './Icon';
  *
  * Tab `to` is matched with NavLink's default partial-prefix logic, so
  * `/customer-ledger` stays highlighted on `/customer-ledger/:id`.
+ *
+ * Tabs flagged `superuserOnly` are hidden from regular users (e.g. the
+ * Audit/Errors tabs under System). The backend also enforces this — the
+ * filter here is purely a UX hint.
  */
 export default function HubFrame({ title, subtitle, tabs }) {
+  const { user } = useAuth();
+  const visible = tabs.filter(
+    (t) => !t.superuserOnly || isSuperuser(user),
+  );
   return (
     <>
       <header className="hub-head">
@@ -18,7 +27,7 @@ export default function HubFrame({ title, subtitle, tabs }) {
         {subtitle && <p>{subtitle}</p>}
       </header>
       <nav className="hub-tabs" aria-label="Section tabs">
-        {tabs.map((t) => (
+        {visible.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}

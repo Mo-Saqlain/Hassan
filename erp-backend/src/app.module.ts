@@ -33,6 +33,7 @@ import { StockTransfersModule } from './modules/stock-transfers/stock-transfers.
 import { DamagedGoodsModule } from './modules/damaged-goods/damaged-goods.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { ErrorLogsModule } from './modules/error-logs/error-logs.module';
+import { UsersModule } from './modules/users/users.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -86,6 +87,7 @@ function buildDbOptions(): TypeOrmModuleOptions {
     BackupModule,
     AuditLogsModule,
     ErrorLogsModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

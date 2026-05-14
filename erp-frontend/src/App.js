@@ -35,6 +35,13 @@ import EmployeeLedger from './pages/EmployeeLedger';
 import Backup from './pages/Backup';
 import AuditLog from './pages/AuditLog';
 import ErrorLog from './pages/ErrorLog';
+import UsersInfo from './pages/users/UsersInfo';
+import UsersAllowAccess from './pages/users/UsersAllowAccess';
+import UsersRecentLogin from './pages/users/UsersRecentLogin';
+import UsersChangePassword from './pages/users/UsersChangePassword';
+import Login from './pages/Login';
+import { AuthProvider } from './auth/AuthContext';
+import RequireSuperuser from './auth/RequireSuperuser';
 import CustomerLedger from './pages/CustomerLedger';
 import SupplierLedger from './pages/SupplierLedger';
 import AccountLedger from './pages/AccountLedger';
@@ -45,7 +52,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <HashRouter>
+        <AuthProvider>
         <Routes>
+          <Route path="login" element={<Login />} />
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />
             <Route path="pos" element={<POS />} />
@@ -181,6 +190,46 @@ export default function App() {
               <Route path="account-ledger/:id" element={<AccountLedger />} />
             </Route>
 
+            {/* Users hub — Info / Allow Access / Recent Login / Change Password */}
+            <Route
+              element={
+                <HubFrame
+                  title={HUBS.users.title}
+                  subtitle={HUBS.users.subtitle}
+                  tabs={HUBS.users.tabs}
+                />
+              }
+            >
+              <Route
+                path="users"
+                element={
+                  <RequireSuperuser>
+                    <UsersInfo />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="users-allow-access"
+                element={
+                  <RequireSuperuser>
+                    <UsersAllowAccess />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="users-recent-login"
+                element={
+                  <RequireSuperuser>
+                    <UsersRecentLogin />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="users-change-password"
+                element={<UsersChangePassword />}
+              />
+            </Route>
+
             {/* System hub — Backups + Audit + Errors */}
             <Route
               element={
@@ -192,8 +241,22 @@ export default function App() {
               }
             >
               <Route path="backup" element={<Backup />} />
-              <Route path="audit-log" element={<AuditLog />} />
-              <Route path="error-log" element={<ErrorLog />} />
+              <Route
+                path="audit-log"
+                element={
+                  <RequireSuperuser>
+                    <AuditLog />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="error-log"
+                element={
+                  <RequireSuperuser>
+                    <ErrorLog />
+                  </RequireSuperuser>
+                }
+              />
             </Route>
 
             {/* Reports — single-page entry (no hub strip yet) */}
@@ -202,6 +265,7 @@ export default function App() {
           <Route path="print/sale/:id" element={<InvoicePrint type="sale" />} />
           <Route path="print/purchase/:id" element={<InvoicePrint type="purchase" />} />
         </Routes>
+        </AuthProvider>
       </HashRouter>
     </ThemeProvider>
   );

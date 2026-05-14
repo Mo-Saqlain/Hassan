@@ -14,6 +14,24 @@ import { Setting } from '../../common/entities/setting.entity';
 const DEFAULT_HOUR = 20;
 const SCHEDULE_KEY = 'backup.scheduledHour';
 
+/**
+ * Tables we deliberately exclude from both dump and restore.
+ *
+ * `backups` — recursive; the dump would include itself.
+ *
+ * `users`, `user_access_requests`, `user_login_events` — security. A
+ * tampered backup could otherwise inject a fresh superuser row or
+ * replay leaked password hashes. Keeping users out of the snapshot
+ * means a restore can never touch the credentials store: the boot-time
+ * superuser seed re-creates the admin if the table is somehow empty.
+ */
+const EXCLUDED_TABLES = new Set([
+  'backups',
+  'users',
+  'user_access_requests',
+  'user_login_events',
+]);
+
 @Injectable()
 export class BackupService {
   private readonly logger = new Logger(BackupService.name);
@@ -45,7 +63,7 @@ export class BackupService {
     const seenTables = new Set<string>();
 
     for (const meta of this.dataSource.entityMetadatas) {
-      if (meta.tableName === 'backups') continue;
+      if (EXCLUDED_TABLES.has(meta.tableName)) continue;
       if (seenTables.has(meta.tableName)) continue;
       seenTables.add(meta.tableName);
 
@@ -273,7 +291,7 @@ export class BackupService {
     const entityTables: string[] = [];
     const joinTables: string[] = [];
     for (const meta of this.dataSource.entityMetadatas) {
-      if (meta.tableName === 'backups') continue;
+      if (EXCLUDED_TABLES.has(meta.tableName)) continue;
       entityTables.push(meta.tableName);
       for (const rel of meta.manyToManyRelations) {
         const j = rel.junctionEntityMetadata;
@@ -316,7 +334,7 @@ export class BackupService {
         // 2) Replay — entities first (forward order is fine with FK off),
         //    then M2M rows.
         for (const meta of this.dataSource.entityMetadatas) {
-          if (meta.tableName === 'backups') continue;
+          if (EXCLUDED_TABLES.has(meta.tableName)) continue;
           const rows = dataset[meta.tableName];
           if (!Array.isArray(rows) || rows.length === 0) {
             counts[meta.tableName] = 0;

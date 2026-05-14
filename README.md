@@ -1,6 +1,6 @@
 # Hassan Electronics — Home-Appliances ERP & POS
 
-Offline-first ERP with an integrated Point-of-Sale terminal for a small home-appliances retail shop. Inventory, master data ("Catalogue"), vouchers, customer/supplier/account ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Credit), an incentive-tracking system that feeds adjusted-net-income, daily JSON backups with restore, and a four-statement financials report — all backed by Supabase Postgres in the cloud, with a desktop Electron build that bundles a local SQLite for true offline cashier operation. **UI is a violet→cyan aurora-glass redesign** ([design.md](./design.md)) — sticky topbar, glass cards, gradient brand mark, coloured sidebar icon chips, light + dark themes, responsive off-canvas drawer.
+Offline-first ERP with an integrated Point-of-Sale terminal for a small home-appliances retail shop. Inventory, master data ("Catalogue"), vouchers, customer/supplier/account ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Credit), an incentive-tracking system that feeds adjusted-net-income, daily JSON backups with restore, a four-statement financials report, and **user access control with a single superuser who approves new users**. All backed by Supabase Postgres in the cloud, with a desktop Electron build that bundles a local SQLite for true offline cashier operation. **UI is a violet→cyan aurora-glass redesign** ([design.md](./design.md)) — sticky topbar, glass cards, gradient brand mark, coloured sidebar icon chips, light + dark themes, responsive off-canvas drawer.
 
 ![Status](https://img.shields.io/badge/status-Phase%201%20%2B%202%20%2B%203%20complete-brightgreen)
 ![Tests](https://img.shields.io/badge/tests-82%2F82%20passing-success)
@@ -133,7 +133,22 @@ Both surfaced under **System → Audit** and **System → Errors**.
 - **Audit log** — every TypeORM insert / update / delete on a user-facing entity is captured by [erp-backend/src/modules/audit-logs/audit.subscriber.ts](erp-backend/src/modules/audit-logs/audit.subscriber.ts) and written to `audit_logs` with a human-readable summary plus a small JSON snapshot of the affected fields (or a before→after diff for updates). The subscriber filters out its own table, the outbox queue, and the error log to avoid recursion and noise. The frontend page has entity-type / action / date filters, quick-search, and **CSV + PDF export**. The audit log is intentionally append-only — there is no "Clear" button and no `DELETE /audit-logs` endpoint, so the trail can't be wiped from the UI.
 - **Error log** — a global Nest exception filter ([erp-backend/src/modules/error-logs/error-log.filter.ts](erp-backend/src/modules/error-logs/error-log.filter.ts)) writes every error response to `error_logs` with method, path, status code, message, stack, and a JSON snapshot of the request body / query / params. Validation 400s and 404s are tagged `WARN`; 5xx are tagged `ERROR`. The frontend page has level / source filters, quick-search, expandable stack viewer, and **CSV + PDF export**. Clearable from the System → Errors tab.
 
-### 10c. Monthly salary accrual
+### 10c. Access control (users, roles, login)
+
+The app is now gated by a sign-in screen. Two roles only: **SUPERUSER** and **USER**.
+
+- **Seed superuser** — on every backend boot, [erp-backend/src/modules/users/users.service.ts](erp-backend/src/modules/users/users.service.ts) ensures a superuser exists. Default credentials: username **`admin`** / password **`Tech@123`** — change this from System → Users → "Change my password" on first login.
+- **Passwords are hashed** — `scrypt` with a 16-byte random salt, 64-byte derived key, constant-time comparison ([password.util.ts](erp-backend/src/modules/users/password.util.ts)). No plaintext password ever lands in the DB.
+- **Sessions** — login returns an opaque 64-char token; the frontend stores it in `localStorage` and sends `Authorization: Bearer <token>` on every request. A sliding 12-hour window auto-renews on activity. The global `AuthGuard` ([auth.guard.ts](erp-backend/src/modules/users/auth.guard.ts)) protects every endpoint except `/auth/login`, `/auth/request-access`, `/health`, and `/sync/push` (cloud webhook).
+- **Login screen** — a clean centred card with sign-in + a "Request access" button that opens a sign-up form (desired username, full name, optional phone/email/reason). Submitting **does not create a user** — it creates a `user_access_requests` row that the superuser must review.
+- **Superuser-only**: creating users, resetting other users' passwords, enabling/disabling accounts, approving/rejecting access requests, plus the **Audit log** and **Error log** tabs. Regular users can still take **backups** and use the rest of the ERP.
+- **Login bell** in the topbar (superuser only) — polls every 30s and shows a badge with the count of pending access requests + unseen logins. Opening the panel marks logins as seen.
+- **Users hub** — its own sidebar entry (between Account and Reports) with a four-tab strip: **Info** (admin: CRUD + enable/disable/delete), **Allow Access** (admin: approve/reject pending access requests), **Recent Login** (admin: last 200 sign-ins), **Change Password** (everyone changes their own; admin gets an extra card to reset any other user's password too). The first three tabs are filtered out for regular users by [HubFrame](erp-frontend/src/components/HubFrame.js); the sidebar entry's `defaultTo` lands non-admins on Change Password directly.
+- **Backups don't touch users** — `users`, `user_access_requests`, and `user_login_events` are excluded from both `dumpAll()` and `restoreFromSnapshot()` in [backup.service.ts](erp-backend/src/modules/backup/backup.service.ts). Restoring a tampered backup cannot inject a fake superuser, cannot replay leaked password hashes, and cannot wipe the existing user list — the boot-time seed re-creates `admin` only if the table is somehow empty.
+- **Last-superuser guard** — the service refuses to remove, demote, or deactivate the only remaining active SUPERUSER, so the app can never end up unmanageable.
+- **Audit log skips user mutations** — credential / login activity has its own viewer; the day-to-day audit feed stays focused on business entities.
+
+### 10d. Monthly salary accrual
 
 Each employee can declare a `salaryDay` (1–31) and `firstSalaryInAdvance` flag. The [erp-backend/src/modules/employees/salary-accrual.service.ts](erp-backend/src/modules/employees/salary-accrual.service.ts) cron ticks hourly; on the configured day of the month it posts a `SALARY_ACCRUED` transaction equal to the employee's `monthlySalary` to their ledger as a **debit** (we now owe them). The cashier later books a `SALARY` payment (credit) when handing over the cash, and the ledger nets out.
 
@@ -163,16 +178,15 @@ Coverage:
 | Financial Statements (all 4 tabs) | Flattened {Item, Amount} rows of every line in the statement |
 
 ### 12. UX / UI
-- **Branded** — "Hassan Electronics · Home Appliances" with custom logo mark (gradient + lightning bolt)
-- **Light & Dark theme** — toggle in the sidebar footer; preference persisted in `localStorage`, initial theme honours `prefers-color-scheme`. No flash on load (theme bootstrap script in `index.html` runs before React)
-- **Aurora-glass design system** — `tokens.css` + `app.css` ([src/styles/](erp-frontend/src/styles/)) hold every variable. Cards, tables, and tiles use `rgba(surface, glass-strength*0.85)` with `backdrop-filter: blur(22px) saturate(170%)` plus a `::before` glossy specular sheen. The page-wide aurora (`body::before`) paints four radial blobs (violet / cyan / pink / indigo) at –10vmax inset, blurred 48px, and masks the bottom 30% so cards never sit on a glow band — animates over 28s. Light and dark themes both ship aurora; light uses 0.55+glass*0.20 surface alpha for visible translucency.
-- **Coloured sidebar icons** — every nav item gets a tinted chip in its own `--nav-c` token (Dashboard indigo, POS pink, Catalogue violet, Transactions sky, Cash teal, Stock orange, Ledgers green, Reports light-violet, System grey). Hover rotates the chip −4° and scales 1.04; active item fills the chip to 30% alpha and paints a 3px gradient bar to the left of the row.
-- **Sticky topbar** — 60px tall, glass surface. Global search input on the left, theme toggle on the right. Hamburger appears on the left ≤ 860px to open the off-canvas sidebar.
-- **Collapsible sidebar rail** — the gradient brand chip at the top of the sidebar renders a hamburger icon and doubles as the rail toggle: click it to collapse the desktop sidebar to a 72px icon-only rail (brand text + section headers hide); click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). Disabled on mobile (≤860px), where the off-canvas drawer pattern is used instead.
-- **Responsive** — sidebar becomes a fixed off-canvas drawer ≤ 860px (`.app[data-nav="open"]` toggles); grids collapse, tables get horizontal scroll, POS stacks vertically, cart rows reflow into 3-col with hidden price column
-- **Coloured hub tiles** — every Catalogue and Transactions tile has its own `--tile-c` value driving a 22%-alpha icon badge + `.tile-foot` linking forward
-- **Status chips** — pill-shaped, six variants (`chip-success`, `chip-warn`, `chip-danger`, `chip-info`, `chip-violet`, neutral). Used for payment states, low-stock badges, session status
-- **Fonts** — Plus Jakarta Sans (display headings) + Inter (body) + JetBrains Mono (numbers, voucher refs, SKUs) loaded from Google Fonts
+- **Branded** — "Hassan Electronics · Home Appliances" with custom logo mark
+- **Light & Dark theme** — toggle in the sidebar footer; preference persisted in `localStorage`, initial theme honours `prefers-color-scheme`. No flash on load (theme bootstrap script in `index.html` runs before React).
+- **Flat Windows 10-inspired design** — `tokens.css` + `app.css` ([src/styles/](erp-frontend/src/styles/)) hold every variable. Solid surfaces, sharp 90° corners everywhere (no border-radius), 1px borders, no glass / blur / aurora / glow / animation. Lightweight `color` / `background` / `border` transitions only. `content-visibility: auto` on long tables. Built for low-end hardware while keeping the modern ERP feel.
+- **Coloured sidebar icons** — every nav item gets a tinted square chip in its own `--nav-c` token (Dashboard blue, POS red, Catalogue violet, Transactions teal, Cash green, Stock orange, Ledgers teal, Reports violet, System grey). Active item paints a 3px accent strip on the left edge of the row.
+- **Sticky topbar** — 44px tall, solid surface. Global search input on the left, login bell + user chip + theme toggle on the right. Hamburger appears on the left ≤ 860px to open the off-canvas sidebar.
+- **Collapsible sidebar rail** — the brand chip at the top of the sidebar doubles as the rail toggle: click it to collapse the desktop sidebar to a 56px icon-only rail; click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). Disabled on mobile (≤860px), where the off-canvas drawer pattern is used instead.
+- **Responsive** — sidebar becomes a fixed off-canvas drawer ≤ 860px (`.app[data-nav="open"]` toggles); grids collapse, tables get horizontal scroll, POS stacks vertically, cart rows reflow.
+- **Status chips** — semantic-color filled rectangles, six variants (`chip-success`, `chip-warn`, `chip-danger`, `chip-info`, `chip-violet`, neutral). Used for payment states, low-stock badges, session status.
+- **Fonts** — Segoe UI Variable / Segoe UI system stack (no web fonts to download); Cascadia Code / Consolas for numbers, voucher refs, SKUs.
 
 ---
 
@@ -253,6 +267,7 @@ src/
    ├─ employee-transactions/ # SALARY_ACCRUED (debit) + SALARY/ADVANCE/REIMBURSEMENT/EXPENSE/INCENTIVE_PAYOUT/ADJUSTMENT (credits)
    ├─ audit-logs/         # AuditSubscriber + REST; every insert/update/delete on a user-facing entity
    ├─ error-logs/         # ErrorLogFilter (global Nest exception filter) + REST
+   ├─ users/              # User + UserAccessRequest + UserLoginEvent + AuthGuard (global) + /auth + /users
    └─ reports/            # read-only: ledgers, stock ledger, 4 financial statements (consumes IncentivesService + FundTransfersService)
 ```
 
@@ -296,7 +311,17 @@ src/
    ├─ Financials.js       # 4-tab financial statements
    ├─ AuditLog.js         # System → Audit (every entity mutation, filterable, CSV/PDF)
    ├─ ErrorLog.js         # System → Errors (exceptions captured by the global filter)
+   ├─ users/              # Users hub — split per tab
+   │  ├─ UsersInfo.js              # Info tab (admin: list/create/enable/disable/delete)
+   │  ├─ UsersAllowAccess.js       # Allow Access tab (admin: approve/reject access requests)
+   │  ├─ UsersRecentLogin.js       # Recent Login tab (admin: sign-in history)
+   │  └─ UsersChangePassword.js    # Change Password tab (everyone; admin sees an extra "reset others" card)
+   ├─ Login.js            # /login — sign-in + Request access flow
    └─ InvoicePrint.js     # auto-print invoice route
+
+src/auth/
+├─ AuthContext.js         # token + user persistence, login/logout/changePassword
+└─ RequireSuperuser.js    # route guard for /audit-log + /error-log + admin tabs of /users
 ```
 
 ### Sidebar layout (flat hubs with horizontal tab strip)
@@ -316,8 +341,9 @@ The sidebar is a flat list — one entry per domain — and the sub-pages of eac
 | Stock | `/stock` | Summary · Stores · Ledger · Transfers · Damaged |
 | Employee | `/employees` | Info · Attendance · Payments · Incentive Rules · Ledger |
 | Account | `/accounts` | Info · Transfers · Ledger |
+| Users | `/users-change-password` | **Info*** · **Allow Access*** · **Recent Login*** · Change Password (*=superuser-only) |
 | Reports | `/financials` | — |
-| System | `/backup` | Backups · **Audit** · **Errors** |
+| System | `/backup` | Backups · **Audit*** · **Errors*** (*=superuser-only) |
 
 Routing-wise the hubs are layout routes wired in [erp-frontend/src/App.js](erp-frontend/src/App.js) with `<HubFrame title subtitle tabs />` around the matched child route ([erp-frontend/src/components/HubFrame.js](erp-frontend/src/components/HubFrame.js)). The hub definitions (label, default route, tabs) live in a single source of truth at [erp-frontend/src/nav/hubs.js](erp-frontend/src/nav/hubs.js).
 
@@ -550,11 +576,38 @@ POST   /employees/accrue-salaries           # idempotent: post any due monthly a
 POST   /employees/:id/accrue-salary         # same, single employee
 ```
 
-### Audit + error logs (System tab)
+### Audit + error logs (System tab — superuser only)
 ```
 GET    /audit-logs?entityType=&action=&from=&to=&limit=
 GET    /error-logs?level=&source=&from=&to=&limit=
 DELETE /error-logs                          # wipe (testing)
+```
+
+### Auth + Users
+```
+# Public — no token required
+POST   /auth/login                 { username, password }  → { token, user, expiresAt }
+POST   /auth/request-access        { requestedUsername, fullName, phone?, email?, reason? }
+
+# Authenticated (any role)
+GET    /auth/me                    → currently signed-in user
+POST   /auth/logout                # invalidates the caller's session token
+POST   /auth/change-password       { currentPassword, newPassword }   # also rotates session
+
+# Superuser only (everything below)
+GET    /users                                       # list users
+POST   /users                                       # create user
+PATCH  /users/:id                                   # update (rename / reset pw / enable / disable / promote)
+DELETE /users/:id
+GET    /users/access-requests?status=PENDING|APPROVED|REJECTED
+GET    /users/access-requests/pending-count
+POST   /users/access-requests/:id/approve  { username, password, fullName? }   # creates the user
+POST   /users/access-requests/:id/reject
+DELETE /users/access-requests/:id
+GET    /users/login-events?unseen=true&limit=
+GET    /users/login-events/unseen-count
+POST   /users/login-events/mark-seen
+DELETE /users/login-events                          # purge entries older than 30 days
 ```
 
 ### Backup
@@ -605,8 +658,13 @@ GET    /health   →  { status: "ok", service: "erp-backend", time: "…" }
 | `/financials` | 4-tab financial statements |
 | `/incentives` | Incentives — Targets / Progress / Awards tabs |
 | `/backup` | Backups — manual snapshot, history, schedule, overdue reminder |
-| `/audit-log` | Audit log — every entity insert/update/delete with CSV/PDF export |
-| `/error-log` | Error / exception log — every error response captured by the global Nest filter, with CSV/PDF export |
+| `/audit-log` | Audit log — superuser only — every entity insert/update/delete with CSV/PDF export |
+| `/error-log` | Error / exception log — superuser only — every error response captured by the global Nest filter, with CSV/PDF export |
+| `/users` | Users hub → **Info** (superuser only — user CRUD) |
+| `/users-allow-access` | Users hub → **Allow Access** (superuser only — pending access requests) |
+| `/users-recent-login` | Users hub → **Recent Login** (superuser only — sign-in events) |
+| `/users-change-password` | Users hub → **Change Password** (everyone changes own; admin can also reset others) |
+| `/login` | Sign-in screen (also hosts the "Request access" sign-up form) |
 | `/print/sale/:id`, `/print/purchase/:id` | Print-friendly invoice/bill |
 
 ---
@@ -656,7 +714,7 @@ Untested (intentional): thin CRUD services for `accounts`, `brands`, `customers`
 
 ## Project conventions
 
-- **No auth** in any phase — `userId` on `pos_sessions` is nullable and unwired
+- **Access control** — every request is gated by a session-token auth guard except `/auth/login`, `/auth/request-access`, `/health`, and `/sync/push`. Two roles: SUPERUSER (admin only — can manage users, view audit / error logs) and USER (everything else, including backups). Default superuser is `admin` / `Tech@123` — change it on first login. POS session's `userId` field is still unwired by design (the POS terminal is a shared device — see [pos.module.ts](erp-backend/src/modules/pos/pos.module.ts))
 - **Sidebar discipline** — new master-data entities → tile in `/master`, new transaction types → tile in one of the four `/transactions` groups (Sales / Purchases / Money / Treasury). Cash Book and Incentives are sidebar-level because they're cross-cutting tools, not single transaction types. Singleton sidebar sections render without a category header.
 - **Idempotent sync** — every outbound event has a client-generated UUID; the cloud receiver returns `DUPLICATE` (with the prior result id) if the same ID arrives twice
 - **Voucher numbers** — auto-generated, not gap-free (`count + 1`). Prefixes: `INV-` sales, `BILL-` purchases, `SR-`/`PR-` returns, `RCT-` receipts, `PMT-` payments, **`TRF-` fund transfers**. Replace with a sequences table if strict sequencing matters

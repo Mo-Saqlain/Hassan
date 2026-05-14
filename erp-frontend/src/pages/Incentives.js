@@ -100,10 +100,11 @@ function ProgressPanel() {
                     display: 'inline-block',
                     width: 100,
                     height: 8,
-                    borderRadius: 4,
-                    background: 'var(--border)',
+                    borderRadius: 0,
+                    background: 'var(--chip-bg)',
                     overflow: 'hidden',
                     verticalAlign: 'middle',
+                    border: '1px solid var(--border)',
                   }}
                 >
                   <div

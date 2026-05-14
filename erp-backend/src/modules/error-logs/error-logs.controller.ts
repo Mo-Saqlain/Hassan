@@ -1,7 +1,9 @@
 import { Controller, Delete, Get, Query } from '@nestjs/common';
 import { ErrorLogsService } from './error-logs.service';
 import { ErrorLevel } from './entities/error-log.entity';
+import { SuperuserOnly } from '../users/auth.decorators';
 
+@SuperuserOnly()
 @Controller('error-logs')
 export class ErrorLogsController {
   constructor(private readonly service: ErrorLogsService) {}

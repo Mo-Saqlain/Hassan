@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
 import Brand from './Brand';
 import Icon from './Icon';
 import ThemeToggle from './ThemeToggle';
 import GlobalSearch from './GlobalSearch';
 import { api } from '../api/client';
 import { SIDEBAR } from '../nav/hubs';
+import { isSuperuser, useAuth } from '../auth/AuthContext';
 
 const RAIL_KEY = 'hassan-sidebar-rail';
 
@@ -21,6 +22,7 @@ export default function Layout() {
   const [navOpen, setNavOpen] = useState(false);
   const [rail, setRail] = useState(readRail);
   const location = useLocation();
+  const { user, loading } = useAuth();
 
   useEffect(() => {
     try {
@@ -34,6 +36,13 @@ export default function Layout() {
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname]);
+
+  if (loading) {
+    return <div className="login-shell"><div className="muted">Loading…</div></div>;
+  }
+  if (!user) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
 
   return (
     <div
@@ -96,6 +105,8 @@ export default function Layout() {
           <GlobalSearch />
 
           <div className="spacer" />
+          <LoginBell />
+          <UserChip />
           <ThemeToggle />
         </header>
 
@@ -158,12 +169,12 @@ function BackupReminder() {
   return (
     <div
       style={{
-        padding: '12px 18px',
-        margin: '12px 18px 0',
-        borderRadius: 'var(--radius)',
-        background:
-          'linear-gradient(135deg, rgba(244,63,94,0.15), rgba(124,58,237,0.10))',
-        border: '1px solid rgba(244,63,94,0.35)',
+        padding: '10px 14px',
+        margin: '10px 16px 0',
+        borderRadius: 0,
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderLeft: '3px solid var(--danger)',
         display: 'flex',
         alignItems: 'center',
         gap: 12,
@@ -173,12 +184,215 @@ function BackupReminder() {
       <span style={{ flex: 1 }}>
         ⚠ Today's backup is overdue — scheduled for{' '}
         <strong>{String(status.scheduledHour).padStart(2, '0')}:00</strong>.{' '}
-        <Link to="/backup" style={{ textDecoration: 'underline', color: 'var(--violet-400)' }}>
-          Take it now →
+        <Link to="/backup" style={{ textDecoration: 'underline', color: 'var(--primary)' }}>
+          Take it now
         </Link>
       </span>
       <button className="btn btn-sm btn-ghost" onClick={dismiss}>
         Dismiss
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Superuser-only "bell" in the topbar — polls for unseen login events
+ * and pending access requests every 30s, and shows a panel listing the
+ * latest entries when clicked. Marks events as seen when the panel is
+ * opened.
+ */
+function LoginBell() {
+  const { user } = useAuth();
+  const [counts, setCounts] = useState({ logins: 0, requests: 0 });
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState({ logins: [], requests: [] });
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!isSuperuser(user)) return undefined;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [l, r] = await Promise.all([
+          api.get('/users/login-events/unseen-count'),
+          api.get('/users/access-requests/pending-count'),
+        ]);
+        if (!cancelled) {
+          setCounts({ logins: l.data.count, requests: r.data.count });
+        }
+      } catch {
+        /* ignore — likely just logged out */
+      }
+    };
+    load();
+    const id = setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [user]);
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return undefined;
+    const handle = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    window.addEventListener('mousedown', handle);
+    return () => window.removeEventListener('mousedown', handle);
+  }, [open]);
+
+  if (!isSuperuser(user)) return null;
+
+  const total = counts.logins + counts.requests;
+
+  const togglePanel = async () => {
+    const willOpen = !open;
+    setOpen(willOpen);
+    if (willOpen) {
+      try {
+        const [l, r] = await Promise.all([
+          api.get('/users/login-events?unseen=true&limit=20'),
+          api.get('/users/access-requests?status=PENDING'),
+        ]);
+        setItems({ logins: l.data, requests: r.data });
+        // Optimistically mark logins seen.
+        await api.post('/users/login-events/mark-seen').catch(() => {});
+        setCounts((c) => ({ ...c, logins: 0 }));
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={togglePanel}
+        title="Login notifications"
+        style={{ position: 'relative' }}
+      >
+        🔔
+        {total > 0 && (
+          <span
+            style={{
+              position: 'absolute',
+              top: -4,
+              right: -4,
+              background: 'var(--danger)',
+              color: '#fff',
+              borderRadius: 0,
+              fontSize: 10,
+              padding: '1px 5px',
+              minWidth: 16,
+              textAlign: 'center',
+              fontWeight: 600,
+            }}
+          >
+            {total}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            width: 320,
+            maxHeight: 420,
+            overflowY: 'auto',
+            background: 'var(--surface-elev)',
+            color: 'var(--text)',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 0,
+            boxShadow: 'var(--shadow-lg)',
+            zIndex: 50,
+            padding: 10,
+            fontSize: 13,
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            Pending access requests ({items.requests.length})
+          </div>
+          {items.requests.length === 0 ? (
+            <div className="muted" style={{ marginBottom: 12 }}>None.</div>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              {items.requests.slice(0, 5).map((r) => (
+                <div key={r.id} style={{ padding: '4px 0' }}>
+                  <strong>{r.requestedUsername}</strong>{' '}
+                  <span className="muted">— {r.fullName}</span>
+                </div>
+              ))}
+              <Link
+                to="/users"
+                onClick={() => setOpen(false)}
+                style={{ fontSize: 12, color: 'var(--primary)' }}
+              >
+                Review in Users
+              </Link>
+            </div>
+          )}
+
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            Recent logins
+          </div>
+          {items.logins.length === 0 ? (
+            <div className="muted">No new logins.</div>
+          ) : (
+            items.logins.slice(0, 8).map((l) => (
+              <div key={l.id} style={{ padding: '4px 0' }}>
+                <strong>{l.username}</strong>{' '}
+                <span className="muted" style={{ fontSize: 11 }}>
+                  {new Date(l.createdAt).toLocaleString()}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Signed-in user chip in the topbar — shows the username, role hint, and a
+ * Logout button.
+ */
+function UserChip() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '3px 10px',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 0,
+        fontSize: 12,
+      }}
+    >
+      <Icon name="user" size={14} />
+      <span>
+        <strong>{user.username}</strong>
+        {isSuperuser(user) && (
+          <span className="muted" style={{ marginLeft: 4 }}>· admin</span>
+        )}
+      </span>
+      <button
+        type="button"
+        className="btn btn-sm btn-ghost"
+        onClick={logout}
+        style={{ padding: '2px 8px' }}
+        title="Sign out"
+      >
+        Logout
       </button>
     </div>
   );

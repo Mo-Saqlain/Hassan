@@ -349,16 +349,17 @@ export default function Dashboard() {
                   <div
                     style={{
                       height: 6,
-                      borderRadius: 99,
+                      borderRadius: 0,
                       background: 'var(--chip-bg)',
                       overflow: 'hidden',
+                      border: '1px solid var(--border)',
                     }}
                   >
                     <div
                       style={{
                         width: `${pct}%`,
                         height: '100%',
-                        background: 'var(--gradient-primary)',
+                        background: 'var(--primary)',
                       }}
                     />
                   </div>
@@ -420,13 +421,12 @@ export default function Dashboard() {
         <div
           className="card"
           style={{
-            padding: 20,
-            background:
-              'linear-gradient(160deg, rgba(124,58,237,0.20), rgba(6,182,212,0.10))',
-            borderColor: 'var(--border-glow)',
+            padding: 16,
+            background: 'var(--surface)',
+            borderLeft: '3px solid var(--primary)',
           }}
         >
-          <div className="eyebrow" style={{ color: '#c4b5fd' }}>
+          <div className="eyebrow" style={{ color: 'var(--primary)' }}>
             Incentive · this period
           </div>
           {data.incentive ? (
@@ -442,17 +442,18 @@ export default function Dashboard() {
               <div
                 style={{
                   height: 8,
-                  borderRadius: 99,
-                  background: 'rgba(255,255,255,0.08)',
+                  borderRadius: 0,
+                  background: 'var(--chip-bg)',
                   overflow: 'hidden',
-                  marginTop: 14,
+                  marginTop: 12,
+                  border: '1px solid var(--border)',
                 }}
               >
                 <div
                   style={{
                     width: `${data.incentive.progressPct}%`,
                     height: '100%',
-                    background: 'var(--gradient-accent)',
+                    background: 'var(--primary)',
                   }}
                 />
               </div>
@@ -529,14 +530,14 @@ function ActivityRow({ t, last }) {
     >
       <div
         style={{
-          width: 32,
-          height: 32,
-          borderRadius: 9,
+          width: 30,
+          height: 30,
+          borderRadius: 0,
           background: 'var(--chip-bg)',
           border: '1px solid var(--border)',
           display: 'grid',
           placeItems: 'center',
-          color: 'var(--violet-400)',
+          color: 'var(--primary)',
         }}
       >
         <Icon name={iconName} size={15} />

@@ -139,6 +139,40 @@ export const HUBS = {
       { to: '/account-ledger', label: 'Ledger', icon: 'ledger' },
     ],
   },
+  users: {
+    label: 'Users',
+    title: 'Users',
+    subtitle:
+      'User accounts, access requests, sign-in history, and passwords.',
+    icon: 'users',
+    colorVar: '--nav-system',
+    defaultTo: '/users-change-password',
+    paths: [
+      '/users',
+      '/users-allow-access',
+      '/users-recent-login',
+      '/users-change-password',
+    ],
+    tabs: [
+      // Admin-only tabs come first; the regular-user view starts at
+      // Change Password (the only tab visible to them) — `defaultTo`
+      // above lands non-admins straight on it. HubFrame filters by role.
+      { to: '/users', label: 'Info', icon: 'user', superuserOnly: true },
+      {
+        to: '/users-allow-access',
+        label: 'Allow Access',
+        icon: 'shield',
+        superuserOnly: true,
+      },
+      {
+        to: '/users-recent-login',
+        label: 'Recent Login',
+        icon: 'ledger',
+        superuserOnly: true,
+      },
+      { to: '/users-change-password', label: 'Change Password', icon: 'card' },
+    ],
+  },
   system: {
     label: 'System',
     title: 'System',
@@ -149,8 +183,10 @@ export const HUBS = {
     paths: ['/backup', '/audit-log', '/error-log'],
     tabs: [
       { to: '/backup', label: 'Backups', icon: 'backup' },
-      { to: '/audit-log', label: 'Audit', icon: 'ledger' },
-      { to: '/error-log', label: 'Errors', icon: 'packageX' },
+      // `superuserOnly` tabs are stripped from the strip in HubFrame for
+      // regular users so they don't see (or 403) those pages.
+      { to: '/audit-log', label: 'Audit', icon: 'ledger', superuserOnly: true },
+      { to: '/error-log', label: 'Errors', icon: 'packageX', superuserOnly: true },
     ],
   },
 };

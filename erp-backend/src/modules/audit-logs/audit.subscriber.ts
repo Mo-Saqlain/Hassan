@@ -15,8 +15,19 @@ import { AuditLogsService } from './audit-logs.service';
  * the sync worker, and the error log) — auditing them would either
  * cause an infinite recursion or flood the audit table with noise that
  * isn't useful to the user.
+ *
+ * `User`, `UserAccessRequest`, and `UserLoginEvent` are also excluded:
+ * password-hash changes and login timestamps shouldn't show up in the
+ * day-to-day audit feed, and login events have their own viewer.
  */
-const SKIP = new Set(['AuditLog', 'ErrorLog', 'OutboxEvent']);
+const SKIP = new Set([
+  'AuditLog',
+  'ErrorLog',
+  'OutboxEvent',
+  'User',
+  'UserAccessRequest',
+  'UserLoginEvent',
+]);
 
 /**
  * Subset of entity fields included verbatim in the `summary` string and
