@@ -48,9 +48,23 @@ function buildDbOptions(): TypeOrmModuleOptions {
       synchronize: true,
     };
   }
+  // Supabase's Session pooler expects the username `postgres.<project-ref>`
+  // (e.g. `postgres.vgjecwkyselvwwvmawvn`) — the dot is significant. Passing
+  // the URL through TypeORM's `url:` option works on direct connections but
+  // some pg/TLS code paths split the username at the dot and ship just
+  // `postgres` upstream, which the pooler then rejects as
+  //   `password authentication failed for user "postgres"`.
+  //
+  // Parsing the URL ourselves and passing explicit username/password/host/
+  // port/database fields routes around that — pg uses them verbatim.
+  const parsed = new URL(process.env.DATABASE_URL!);
   return {
     type: 'postgres',
-    url: process.env.DATABASE_URL,
+    host: parsed.hostname,
+    port: Number(parsed.port || 5432),
+    username: decodeURIComponent(parsed.username),
+    password: decodeURIComponent(parsed.password),
+    database: parsed.pathname.replace(/^\//, '') || 'postgres',
     autoLoadEntities: true,
     synchronize: process.env.DB_SYNC === 'true',
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
