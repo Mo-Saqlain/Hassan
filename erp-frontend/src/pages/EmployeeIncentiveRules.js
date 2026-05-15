@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
 const BASIS = [
   { value: 'ALL_SALES', label: 'All sales', needsRef: null },
@@ -19,24 +20,31 @@ export default function EmployeeIncentiveRules() {
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(blank());
+  const [initialForm, setInitialForm] = useState(blank());
   const [submitErr, setSubmitErr] = useState(null);
+
+  const isDirty = useMemo(
+    () => show && JSON.stringify(form) !== JSON.stringify(initialForm),
+    [show, form, initialForm],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const open = (row) => {
     setEditing(row);
-    setForm(
-      row
-        ? {
-            employeeId: row.employeeId,
-            basis: row.basis,
-            referenceId: row.referenceId ?? '',
-            percentage: row.percentage ?? '',
-            startsOn: row.startsOn ?? '',
-            endsOn: row.endsOn ?? '',
-            notes: row.notes ?? '',
-            isActive: row.isActive ?? true,
-          }
-        : blank(),
-    );
+    const next = row
+      ? {
+          employeeId: row.employeeId,
+          basis: row.basis,
+          referenceId: row.referenceId ?? '',
+          percentage: row.percentage ?? '',
+          startsOn: row.startsOn ?? '',
+          endsOn: row.endsOn ?? '',
+          notes: row.notes ?? '',
+          isActive: row.isActive ?? true,
+        }
+      : blank();
+    setForm(next);
+    setInitialForm(next);
     setSubmitErr(null);
     setShow(true);
   };

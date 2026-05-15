@@ -118,11 +118,28 @@ export function clearAppliedAccent() {
 }
 
 /**
- * OS accent exposed by the Electron main process via a `data-os-accent`
- * attribute on `<html>`. Returns null in the browser build.
+ * Read the OS accent (Windows / macOS) exposed by the Electron preload
+ * bridge. Falls back to the legacy `data-os-accent` attribute for any
+ * older build still running. Returns null in the browser dev server.
  */
 export function getOsAccent() {
+  if (typeof window === 'undefined') return null;
+  const bridged = window.erpBridge && window.erpBridge.osAccent;
+  if (bridged && /^#[0-9a-fA-F]{6}$/.test(bridged)) return bridged.toLowerCase();
   if (typeof document === 'undefined') return null;
-  const v = document.documentElement.getAttribute('data-os-accent');
-  return v && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
+  const attr = document.documentElement.getAttribute('data-os-accent');
+  return attr && /^#[0-9a-fA-F]{6}$/.test(attr) ? attr.toLowerCase() : null;
+}
+
+/**
+ * Subscribe to live OS accent changes (the user opens Windows Settings
+ * → Personalisation → Colors mid-session and switches accent). The
+ * callback receives the new `#rrggbb` hex string. Returns an
+ * unsubscribe function. No-op in the browser dev server.
+ */
+export function subscribeOsAccentChange(cb) {
+  if (typeof window === 'undefined') return () => {};
+  const bridge = window.erpBridge;
+  if (!bridge || typeof bridge.onOsAccentChange !== 'function') return () => {};
+  return bridge.onOsAccentChange(cb);
 }

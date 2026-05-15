@@ -7,6 +7,7 @@ import {
   getOsAccent,
   getStoredAccent,
   setStoredAccent,
+  subscribeOsAccentChange,
 } from '../theme/accent';
 
 /**
@@ -24,21 +25,19 @@ export default function Accent() {
 
   const mode = stored ? 'custom' : osAccent ? 'os' : 'custom';
 
+  // Subscribe to live OS-accent changes pushed by the Electron main
+  // process (the user opens Windows Personalisation mid-session and
+  // picks a new colour). If the user is on "Follow Windows" mode, the
+  // new accent also re-applies immediately so they see it without
+  // restarting the app.
   useEffect(() => {
-    if (osAccent) return undefined;
-    let ticks = 0;
-    const id = setInterval(() => {
-      ticks += 1;
-      const v = getOsAccent();
-      if (v) {
-        setOsAccent(v);
-        clearInterval(id);
-      } else if (ticks >= 10) {
-        clearInterval(id);
-      }
-    }, 500);
-    return () => clearInterval(id);
-  }, [osAccent]);
+    const unsub = subscribeOsAccentChange((hex) => {
+      if (!hex) return;
+      setOsAccent(hex);
+      if (!getStoredAccent()) applyAccent(hex);
+    });
+    return unsub;
+  }, []);
 
   const flashOk = (msg) => {
     setFlash(msg);

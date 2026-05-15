@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { useResource } from '../../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../ExportButtons';
 
 const empty = {
@@ -23,8 +24,15 @@ export default function ItemsPanel() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
+  const [initialForm, setInitialForm] = useState(empty);
   const [submitError, setSubmitError] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(initialForm),
+    [showForm, form, initialForm],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   // Quick search — typing here filters the list as you go.
   const [query, setQuery] = useState('');
@@ -42,21 +50,21 @@ export default function ItemsPanel() {
 
   const open = (row) => {
     setEditing(row);
-    setForm(
-      row
-        ? {
-            modelNo: row.modelNo ?? row.name ?? '',
-            sku: row.sku ?? '',
-            brandId: row.brandId ?? '',
-            categoryIds: (row.categories ?? []).map((c) => c.id),
-            purchasePrice: row.purchasePrice ?? '',
-            salePrice: row.salePrice ?? '',
-            unit: row.unit ?? 'pcs',
-            minStockLevel: row.minStockLevel ?? '',
-            isActive: row.isActive ?? true,
-          }
-        : empty,
-    );
+    const next = row
+      ? {
+          modelNo: row.modelNo ?? row.name ?? '',
+          sku: row.sku ?? '',
+          brandId: row.brandId ?? '',
+          categoryIds: (row.categories ?? []).map((c) => c.id),
+          purchasePrice: row.purchasePrice ?? '',
+          salePrice: row.salePrice ?? '',
+          unit: row.unit ?? 'pcs',
+          minStockLevel: row.minStockLevel ?? '',
+          isActive: row.isActive ?? true,
+        }
+      : empty;
+    setForm(next);
+    setInitialForm(next);
     setShowAdvanced(false);
     setShowForm(true);
     setSubmitError(null);

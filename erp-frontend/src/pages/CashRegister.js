@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
 const CATEGORIES = [
   { value: 'EXPENSE', label: 'Expense (rent, tea, transport…)' },
@@ -342,6 +343,16 @@ function OpenSessionForm({ accounts, date, expectedOpening, onCancel, onSaved })
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  const isDirty =
+    actual !== '' ||
+    notes !== '' ||
+    transferOpen ||
+    transfer.fromAccountId !== '' ||
+    transfer.toAccountId !== '' ||
+    transfer.amount !== '' ||
+    transfer.notes !== '';
+  useUnsavedChangesPrompt(isDirty);
+
   const actualNum = Number(actual || 0);
   const diff = actualNum - Number(expectedOpening);
   const shortfall = diff < 0 ? -diff : 0;
@@ -549,6 +560,8 @@ function CloseSessionForm({ session, expectedClosing, onCancel, onSaved }) {
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  useUnsavedChangesPrompt(actual !== '' || notes !== '');
+
   const actualNum = Number(actual || 0);
   const diff = actualNum - Number(expectedClosing);
 
@@ -626,17 +639,27 @@ function CloseSessionForm({ session, expectedClosing, onCancel, onSaved }) {
 }
 
 function EntryForm({ accounts, date, onCancel, onSaved }) {
-  const [form, setForm] = useState({
-    entryDate: date,
-    direction: 'OUT',
-    category: 'EXPENSE',
-    amount: '',
-    accountId: '',
-    description: '',
-    notes: '',
-  });
+  const blankEntry = useMemo(
+    () => ({
+      entryDate: date,
+      direction: 'OUT',
+      category: 'EXPENSE',
+      amount: '',
+      accountId: '',
+      description: '',
+      notes: '',
+    }),
+    [date],
+  );
+  const [form, setForm] = useState(blankEntry);
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(blankEntry),
+    [form, blankEntry],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const submit = async (e) => {
     e.preventDefault();

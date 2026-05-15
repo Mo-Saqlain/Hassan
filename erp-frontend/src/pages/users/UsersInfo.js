@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
+import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt';
 
 const fmt = (d) => (d ? new Date(d).toLocaleString() : '—');
 
@@ -138,6 +139,13 @@ function CreateUserModal({ onClose, onCreated }) {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  const isDirty =
+    form.username !== '' ||
+    form.password !== '' ||
+    form.fullName !== '' ||
+    form.role !== 'USER';
+  useUnsavedChangesPrompt(isDirty);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { useResource } from '../../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../ExportButtons';
 
 const empty = { name: '', description: '', parentId: '', isActive: true };
@@ -10,7 +11,14 @@ export default function CategoriesPanel() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
+  const [initialForm, setInitialForm] = useState(empty);
   const [submitError, setSubmitError] = useState(null);
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(initialForm),
+    [showForm, form, initialForm],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const tree = useMemo(() => buildTree(categories), [categories]);
   const flat = useMemo(() => flattenTree(tree), [tree]);
@@ -27,16 +35,16 @@ export default function CategoriesPanel() {
 
   const open = (row) => {
     setEditing(row);
-    setForm(
-      row
-        ? {
-            name: row.name ?? '',
-            description: row.description ?? '',
-            parentId: row.parentId ?? '',
-            isActive: row.isActive ?? true,
-          }
-        : empty,
-    );
+    const next = row
+      ? {
+          name: row.name ?? '',
+          description: row.description ?? '',
+          parentId: row.parentId ?? '',
+          isActive: row.isActive ?? true,
+        }
+      : empty;
+    setForm(next);
+    setInitialForm(next);
     setShowForm(true);
     setSubmitError(null);
   };

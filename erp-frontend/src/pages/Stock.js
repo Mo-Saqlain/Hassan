@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../components/ExportButtons';
 
 /**
@@ -36,6 +37,12 @@ export default function Stock() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm());
   const [submitError, setSubmitError] = useState(null);
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(blankForm()),
+    [showForm, form],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   // Look up the selected item's on-hand from the cached summary so we can
   // show "after adjustment" preview without an extra API round-trip.

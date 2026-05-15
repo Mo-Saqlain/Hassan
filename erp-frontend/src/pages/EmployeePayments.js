@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../components/ExportButtons';
 
 const TYPES = [
@@ -22,6 +23,12 @@ export default function EmployeePayments() {
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(blank());
   const [submitErr, setSubmitErr] = useState(null);
+
+  const isDirty = useMemo(
+    () => show && JSON.stringify(form) !== JSON.stringify(blank()),
+    [show, form],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const submit = async (e) => {
     e.preventDefault();

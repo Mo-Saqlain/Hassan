@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client';
+import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt';
 
 const fmt = (d) => (d ? new Date(d).toLocaleString() : '—');
 
@@ -157,13 +158,20 @@ export default function UsersAllowAccess() {
 }
 
 function ApproveModal({ request, onClose, onApproved }) {
-  const [form, setForm] = useState({
+  const initial = {
     username: request.requestedUsername,
     password: '',
     fullName: request.fullName,
-  });
+  };
+  const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  const isDirty =
+    form.username !== initial.username ||
+    form.password !== '' ||
+    form.fullName !== initial.fullName;
+  useUnsavedChangesPrompt(isDirty);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 

@@ -1,7 +1,7 @@
 {
   "name": "erp-desktop",
   "version": "1.0.0",
-  "description": "Hassan Electronics ERP — Electron desktop wrapper. Bundles the local NestJS backend (offline-first SQLite) and React frontend; pushes outbox events to a deployed cloud backend / Supabase when online.",
+  "description": "Hassan Electronics",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -22,7 +22,7 @@
   },
   "build": {
     "appId": "com.hassanelectronics.erp",
-    "productName": "Hassan Electronics ERP",
+    "productName": "Hassan Electronics",
     "copyright": "Copyright © 2026 Hassan Electronics",
     "directories": {
       "buildResources": "build-resources",
@@ -64,9 +64,16 @@
         {
           "target": "nsis",
           "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
         }
       ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -74,7 +81,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "Hassan Electronics ERP"
+      "shortcutName": "Hassan Electronics",
+      "include": "build-resources/installer.nsh",
+      "deleteAppDataOnUninstall": false
     },
     "mac": {
       "target": [

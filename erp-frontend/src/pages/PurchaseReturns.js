@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
 const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0 });
 
@@ -12,15 +13,22 @@ export default function PurchaseReturns() {
   const { data: suppliers } = useResource('/suppliers');
   const { data: stores } = useResource('/stores');
 
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
+  const blankForm = () => ({
     supplierId: '',
     storeId: '',
     purchaseId: '',
     reason: '',
     lines: [emptyLine()],
   });
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(blankForm());
   const [submitError, setSubmitError] = useState(null);
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(blankForm()),
+    [showForm, form],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const itemById = useMemo(() => {
     const m = new Map();
@@ -71,13 +79,7 @@ export default function PurchaseReturns() {
     try {
       await api.post('/purchase-returns', payload);
       setShowForm(false);
-      setForm({
-        supplierId: '',
-        storeId: '',
-        purchaseId: '',
-        reason: '',
-        lines: [emptyLine()],
-      });
+      setForm(blankForm());
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
 const tabs = [
   { key: 'progress', label: 'Targets & Progress' },
@@ -150,18 +151,27 @@ function TargetsPanel() {
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(blankTarget());
+  const [initialForm, setInitialForm] = useState(blankTarget());
   const [submitErr, setSubmitErr] = useState(null);
+
+  const isDirty = useMemo(
+    () => show && JSON.stringify(form) !== JSON.stringify(initialForm),
+    [show, form, initialForm],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const startAdd = () => {
     setEditing(null);
-    setForm(blankTarget());
+    const next = blankTarget();
+    setForm(next);
+    setInitialForm(next);
     setSubmitErr(null);
     setShow(true);
   };
 
   const startEdit = (t) => {
     setEditing(t);
-    setForm({
+    const next = {
       name: t.name,
       basis: t.basis,
       itemId: t.itemId ?? '',
@@ -173,7 +183,9 @@ function TargetsPanel() {
       incentiveAmount: t.incentiveAmount,
       notes: t.notes ?? '',
       isActive: t.isActive,
-    });
+    };
+    setForm(next);
+    setInitialForm(next);
     setSubmitErr(null);
     setShow(true);
   };
@@ -451,6 +463,12 @@ function AwardsPanel() {
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(blankAward());
   const [submitErr, setSubmitErr] = useState(null);
+
+  const isDirty = useMemo(
+    () => show && JSON.stringify(form) !== JSON.stringify(blankAward()),
+    [show, form],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const submit = async (e) => {
     e.preventDefault();

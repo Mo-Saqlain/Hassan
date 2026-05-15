@@ -43,7 +43,12 @@
   height: 44px;
   box-sizing: border-box;
   padding: 0 8px;
-  border-bottom: 1px solid var(--border);
+  /* No border-bottom here — the title-bar overlay (Windows-drawn min/
+     max/close on the right) cannot paint over a border, so any 1px line
+     drawn across .brand + .topbar appears broken at the overlay seam.
+     The sidebar's right-edge border on .sidebar separates it from the
+     topbar; the .content area below uses --bg which contrasts with
+     --surface-elev so the visual separation survives. */
   margin-bottom: 6px;
 }
 button.brand-toggle {
@@ -138,7 +143,10 @@ button.brand-toggle:focus-visible { outline: 2px solid var(--info); outline-offs
      titleBarStyle is 'hidden' with a titleBarOverlay; the fallback (0) is
      used in the browser dev server where there is no overlay. */
   padding: 0 calc(100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 0px) + 12px) 0 16px;
-  border-bottom: 1px solid var(--border);
+  /* No border-bottom — see .brand above. The Windows title-bar overlay
+     covers the right edge of the topbar and breaks any 1px line drawn
+     across the bar's bottom; --bg vs --surface-elev contrast supplies
+     enough visual separation from the content area below. */
   background: var(--surface-elev);
   backdrop-filter: none;
   z-index: 9;

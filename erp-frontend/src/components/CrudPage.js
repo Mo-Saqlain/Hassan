@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ExportButtons from './ExportButtons';
 
 /**
@@ -177,7 +178,7 @@ function formatCell(v) {
 }
 
 function CrudForm({ fields, initial, onCancel, onSubmit, submitError }) {
-  const [values, setValues] = useState(() => {
+  const buildInitial = () => {
     const init = {};
     for (const f of fields) {
       init[f.key] =
@@ -186,7 +187,15 @@ function CrudForm({ fields, initial, onCancel, onSubmit, submitError }) {
           : f.defaultValue ?? (f.type === 'checkbox' ? false : '');
     }
     return init;
-  });
+  };
+  const [initialValues] = useState(buildInitial);
+  const [values, setValues] = useState(initialValues);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(values) !== JSON.stringify(initialValues),
+    [values, initialValues],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const handleChange = (key, value) => {
     setValues((v) => ({ ...v, [key]: value }));

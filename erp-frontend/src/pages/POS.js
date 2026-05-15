@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import Icon from '../components/Icon';
 
 export default function POS() {
@@ -32,6 +33,14 @@ export default function POS() {
   });
   const [newCustomerError, setNewCustomerError] = useState(null);
   const [newCustomerBusy, setNewCustomerBusy] = useState(false);
+
+  const newCustomerDirty =
+    showCustomerModal &&
+    (newCustomer.name !== '' ||
+      newCustomer.phone !== '' ||
+      newCustomer.email !== '' ||
+      newCustomer.address !== '');
+  useUnsavedChangesPrompt(newCustomerDirty);
 
   const scanInputRef = useRef(null);
 

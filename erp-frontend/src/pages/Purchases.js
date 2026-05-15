@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
 const emptyLine = () => ({ itemId: '', storeId: '', quantity: 1, unitPrice: 0 });
 
@@ -12,6 +13,16 @@ const emptyItem = () => ({
   brandId: '',
   purchasePrice: '',
   salePrice: '',
+});
+
+const blankPurchase = () => ({
+  supplierId: '',
+  storeId: '',
+  discount: 0,
+  paidAmount: '',
+  paymentMethod: 'CASH',
+  notes: '',
+  lines: [emptyLine()],
 });
 
 export default function Purchases() {
@@ -30,16 +41,20 @@ export default function Purchases() {
   const [savingNewItem, setSavingNewItem] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    supplierId: '',
-    storeId: '',
-    discount: 0,
-    paidAmount: '',
-    paymentMethod: 'CASH',
-    notes: '',
-    lines: [emptyLine()],
-  });
+  const [form, setForm] = useState(blankPurchase());
   const [submitError, setSubmitError] = useState(null);
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(blankPurchase()),
+    [showForm, form],
+  );
+  useUnsavedChangesPrompt(isDirty);
+
+  const newItemDirty = useMemo(
+    () => newItemFor !== null && JSON.stringify(newItem) !== JSON.stringify(emptyItem()),
+    [newItemFor, newItem],
+  );
+  useUnsavedChangesPrompt(newItemDirty);
 
   const itemById = useMemo(() => {
     const m = new Map();
@@ -155,15 +170,7 @@ export default function Purchases() {
     try {
       await api.post('/purchases', payload);
       setShowForm(false);
-      setForm({
-        supplierId: '',
-        storeId: '',
-        discount: 0,
-        paidAmount: '',
-        paymentMethod: 'CASH',
-        notes: '',
-        lines: [emptyLine()],
-      });
+      setForm(blankPurchase());
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');

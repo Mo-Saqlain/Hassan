@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
 /**
  * direction = 'IN' (Receipt from customer) or 'OUT' (Payment to supplier)
@@ -26,13 +27,18 @@ export default function VoucherPage({ direction }) {
   const { data: parties } = useResource(balancesPath);
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    accountId: '',
-    [partyKey]: '',
-    amount: '',
-    notes: '',
-  });
+  const blankForm = { accountId: '', [partyKey]: '', amount: '', notes: '' };
+  const [form, setForm] = useState(blankForm);
   const [submitError, setSubmitError] = useState(null);
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(blankForm),
+    // partyKey changes only when `direction` changes — safe to depend on
+    // form alone because the page remounts on direction switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [showForm, form],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const submit = async (e) => {
     e.preventDefault();

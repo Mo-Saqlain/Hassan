@@ -165,9 +165,11 @@ A real cashier's day book.
 - **Collapsible sidebar rail** — the brand chip at the top of the sidebar doubles as the rail toggle: click it to collapse the desktop sidebar to a 56 px icon-only rail; click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). Disabled on mobile (≤ 860 px), where the off-canvas drawer pattern is used.
 - **Responsive** — sidebar becomes a fixed off-canvas drawer ≤ 860 px; grids collapse, tables get horizontal scroll, POS stacks vertically, cart rows reflow.
 - **Status chips** — semantic-color filled rectangles. Used for payment states, low-stock badges, session status, sync-queue status.
+- **Unsaved-changes guard** — every CRUD form (items, categories, brands, customers, suppliers, stores, accounts, employees, users, vouchers, stock transfers, fund transfers, purchase orders, sale/purchase returns, damaged goods, stock adjustments, cash-register sessions, employee payments, incentive targets / awards / rules, POS new-customer modal, etc.) is tracked by a shared [`useUnsavedChangesPrompt` hook](erp-frontend/src/hooks/useUnsavedChangesPrompt.js). The hook diffs the live form against its initial snapshot; when it's dirty it (a) attaches a capture-phase `click` listener to `document` that intercepts any `<a href="#/…">` (sidebar NavLinks, hub-tab links) before React Router sees it, pops a confirm dialog, and only lets the navigation through if the user agrees, and (b) wires `beforeunload` so closing the tab / refreshing the window also asks. Saving / Cancel both clear the dirty flag first, so the prompt never fires on a legitimate completion. The click-interceptor approach was chosen over React Router's `useBlocker` because the app uses the declarative `<HashRouter>` (not a data router), and `useBlocker` only works with `createHashRouter` + `RouterProvider`. No more retyping a half-filled item form because you brushed the Dashboard link with the touchpad.
+- **Seamless title bar (Electron)** — the in-app `.topbar` and the sidebar header (`.brand`) share the exact same background as the Windows-drawn min/max/close overlay (`#fafafa` light, `#333333` dark, both pinned to `--surface-elev` in [tokens.css](erp-frontend/src/styles/tokens.css)). No 1 px border lines anywhere on the top 44 px band — the Windows overlay is opaque and sits on top of the topbar, so any border would appear truncated at the overlay seam. Visual separation from the page content below is supplied by the `--bg` vs `--surface-elev` colour contrast, not a divider line.
 - **Accent colour — three-layer resolution** (highest priority first):
   1. **User pick** — `System → Accent` presents two explicit modes: **Follow Windows accent** (auto-syncs with Windows/macOS Personalisation) or **Use custom accent** (9 Win10-style preset swatches + an HTML5 color input + a hex text field). The custom-mode choice persists in `localStorage.hassan-accent-color` and is applied **before the first paint** via [erp-frontend/src/theme/accent.js](erp-frontend/src/theme/accent.js) so there's no flash of the old colour on cold load. The "Follow Windows" card is disabled outside the Electron wrapper.
-  2. **OS accent (Electron only)** — the desktop wrapper reads `systemPreferences.getAccentColor()` and pushes it into the renderer on every page load and on `accent-color-changed`. Injected JS bails if the localStorage override is set, so a user pick always wins.
+  2. **OS accent (Electron only)** — the desktop wrapper reads `systemPreferences.getAccentColor()` and pushes the hex value through the sandboxed preload bridge ([`erp-desktop/src/preload.js`](erp-desktop/src/preload.js)): synchronously at app launch as `window.erpBridge.osAccent`, and live via `onOsAccentChange()` when the user opens Windows Personalisation mid-session and switches accent. The accent flows over Electron IPC, **not** `webContents.executeJavaScript()` — the renderer's strict CSP (`script-src 'self'` in [index.html](erp-frontend/public/index.html)) blocks dynamic script evaluation inside the page context, which would otherwise silently break "Follow Windows accent" in production builds. The boot script in [theme-bootstrap.js](erp-frontend/public/theme-bootstrap.js) reads `window.erpBridge.osAccent` before React mounts and applies it as the first paint, so there's no flash of default blue when "Follow Windows" is active.
   3. **Default Windows blue** — `#0078d4` (defined in [tokens.css](erp-frontend/src/styles/tokens.css)).
 
   Every accent surface (primary buttons, hub-tab underline, active sidebar strip, focus rings, the Adjusted Net Income row on the Income Statement, etc.) resolves through `var(--primary)` / `var(--info)`. The same `applyAccent()` writes `--primary-hover` (12 % darker), `--primary-soft` (18 % alpha for chip fills), `--accent-pressed` (25 % darker), `--primary-fg` (auto-picked white or `#1f1f1f` for AAA contrast).
@@ -381,7 +383,7 @@ The Electron wrapper produces a fully self-contained NSIS installer. The shop PC
 
 ### Renderer sandboxing
 
-The Electron `BrowserWindow` runs with `contextIsolation: true` and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface (currently only `setTitleBarTheme`). A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out to the OS — it sees the same DOM a regular browser tab would see. The planned hardening pass adds `sandbox: true`, a strict CSP, and Helmet on the backend on top of this.
+The Electron `BrowserWindow` runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface — `setTitleBarTheme(theme)`, `osAccent` (read at preload, used by the boot script in [theme-bootstrap.js](erp-frontend/public/theme-bootstrap.js)), and `onOsAccentChange(cb)`. A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out to the OS — it sees the same DOM a regular browser tab would see. The strict Helmet CSP on the backend and the `<meta http-equiv="Content-Security-Policy">` tag in [index.html](erp-frontend/public/index.html) (with `script-src 'self'`) further block dynamic script evaluation in the renderer.
 
 ### Window chrome (VS Code-style)
 
@@ -392,10 +394,11 @@ The Electron window deliberately drops the native menu bar (`Menu.setApplication
 ```bash
 cd erp-desktop
 npm install
-npm run package:win        # → release/Hassan Electronics ERP-Setup-1.0.0.exe  (~115 MB)
+npm run package:win        # → release/Hassan Electronics-Setup-1.0.0.exe   (NSIS installer, ~115 MB)
+                           # → release/Hassan Electronics-Portable-1.0.0.exe (single-file portable, ~115 MB)
 ```
 
-`package:win` chains `npm run prepackage` (build backend + frontend, rebuild native deps for Electron) and `electron-builder --win --x64`. On macOS / Linux:
+`package:win` chains `npm run prepackage` (build backend + frontend, stage a production-only backend tree, rebuild native deps for Electron) and `electron-builder --win --x64`. The Windows target produces **both** artifacts in one run — pick whichever matches the install context. On macOS / Linux:
 
 ```bash
 npm run package:mac        # .dmg (universal arm64 + x64)
@@ -403,7 +406,17 @@ npm run package:linux      # AppImage (x64)
 npm run package            # current platform
 ```
 
-**NSIS installer settings:** per-user (no admin needed), oneClick off (user gets a Next / Install flow), `allowToChangeInstallationDirectory: true`, creates Desktop + Start Menu shortcuts named "Hassan Electronics ERP". **Unsigned** — Windows SmartScreen warns on first run; click *More info → Run anyway*. To suppress this, ship a code-signing certificate via electron-builder's `signtoolOptions`.
+**App identity.** `build.productName` is **"Hassan Electronics"** (just the two words — the longer "ERP" form is gone from every user-facing surface: installer filename, shortcut name, Start Menu entry, Add/Remove Programs label, BrowserWindow title, .exe basename). The `package.json` `description` field is kept short ("Hassan Electronics") so the Windows Task Manager process tree shows a clean label instead of the full marketing blurb that electron-builder otherwise bakes into the .exe's `FileDescription` VersionInfo field. Task Manager groups Electron's 5 sub-processes (main + renderer + 3 utility) under that single label.
+
+**NSIS installer:** per-user (no admin needed), `oneClick: false` (user gets the Welcome → License → Install Location → Install flow), `allowToChangeInstallationDirectory: true`, `deleteAppDataOnUninstall: false` (SQLite database and backups under `%APPDATA%\Hassan Electronics` survive an uninstall). Creates Desktop + Start Menu shortcuts named "Hassan Electronics".
+
+The installer ships a custom NSIS include ([erp-desktop/build-resources/installer.nsh](erp-desktop/build-resources/installer.nsh)) that adds a per-module narrative to both install and uninstall. `ShowInstDetails show` + `ShowUnInstDetails show` keep the details panel open by default so the user sees lines such as *"[3/6] Installing frontend module (React UI)…"* and *"[4/6] Installing backend module (local NestJS server)…"* without having to click *Show details*. Uninstall shows a matching 5-step narrative noting that SQLite + backups are intentionally preserved. The hooks used are electron-builder's `customHeader`, `customInit`, `customInstall`, `customUnInit`, `customUnInstall`.
+
+**Portable .exe:** electron-builder's `target: portable` produces a single self-extracting `.exe` that runs on the go — no install, no admin prompt, no Start Menu shortcut. On launch it unpacks itself to `%TEMP%\<app-id>` and starts. SQLite + backups still land in `%APPDATA%\Hassan Electronics`, so data persists across portable launches AND survives a switch between the portable and the installed build on the same machine.
+
+**Backend launch resilience.** First boot of a fresh SQLite install runs TypeORM `synchronize: true` across 41 entities and `AccountsService.onModuleInit` seeds 14 chart-of-accounts rows (8 control + 6 system) — slow on low-end hardware. The desktop wrapper waits up to **90 s** for the backend's `/api/health` to come up (was 15 s — too tight for first boot), short-circuits the wait the instant the backend process dies (so you see a real error instead of staring at a 90-second timer), and mirrors the backend's stdout + stderr to `%APPDATA%\Hassan Electronics\backend.log`. Any "Backend did not become ready in time" / "Backend stopped" dialog now points at the log file path so you can read the actual stack trace.
+
+**Unsigned.** Windows SmartScreen warns on first run; click *More info → Run anyway*. To suppress this, ship a code-signing certificate via electron-builder's `signtoolOptions`.
 
 > **Electron version pin.** `erp-desktop/package.json` pins `electron` to `^40.0.0`. better-sqlite3 v12.10 only publishes Electron prebuilts through ABI `electron-v145` (= Electron 40); newer Electron majors (41+) force a source compile via node-gyp which fails without MSVC Build Tools. If you bump Electron, either wait for a matching better-sqlite3 release or install "Build Tools for Visual Studio 2022" with the **Desktop development with C++** workload.
 
@@ -411,9 +424,11 @@ npm run package            # current platform
 
 After install (per user), drop a `config.json` at:
 
-- **Windows:** `%APPDATA%\erp-desktop\config.json`
-- **macOS:** `~/Library/Application Support/erp-desktop/config.json`
-- **Linux:** `~/.config/erp-desktop/config.json`
+- **Windows:** `%APPDATA%\Hassan Electronics\config.json`
+- **macOS:** `~/Library/Application Support/Hassan Electronics/config.json`
+- **Linux:** `~/.config/Hassan Electronics/config.json`
+
+(The folder name follows `build.productName` from `erp-desktop/package.json`. Older installs of the same app may still write to `…\erp-desktop\` — copy `config.json` over after the first launch of the renamed build.)
 
 ```json
 {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import CrudPage from '../components/CrudPage';
@@ -6,6 +6,7 @@ import Icon from '../components/Icon';
 import ExportButtons from '../components/ExportButtons';
 import ItemsPanel from '../components/master/ItemsPanel';
 import CategoriesPanel from '../components/master/CategoriesPanel';
+import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
 const tiles = [
   {
@@ -261,8 +262,15 @@ function EmployeesPanel() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyEmployee());
+  const [initialForm, setInitialForm] = useState(emptyEmployee());
   const [submitError, setSubmitError] = useState(null);
   const [query, setQuery] = useState('');
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(initialForm),
+    [showForm, form, initialForm],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const filtered = rows.filter((r) => {
     const term = query.trim().toLowerCase();
@@ -307,14 +315,16 @@ function EmployeesPanel() {
 
   const startAdd = () => {
     setEditing(null);
-    setForm(emptyEmployee());
+    const next = emptyEmployee();
+    setForm(next);
+    setInitialForm(next);
     setShowForm(true);
     setSubmitError(null);
   };
 
   const startEdit = (row) => {
     setEditing(row);
-    setForm({
+    const next = {
       code: row.code ?? '',
       name: row.name ?? '',
       role: row.role ?? '',
@@ -328,7 +338,9 @@ function EmployeesPanel() {
       firstSalaryInAdvance: row.firstSalaryInAdvance ?? false,
       notes: row.notes ?? '',
       isActive: row.isActive ?? true,
-    });
+    };
+    setForm(next);
+    setInitialForm(next);
     setShowForm(true);
     setSubmitError(null);
   };
@@ -749,8 +761,15 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
+  const [initialForm, setInitialForm] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [query, setQuery] = useState('');
+
+  const isDirty = useMemo(
+    () => showForm && JSON.stringify(form) !== JSON.stringify(initialForm),
+    [showForm, form, initialForm],
+  );
+  useUnsavedChangesPrompt(isDirty);
 
   const filtered = rows.filter((r) => {
     const term = query.trim().toLowerCase();
@@ -795,14 +814,16 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
 
   const startAdd = () => {
     setEditing(null);
-    setForm({ code: '', name: '', phone: '', email: '', address: '', openingBalance: '', isActive: true });
+    const next = { code: '', name: '', phone: '', email: '', address: '', openingBalance: '', isActive: true };
+    setForm(next);
+    setInitialForm(next);
     setShowForm(true);
     setSubmitError(null);
   };
 
   const startEdit = (row) => {
     setEditing(row);
-    setForm({
+    const next = {
       code: row.code ?? '',
       name: row.name ?? '',
       phone: row.phone ?? '',
@@ -810,7 +831,9 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
       address: row.address ?? '',
       openingBalance: row.openingBalance ?? '',
       isActive: row.isActive ?? true,
-    });
+    };
+    setForm(next);
+    setInitialForm(next);
     setShowForm(true);
     setSubmitError(null);
   };
