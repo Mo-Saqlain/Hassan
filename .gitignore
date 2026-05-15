@@ -56,3 +56,4 @@ coverage/
 # ───────── Misc ─────────
 .cache/
 *.local
+Changes.txt
