@@ -15,6 +15,15 @@ import { SyncQueueEntry } from '../outbox/entities/sync-queue.entity';
 import { StockService } from '../stock/stock.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PurchasesService } from './purchases.service';
+import { Sequence } from '../sequences/entities/sequence.entity';
+import { SequenceService } from '../sequences/sequence.service';
+import { Account } from '../accounts/entities/account.entity';
+import { AccountsService } from '../accounts/accounts.service';
+import { JournalEntry } from '../journals/entities/journal-entry.entity';
+import { JournalLine } from '../journals/entities/journal-line.entity';
+import { JournalService } from '../journals/journal.service';
+import { AccountingPeriod } from '../periods/entities/accounting-period.entity';
+import { PeriodsService } from '../periods/periods.service';
 
 describe('PurchasesService', () => {
   let service: PurchasesService;
@@ -25,18 +34,25 @@ describe('PurchasesService', () => {
   beforeEach(async () => {
     const module = await Test.createTestingModule({
       imports: [
+
         TypeOrmModule.forRoot(
           inMemoryTypeOrm([
             Item, Brand, Category, Supplier, Store,
-            StockMovement, Purchase, PurchaseItem, SyncQueueEntry,
+            StockMovement, Purchase, PurchaseItem, SyncQueueEntry, Sequence,
+            Account, JournalEntry, JournalLine, AccountingPeriod,
           ]),
         ),
         TypeOrmModule.forFeature([
-          Item, StockMovement, Purchase, PurchaseItem, SyncQueueEntry,
+          Item, StockMovement, Purchase, PurchaseItem, SyncQueueEntry, Sequence,
+          Account, JournalEntry, JournalLine, AccountingPeriod,
         ]),
       ],
-      providers: [PurchasesService, StockService, OutboxService],
+      providers: [
+        PurchasesService, StockService, OutboxService, SequenceService,
+        AccountsService, JournalService, PeriodsService,
+      ],
     }).compile();
+    await module.init();
 
     service = module.get(PurchasesService);
     stock = module.get(StockService);

@@ -56,6 +56,16 @@ export class Purchase extends BaseEntity {
   @Column({ nullable: true })
   notes?: string;
 
+  /** Reversal metadata — see Sale.reversedAt for the convention. */
+  @Column({ name: 'reversed_at', type: Date, nullable: true })
+  reversedAt?: Date;
+
+  @Column({ name: 'reversed_by', nullable: true })
+  reversedBy?: string;
+
+  @Column({ name: 'reversal_reason', nullable: true })
+  reversalReason?: string;
+
   @OneToMany(() => PurchaseItem, (line) => line.purchase, {
     cascade: true,
     eager: true,

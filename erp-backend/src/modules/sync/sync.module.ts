@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { SyncEvent } from './entities/sync-event.entity';
 import { SyncService } from './sync.service';
 import { SyncController } from './sync.controller';
+import { SyncSignatureGuard } from './sync-signature.guard';
 import { OutboxModule } from '../outbox/outbox.module';
 import { SalesModule } from '../sales/sales.module';
 import { PurchasesModule } from '../purchases/purchases.module';
@@ -17,7 +18,7 @@ import { PurchasesModule } from '../purchases/purchases.module';
     PurchasesModule,
   ],
   controllers: [SyncController],
-  providers: [SyncService],
+  providers: [SyncService, SyncSignatureGuard],
   exports: [SyncService],
 })
 export class SyncModule {}

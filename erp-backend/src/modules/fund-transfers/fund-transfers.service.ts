@@ -7,12 +7,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, LessThanOrEqual, Repository } from 'typeorm';
 import { FundTransfer } from './entities/fund-transfer.entity';
 import { CreateFundTransferDto } from './dto/create-fund-transfer.dto';
+import { SequenceService } from '../sequences/sequence.service';
+import { DataSource } from 'typeorm';
+import { JournalService } from '../journals/journal.service';
 
 @Injectable()
 export class FundTransfersService {
   constructor(
     @InjectRepository(FundTransfer)
     private readonly repo: Repository<FundTransfer>,
+    private readonly sequences: SequenceService,
+    private readonly dataSource: DataSource,
+    private readonly journals: JournalService,
   ) {}
 
   async create(dto: CreateFundTransferDto): Promise<FundTransfer> {
@@ -23,14 +29,44 @@ export class FundTransfersService {
     }
     const transferNo = dto.transferNo ?? (await this.nextTransferNo());
     const transferDate = dto.transferDate ?? today();
-    return this.repo.save(
-      this.repo.create({ ...dto, transferNo, transferDate }),
-    );
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(FundTransfer);
+      const persisted = await repo.save(
+        repo.create({ ...dto, transferNo, transferDate }),
+      );
+      const amount = Number(dto.amount);
+
+      // Symmetrical posting: Dr destination (money in), Cr source (money out).
+      // Both accounts are user-owned, so no system-account lookups needed.
+      await this.journals.post(
+        {
+          entryDate: persisted.createdAt,
+          sourceModule: 'FUND_TRANSFER',
+          sourceRef: transferNo,
+          description: `Fund transfer ${transferNo}`,
+          lines: [
+            {
+              accountId: dto.toAccountId,
+              debit: amount,
+              narration: `${transferNo} into destination`,
+            },
+            {
+              accountId: dto.fromAccountId,
+              credit: amount,
+              narration: `${transferNo} out of source`,
+            },
+          ],
+        },
+        manager,
+      );
+
+      return persisted;
+    });
   }
 
   private async nextTransferNo(): Promise<string> {
-    const count = await this.repo.count();
-    return `TRF-${(count + 1).toString().padStart(6, '0')}`;
+    return this.sequences.next('TRF', () => this.repo.count());
   }
 
   findAll(from?: string, to?: string) {
@@ -52,6 +88,44 @@ export class FundTransfersService {
     const t = await this.findOne(id);
     await this.repo.remove(t);
     return { deleted: true, id };
+  }
+
+  /**
+   * Reverses a fund transfer by posting a balancing journal entry and
+   * marking the row. No stock impact. Idempotent: re-call returns the same
+   * row. Requires a non-empty reason.
+   */
+  async reverse(
+    id: string,
+    opts: { userId?: string; reason: string },
+  ): Promise<FundTransfer> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('Reversal requires a reason.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(FundTransfer);
+      const t = await repo.findOne({ where: { id } });
+      if (!t) throw new NotFoundException(`Fund transfer ${id} not found`);
+      if (t.reversedAt) return t;
+
+      const originalEntry = await this.journals.findBySource('FUND_TRANSFER', t.transferNo);
+      if (originalEntry) {
+        await this.journals.reverse(
+          originalEntry.id,
+          {
+            entryDate: new Date(),
+            description: `Reversal of fund transfer ${t.transferNo}`,
+            reason: opts.reason,
+          },
+          manager,
+        );
+      }
+
+      t.reversedAt = new Date();
+      t.reversedBy = opts.userId;
+      t.reversalReason = opts.reason;
+      return repo.save(t);
+    });
   }
 
   /**

@@ -6,6 +6,7 @@ import {
   EmployeeTransactionType,
 } from './entities/employee-transaction.entity';
 import { CreateEmployeeTransactionDto } from './dto/create-employee-transaction.dto';
+import { SequenceService } from '../sequences/sequence.service';
 
 /** TYPE → voucher prefix. Each type sequences independently. */
 const PREFIX: Record<EmployeeTransactionType, string> = {
@@ -23,6 +24,7 @@ export class EmployeeTransactionsService {
   constructor(
     @InjectRepository(EmployeeTransaction)
     private readonly repo: Repository<EmployeeTransaction>,
+    private readonly sequences: SequenceService,
   ) {}
 
   async create(dto: CreateEmployeeTransactionDto): Promise<EmployeeTransaction> {
@@ -35,8 +37,9 @@ export class EmployeeTransactionsService {
 
   private async nextVoucherNo(type: EmployeeTransactionType): Promise<string> {
     const prefix = PREFIX[type];
-    const count = await this.repo.count({ where: { type } });
-    return `${prefix}-${(count + 1).toString().padStart(6, '0')}`;
+    return this.sequences.next(prefix, () =>
+      this.repo.count({ where: { type } }),
+    );
   }
 
   findAll(employeeId?: string, from?: string, to?: string) {

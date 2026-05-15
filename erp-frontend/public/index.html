@@ -22,22 +22,24 @@
 
     <title>Hassan Electronics — Home Appliances</title>
 
+    <!--
+      Content-Security-Policy. `script-src 'self'` prevents an XSS-injected
+      inline <script> from running — the only legitimate inline script
+      previously here (the theme bootstrap) was extracted to theme-bootstrap.js
+      so this stays strict. `'unsafe-inline'` survives only on style-src
+      because React + CRA inject inline style="" attributes; removing it
+      would need every component refactored. connect-src is wide (http: https:)
+      to keep LAN-from-phone access working when CLOUD_SYNC_URL points at any
+      cloud receiver; script execution is the high-leverage protection, not
+      where data goes.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+    />
+
     <!-- Theme bootstrap: apply saved/system theme before render to avoid flash -->
-    <script>
-      (function () {
-        try {
-          var saved = localStorage.getItem('hassan-theme');
-          var theme =
-            saved ||
-            (window.matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'dark'
-              : 'light');
-          document.documentElement.setAttribute('data-theme', theme);
-        } catch (e) {
-          document.documentElement.setAttribute('data-theme', 'light');
-        }
-      })();
-    </script>
+    <script src="%PUBLIC_URL%/theme-bootstrap.js"></script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

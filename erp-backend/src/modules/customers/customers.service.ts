@@ -5,12 +5,14 @@ import { Customer } from './entities/customer.entity';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
 export class CustomersService implements OnModuleInit {
   constructor(
     @InjectRepository(Customer)
     private readonly repo: Repository<Customer>,
+    private readonly sequences: SequenceService,
   ) {}
 
   async onModuleInit() {
@@ -48,8 +50,7 @@ export class CustomersService implements OnModuleInit {
   }
 
   private async nextCode(): Promise<string> {
-    const count = await this.repo.count();
-    return `CUST-${String(count + 1).padStart(6, '0')}`;
+    return this.sequences.next('CUST', () => this.repo.count());
   }
 
   private async backfillCodes() {

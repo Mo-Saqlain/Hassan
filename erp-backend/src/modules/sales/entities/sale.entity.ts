@@ -66,6 +66,21 @@ export class Sale extends BaseEntity {
   @Column({ nullable: true })
   notes?: string;
 
+  /**
+   * Reversal metadata. A non-null `reversedAt` means this sale has been voided
+   * via `POST /sales/:id/reverse`; the row stays visible in history with a
+   * REVERSED chip and is netted out by the reports. The balancing journal
+   * entry is linked via `journal_entries.reverses_journal_entry_id`.
+   */
+  @Column({ name: 'reversed_at', type: Date, nullable: true })
+  reversedAt?: Date;
+
+  @Column({ name: 'reversed_by', nullable: true })
+  reversedBy?: string;
+
+  @Column({ name: 'reversal_reason', nullable: true })
+  reversalReason?: string;
+
   @OneToMany(() => SaleItem, (line) => line.sale, {
     cascade: true,
     eager: true,

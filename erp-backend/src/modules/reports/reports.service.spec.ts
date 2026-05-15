@@ -37,6 +37,14 @@ import { ReportsService } from './reports.service';
 import { IncentivesService } from '../incentives/incentives.service';
 import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
 import { EmployeeIncentivesService } from '../employee-incentives/employee-incentives.service';
+import { Sequence } from '../sequences/entities/sequence.entity';
+import { SequenceService } from '../sequences/sequence.service';
+import { AccountsService } from '../accounts/accounts.service';
+import { JournalEntry } from '../journals/entities/journal-entry.entity';
+import { JournalLine } from '../journals/entities/journal-line.entity';
+import { JournalService } from '../journals/journal.service';
+import { AccountingPeriod } from '../periods/entities/accounting-period.entity';
+import { PeriodsService } from '../periods/periods.service';
 
 describe('ReportsService', () => {
   let reports: ReportsService;
@@ -60,6 +68,7 @@ describe('ReportsService', () => {
             SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
             Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
             FundTransfer, Employee, EmployeeTransaction, EmployeeIncentiveRule,
+            Sequence, JournalEntry, JournalLine, AccountingPeriod,
           ]),
         ),
         TypeOrmModule.forFeature([
@@ -68,14 +77,17 @@ describe('ReportsService', () => {
           SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
           Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
           FundTransfer, Employee, EmployeeTransaction, EmployeeIncentiveRule,
+          Sequence, JournalEntry, JournalLine, AccountingPeriod,
         ]),
       ],
       providers: [
         ReportsService, ItemsService, StockService, OutboxService,
         SalesService, PurchasesService, IncentivesService,
-        FundTransfersService, EmployeeIncentivesService,
+        FundTransfersService, EmployeeIncentivesService, SequenceService,
+        AccountsService, JournalService, PeriodsService,
       ],
     }).compile();
+    await module.init();
 
     reports = module.get(ReportsService);
     sales = module.get(SalesService);
@@ -91,7 +103,11 @@ describe('ReportsService', () => {
     itemId = item.id;
 
     const customer = await ds.getRepository(Customer).save(
-      ds.getRepository(Customer).create({ name: 'C1' }),
+      ds.getRepository(Customer).create({
+        name: 'C1',
+        creditEnabled: true,
+        creditLimit: 1_000_000, // effectively unlimited for ledger-math tests
+      }),
     );
     customerId = customer.id;
 
@@ -232,5 +248,96 @@ describe('ReportsService', () => {
   it('equity changes: opening + net income matches the reconciliation row', async () => {
     const eq = await reports.equityChanges();
     expect(eq.balanceCheck.expected).toBe(eq.openingEquity + eq.netIncome);
+  });
+
+  it('AR aging: customer with an unpaid sale shows the residual in 0-30 bucket', async () => {
+    // Seed includes a sale of 3 × Rs 500 with paidAmount=0 → dueAmount 1500
+    const r = await reports.arAging();
+    expect(r.rows).toHaveLength(1);
+    const row = r.rows[0];
+    expect(row.name).toBe('C1');
+    expect(row.total).toBe(1500);
+    expect(row.d0_30).toBe(1500);
+    expect(row.d31_60).toBe(0);
+  });
+
+  it('AR aging: FIFO consumes the unpaid sale when a receipt is recorded', async () => {
+    await ds.getRepository(Payment).save(
+      ds.getRepository(Payment).create({
+        voucherNo: 'RCT-AGE-1', direction: 'IN',
+        accountId, customerId, amount: 1500,
+      }),
+    );
+    const r = await reports.arAging();
+    expect(r.rows).toHaveLength(0); // all consumed
+  });
+
+  it('AR aging: excludes customers without outstanding balance', async () => {
+    const other = await ds.getRepository(Customer).save(
+      ds.getRepository(Customer).create({ name: 'Z-cust', creditEnabled: true, creditLimit: 100000 }),
+    );
+    void other;
+    const r = await reports.arAging();
+    expect(r.rows.find((x) => x.name === 'Z-cust')).toBeUndefined();
+  });
+
+  it('AP aging: supplier with unpaid purchase shows residual in 0-30 bucket', async () => {
+    // Seeded purchase: 20 × 300 = 6000, default paidAmount=0 → due 6000.
+    // Add a new partial-pay purchase: 5 × 300 = 1500, paid 1000 → due 500.
+    await purchases.create({
+      supplierId,
+      paidAmount: 1000,
+      lines: [{ itemId, quantity: 5, unitPrice: 300 }],
+    });
+    const r = await reports.apAging();
+    const row = r.rows.find((x) => x.name === 'S1');
+    expect(row).toBeDefined();
+    expect(row!.total).toBe(6500); // 6000 seeded + 500 new
+    expect(row!.d0_30).toBe(6500);
+  });
+
+  it('item margins: revenue, COGS, and gross profit per item', async () => {
+    // Seed: 5 + 3 sold @ Rs 500; item purchasePrice 300 → COGS 8 × 300 = 2400
+    const m = await reports.itemMargins();
+    expect(m.rows).toHaveLength(1);
+    const row = m.rows[0];
+    expect(row.qty).toBe(8);
+    expect(row.revenue).toBe(4000);
+    expect(row.cogs).toBe(2400);
+    expect(row.grossProfit).toBe(1600);
+    expect(row.marginPct).toBeCloseTo(40, 1);
+  });
+
+  it('trial balance: totals balance across all sales+purchase journal entries from the seed', async () => {
+    const tb = await reports.trialBalance();
+    expect(tb.balanced).toBe(true);
+    expect(tb.totalDebit).toBe(tb.totalCredit);
+    // The seed produced: 1 purchase (Dr Inventory 6000, Cr A/P 6000)
+    // + 1 fully-paid sale (Dr Cash 2500, Dr COGS 1500, Cr Revenue 2500, Cr Inventory 1500)
+    // + 1 unpaid sale (Dr A/R 1500, Dr COGS 900, Cr Revenue 1500, Cr Inventory 900)
+    // Each balanced individually, so the rollup is balanced too.
+    expect(tb.totalDebit).toBeGreaterThan(0);
+    // Revenue account shows the total credit.
+    const revRow = tb.rows.find((r) => r.name === 'Sales Revenue');
+    expect(revRow).toBeDefined();
+    expect(revRow!.credit).toBe(4000); // 2500 + 1500
+  });
+
+  it('journal-driven Income Statement: revenue 4000 - COGS 2400 = net income 1600', async () => {
+    const ic = await reports.incomeStatementFromJournals();
+    expect(ic.revenue).toBe(4000);
+    expect(ic.expense).toBe(2400); // COGS only — no operating expenses seeded
+    expect(ic.netIncome).toBe(1600);
+    expect(ic.source).toBe('journals');
+  });
+
+  it('journal-driven Balance Sheet: assets === liabilities + equity + earnings', async () => {
+    const bs = await reports.balanceSheetFromJournals();
+    expect(bs.balanced).toBe(true);
+    expect(bs.assets).toBeGreaterThan(0);
+    // Identity: A = L + E + earnings
+    expect(bs.assets).toBe(bs.totalLiabilitiesAndEquity);
+    // Earnings echo the income statement
+    expect(bs.currentPeriodEarnings).toBe(1600);
   });
 });

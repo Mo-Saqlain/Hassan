@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { FundTransfersService } from './fund-transfers.service';
 import { CreateFundTransferDto } from './dto/create-fund-transfer.dto';
+import { ReverseFundTransferDto } from './dto/reverse-fund-transfer.dto';
 
 @Controller('fund-transfers')
 export class FundTransfersController {
@@ -33,5 +34,13 @@ export class FundTransfersController {
   @Delete(':id')
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.remove(id);
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseFundTransferDto,
+  ) {
+    return this.service.reverse(id, dto);
   }
 }

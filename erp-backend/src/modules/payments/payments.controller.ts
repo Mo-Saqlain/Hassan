@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import { ReversePaymentDto } from './dto/reverse-payment.dto';
 
 @Controller('payments')
 export class PaymentsController {
@@ -27,5 +28,13 @@ export class PaymentsController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReversePaymentDto,
+  ) {
+    return this.service.reverse(id, dto);
   }
 }

@@ -98,4 +98,40 @@ export class ReportsController {
   equityChanges(@Query('from') from?: string, @Query('to') to?: string) {
     return this.service.equityChanges(from, to);
   }
+
+  // Aging + profitability
+  @Get('ar-aging')
+  arAging(@Query('asOf') asOf?: string) {
+    return this.service.arAging(asOf);
+  }
+
+  @Get('ap-aging')
+  apAging(@Query('asOf') asOf?: string) {
+    return this.service.apAging(asOf);
+  }
+
+  @Get('item-margins')
+  itemMargins(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.service.itemMargins(from, to);
+  }
+
+  @Get('trial-balance')
+  trialBalance(@Query('asOf') asOf?: string) {
+    return this.service.trialBalance(asOf);
+  }
+
+  /** Income Statement derived from journal_lines (parallel to /income-statement). */
+  @Get('income-statement-from-journals')
+  incomeStatementFromJournals(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.incomeStatementFromJournals(from, to);
+  }
+
+  /** Balance Sheet derived from journal_lines (parallel to /balance-sheet). */
+  @Get('balance-sheet-from-journals')
+  balanceSheetFromJournals(@Query('asOf') asOf?: string) {
+    return this.service.balanceSheetFromJournals(asOf);
+  }
 }

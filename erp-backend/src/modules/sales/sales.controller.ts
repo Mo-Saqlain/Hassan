@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { ReverseSaleDto } from './dto/reverse-sale.dto';
 
 @Controller('sales')
 export class SalesController {
@@ -26,5 +27,13 @@ export class SalesController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseSaleDto,
+  ) {
+    return this.service.reverse(id, dto);
   }
 }

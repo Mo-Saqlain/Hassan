@@ -17,13 +17,14 @@ export class RestoreDto {
   snapshot: { version?: number; data: Record<string, any[]> };
 
   /**
-   * The signed-in user's current password. Re-asked at the point of
-   * restore because this action wipes the live DB; we don't want a
-   * borrowed/idle session to be enough to nuke the shop's data.
+   * Legacy password field — retained as a fallback for callers that
+   * haven't moved to the reauth-token flow yet. Prefer the `X-Reauth-Token`
+   * header obtained from `POST /auth/reauthenticate`. When both are
+   * present, the header wins.
    */
   @IsString()
-  @MinLength(1)
-  password: string;
+  @IsOptional()
+  password?: string;
 
   @IsString()
   @IsOptional()

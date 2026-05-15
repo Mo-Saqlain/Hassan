@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Purchase } from './entities/purchase.entity';
@@ -7,6 +7,9 @@ import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { StockService } from '../stock/stock.service';
 import { Item } from '../items/entities/item.entity';
 import { OutboxService } from '../outbox/outbox.service';
+import { SequenceService } from '../sequences/sequence.service';
+import { JournalService } from '../journals/journal.service';
+import { AccountsService } from '../accounts/accounts.service';
 
 @Injectable()
 export class PurchasesService {
@@ -16,6 +19,9 @@ export class PurchasesService {
     private readonly stockService: StockService,
     private readonly dataSource: DataSource,
     private readonly outbox: OutboxService,
+    private readonly sequences: SequenceService,
+    private readonly journals: JournalService,
+    private readonly accounts: AccountsService,
   ) {}
 
   async create(
@@ -87,6 +93,56 @@ export class PurchasesService {
         );
       }
 
+      // Journal posting:
+      //   Dr Inventory      (netAmount — stock value coming in)
+      //   Cr Cash/Bank      (paidAmount — out of whichever account; falls back
+      //                      to CASH_ON_HAND when the caller didn't pin one)
+      //   Cr A/P            (dueAmount — supplier becomes a creditor)
+      const sysInventory = await this.accounts.findSystem('INVENTORY');
+      const sysAP = await this.accounts.findSystem('A_P');
+      const sysCashFallback = await this.accounts.findSystem('CASH_ON_HAND');
+
+      const journalLines: Array<{
+        accountId: string;
+        debit?: number;
+        credit?: number;
+        narration?: string;
+      }> = [
+        {
+          accountId: sysInventory.id,
+          debit: netAmount,
+          narration: `Purchase ${billNo} inventory in`,
+        },
+      ];
+      if (paidAmount > 0) {
+        // Purchase header doesn't carry an explicit payment-source account
+        // (unlike sales), so we default to the CASH_ON_HAND fallback for
+        // the journal credit. The user can override by linking a separate
+        // PMT-… voucher to the same supplier afterwards.
+        journalLines.push({
+          accountId: sysCashFallback.id,
+          credit: paidAmount,
+          narration: `Purchase ${billNo} cash paid`,
+        });
+      }
+      if (dueAmount > 0) {
+        journalLines.push({
+          accountId: sysAP.id,
+          credit: dueAmount,
+          narration: `Purchase ${billNo} on credit`,
+        });
+      }
+      await this.journals.post(
+        {
+          entryDate: persisted.createdAt,
+          sourceModule: 'PURCHASE',
+          sourceRef: billNo,
+          description: `Purchase ${billNo}`,
+          lines: journalLines,
+        },
+        manager,
+      );
+
       return persisted;
     });
 
@@ -101,9 +157,7 @@ export class PurchasesService {
   }
 
   private async nextBillNo(repo: Repository<Purchase>): Promise<string> {
-    const count = await repo.count();
-    const seq = (count + 1).toString().padStart(6, '0');
-    return `BILL-${seq}`;
+    return this.sequences.next('BILL', () => repo.count());
   }
 
   findAll() {
@@ -114,5 +168,61 @@ export class PurchasesService {
     const p = await this.purchases.findOne({ where: { id } });
     if (!p) throw new NotFoundException(`Purchase ${id} not found`);
     return p;
+  }
+
+  /**
+   * Reverses a purchase: posts a balancing journal entry, books inverse
+   * stock OUT movements, and marks the original row. The original purchase
+   * stays visible with the REVERSED chip. Idempotent.
+   */
+  async reverse(
+    id: string,
+    opts: { userId?: string; reason: string },
+  ): Promise<Purchase> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('Reversal requires a reason.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const purchaseRepo = manager.getRepository(Purchase);
+      const p = await purchaseRepo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!p) throw new NotFoundException(`Purchase ${id} not found`);
+      if (p.reversedAt) return p;
+
+      const originalEntry = await this.journals.findBySource('PURCHASE', p.billNo);
+      if (originalEntry) {
+        await this.journals.reverse(
+          originalEntry.id,
+          {
+            entryDate: new Date(),
+            description: `Reversal of purchase ${p.billNo}`,
+            reason: opts.reason,
+          },
+          manager,
+        );
+      }
+
+      for (const ln of p.lines) {
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: ln.storeId ?? p.storeId,
+            type: 'OUT',
+            quantity: ln.quantity,
+            referenceType: 'PURCHASE_REVERSAL',
+            referenceId: p.id,
+            note: `Reversal of ${p.billNo}: ${opts.reason}`,
+          },
+          manager,
+        );
+      }
+
+      p.reversedAt = new Date();
+      p.reversedBy = opts.userId;
+      p.reversalReason = opts.reason;
+      return purchaseRepo.save(p);
+    });
   }
 }

@@ -7,6 +7,7 @@ import { Item } from '../items/entities/item.entity';
 import { Brand } from '../brands/entities/brand.entity';
 import { Category } from '../categories/entities/category.entity';
 import { Customer } from '../customers/entities/customer.entity';
+import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Store } from '../stores/entities/store.entity';
 import { Account } from '../accounts/entities/account.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
@@ -20,6 +21,15 @@ import { StockService } from '../stock/stock.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { SalesService } from '../sales/sales.service';
 import { PosService } from './pos.service';
+import { Sequence } from '../sequences/entities/sequence.entity';
+import { SequenceService } from '../sequences/sequence.service';
+import { Payment } from '../payments/entities/payment.entity';
+import { JournalEntry } from '../journals/entities/journal-entry.entity';
+import { JournalLine } from '../journals/entities/journal-line.entity';
+import { JournalService } from '../journals/journal.service';
+import { AccountingPeriod } from '../periods/entities/accounting-period.entity';
+import { PeriodsService } from '../periods/periods.service';
+import { AccountsService } from '../accounts/accounts.service';
 
 describe('PosService', () => {
   let service: PosService;
@@ -33,21 +43,25 @@ describe('PosService', () => {
       imports: [
         TypeOrmModule.forRoot(
           inMemoryTypeOrm([
-            Item, Brand, Category, Customer, Store, Account,
+            Item, Brand, Category, Customer, Supplier, Store, Account,
             StockMovement, Sale, SaleItem,
-            PosSession, PosCartItem, SyncQueueEntry,
+            PosSession, PosCartItem, SyncQueueEntry, Sequence, Payment,
+            JournalEntry, JournalLine, AccountingPeriod,
           ]),
         ),
         TypeOrmModule.forFeature([
           Item, Category, StockMovement, Sale, SaleItem,
-          PosSession, PosCartItem, SyncQueueEntry,
+          PosSession, PosCartItem, SyncQueueEntry, Sequence,
+          Account, JournalEntry, JournalLine, AccountingPeriod,
         ]),
       ],
       providers: [
         PosService, ItemsService, SalesService,
-        StockService, OutboxService,
+        StockService, OutboxService, SequenceService,
+        AccountsService, JournalService, PeriodsService,
       ],
     }).compile();
+    await module.init();
 
     service = module.get(PosService);
     items = module.get(ItemsService);
@@ -174,7 +188,11 @@ describe('PosService', () => {
 
   it('checkout with partial payment records dueAmount as receivable when customer is set', async () => {
     const customer = await ds.getRepository(Customer).save(
-      ds.getRepository(Customer).create({ name: 'Acme Co' }),
+      ds.getRepository(Customer).create({
+        name: 'Acme Co',
+        creditEnabled: true,
+        creditLimit: 1_000_000,
+      }),
     );
     const s = await service.startSession({});
     await service.addToCart(s.id, { code: 'PHN-1', quantity: 2 }); // 1000
@@ -222,7 +240,11 @@ describe('PosService', () => {
 
   it('checkout strips accountId on CREDIT sales (full amount becomes A/R)', async () => {
     const customer = await ds.getRepository(Customer).save(
-      ds.getRepository(Customer).create({ name: 'Acme Co' }),
+      ds.getRepository(Customer).create({
+        name: 'Acme Co',
+        creditEnabled: true,
+        creditLimit: 1_000_000,
+      }),
     );
     const account = await ds.getRepository(Account).save(
       ds.getRepository(Account).create({ name: 'HBL Main', type: 'BANK' }),

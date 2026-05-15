@@ -167,6 +167,10 @@ function startBackend() {
     PORT: String(BACKEND_PORT),
     SQLITE_PATH: sqlitePath,
     BACKUP_DIR: path.join(app.getPath('userData'), 'backups'),
+    // Apply pending TypeORM migrations before the backend opens its port.
+    // The bundled NestJS code respects this flag in `main.ts` — schema
+    // upgrades land on launch without user intervention.
+    DB_MIGRATE_ON_BOOT: 'true',
     // Make Electron's executable behave as plain Node when launched as a
     // child process — required to run the NestJS backend script under the
     // packaged Electron runtime.
@@ -248,6 +252,11 @@ async function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // Sandbox the renderer: the preload script runs in a restricted
+      // V8 context with no Node APIs except `contextBridge` and
+      // `ipcRenderer`. A renderer compromise (hypothetical XSS) cannot
+      // touch the SQLite file, the filesystem, or shell out to the OS.
+      sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
     },
   });

@@ -19,6 +19,8 @@ import { FundTransfersModule } from '../fund-transfers/fund-transfers.module';
 import { EmployeeIncentivesModule } from '../employee-incentives/employee-incentives.module';
 import { Employee } from '../employees/entities/employee.entity';
 import { EmployeeTransaction } from '../employee-transactions/entities/employee-transaction.entity';
+import { JournalEntry } from '../journals/entities/journal-entry.entity';
+import { JournalLine } from '../journals/entities/journal-line.entity';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { EmployeeTransaction } from '../employee-transactions/entities/employee-
       StockMovement,
       Employee,
       EmployeeTransaction,
+      JournalEntry,
+      JournalLine,
     ]),
     IncentivesModule,
     FundTransfersModule,

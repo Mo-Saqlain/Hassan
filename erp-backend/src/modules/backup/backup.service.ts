@@ -128,6 +128,11 @@ export class BackupService {
   /**
    * In-memory dump used for the "download now" endpoint — produces the
    * JSON without persisting a file or recording metadata.
+   *
+   * Plaintext by design: integrity + availability are prioritised over
+   * confidentiality. A lost or unreadable encryption key would mean every
+   * backup becomes a brick. Anyone reaching the disk where this is written
+   * already has the running SQLite, so encryption adds no real defense.
    */
   async streamSnapshot(): Promise<{ filename: string; json: string }> {
     const snapshot = await this.dumpAll();

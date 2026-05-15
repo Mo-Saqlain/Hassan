@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Post,
@@ -13,13 +14,17 @@ import type { Response } from 'express';
 import { BackupService } from './backup.service';
 import { SetScheduleDto } from './dto/set-schedule.dto';
 import { RestoreDto } from './dto/restore.dto';
-import { CurrentUser } from '../users/auth.decorators';
+import { CurrentUser, SuperuserOnly } from '../users/auth.decorators';
 import { User } from '../users/entities/user.entity';
 import { verifyPassword } from '../users/password.util';
+import { ReauthService, REAUTH_HEADER_NAME } from '../users/reauth.service';
 
 @Controller('backup')
 export class BackupController {
-  constructor(private readonly service: BackupService) {}
+  constructor(
+    private readonly service: BackupService,
+    private readonly reauth: ReauthService,
+  ) {}
 
   /** Trigger a new manual backup and persist it to the backup directory. */
   @Post()
@@ -33,7 +38,13 @@ export class BackupController {
     return this.service.list();
   }
 
-  /** Snapshot the DB and send it back as a download — no file written. */
+  /**
+   * Snapshot the DB and send it back as a download — no file written.
+   * Restricted to SUPERUSER (matches the existing two-role model). No
+   * reauth gate: download is read-only and confidentiality isn't the
+   * threat model — the priority is making backups easy to grab.
+   */
+  @SuperuserOnly()
   @Get('download-now')
   async downloadNow(@Res() res: Response) {
     const { filename, json } = await this.service.streamSnapshot();
@@ -57,7 +68,8 @@ export class BackupController {
     return this.service.setScheduledHour(dto.hour);
   }
 
-  /** Download a previously-saved backup file by id. */
+  /** Download a previously-saved backup file by id. SUPERUSER role required. */
+  @SuperuserOnly()
   @Get(':id/download')
   async download(
     @Param('id', ParseUUIDPipe) id: string,
@@ -78,30 +90,51 @@ export class BackupController {
   }
 
   /**
-   * Replay a backup JSON into the database. Destructive: wipes every
+   * Replay a backup JSON into the database. Destructive — wipes every
    * tracked table first.
    *
-   * Two safety gates:
-   *   1. `confirm` must literally equal "RESTORE".
-   *   2. The caller re-supplies their current account password — we
-   *      verify it against the signed-in user, so a left-open session
-   *      isn't enough to nuke the shop's data.
-   *
-   * Before applying the snapshot the service also auto-creates a
-   * pre-restore snapshot of the current DB ("AUTO" trigger) so the
-   * action is reversible.
+   * Safety gates (all must pass — this is integrity protection, not
+   * confidentiality):
+   *   1. SUPERUSER role (enforced by `@SuperuserOnly`).
+   *   2. Either `X-Reauth-Token` header (call `POST /auth/reauthenticate`
+   *      first to get one) OR the legacy `password` field in the body.
+   *      The reauth token is one-shot and lasts 60 seconds — prevents a
+   *      left-open session from nuking the DB by accident.
+   *   3. `confirm` must literally equal "RESTORE".
+   *   4. Before replaying, the service auto-creates a pre-restore snapshot
+   *      ("AUTO" trigger) so the action is reversible.
    */
+  @SuperuserOnly()
   @Post('restore')
   async restore(
     @Body() dto: RestoreDto,
     @CurrentUser() user: User | undefined,
+    @Headers(REAUTH_HEADER_NAME) reauthToken: string | undefined,
   ) {
     if (!user) throw new UnauthorizedException();
-    if (!verifyPassword(dto.password, user.passwordHash)) {
+
+    // Reauth gate: prefer the one-shot token header. Fall back to the
+    // legacy password field for older clients.
+    if (reauthToken) {
+      this.reauth.consume(reauthToken, user.id);
+    } else if (dto.password) {
+      if (!verifyPassword(dto.password, user.passwordHash)) {
+        throw new UnauthorizedException(
+          'Password did not match — restore aborted. Please re-enter your account password.',
+        );
+      }
+    } else {
       throw new UnauthorizedException(
-        'Password did not match — restore aborted. Please re-enter your account password.',
+        'Restore requires reauthentication: call POST /auth/reauthenticate to get an X-Reauth-Token, or include `password` in the body.',
       );
     }
+
+    if (!dto.snapshot) {
+      throw new UnauthorizedException(
+        'Restore body must include `snapshot: { version, data }`.',
+      );
+    }
+
     return this.service.restoreFromSnapshot(dto.snapshot, dto.confirm, {
       actorUsername: user.username,
     });

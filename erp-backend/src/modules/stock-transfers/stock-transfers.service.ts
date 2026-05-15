@@ -9,6 +9,7 @@ import { StockTransfer } from './entities/stock-transfer.entity';
 import { StockTransferItem } from './entities/stock-transfer-item.entity';
 import { CreateStockTransferDto } from './dto/create-stock-transfer.dto';
 import { StockService } from '../stock/stock.service';
+import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
 export class StockTransfersService {
@@ -17,6 +18,7 @@ export class StockTransfersService {
     private readonly repo: Repository<StockTransfer>,
     private readonly stockService: StockService,
     private readonly dataSource: DataSource,
+    private readonly sequences: SequenceService,
   ) {}
 
   /**
@@ -87,8 +89,7 @@ export class StockTransfersService {
   private async nextTransferNo(
     repo: Repository<StockTransfer>,
   ): Promise<string> {
-    const count = await repo.count();
-    return `STK-TRF-${(count + 1).toString().padStart(6, '0')}`;
+    return this.sequences.next('STK-TRF', () => repo.count());
   }
 
   findAll(fromStoreId?: string, toStoreId?: string) {

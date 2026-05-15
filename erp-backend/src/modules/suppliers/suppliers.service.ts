@@ -5,12 +5,14 @@ import { Supplier } from './entities/supplier.entity';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
 export class SuppliersService implements OnModuleInit {
   constructor(
     @InjectRepository(Supplier)
     private readonly repo: Repository<Supplier>,
+    private readonly sequences: SequenceService,
   ) {}
 
   async onModuleInit() {
@@ -46,8 +48,7 @@ export class SuppliersService implements OnModuleInit {
   }
 
   private async nextCode(): Promise<string> {
-    const count = await this.repo.count();
-    return `SUPP-${String(count + 1).padStart(6, '0')}`;
+    return this.sequences.next('SUPP', () => this.repo.count());
   }
 
   private async backfillCodes() {

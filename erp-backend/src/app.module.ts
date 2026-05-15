@@ -34,6 +34,9 @@ import { DamagedGoodsModule } from './modules/damaged-goods/damaged-goods.module
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { ErrorLogsModule } from './modules/error-logs/error-logs.module';
 import { UsersModule } from './modules/users/users.module';
+import { SequenceModule } from './modules/sequences/sequence.module';
+import { PeriodsModule } from './modules/periods/periods.module';
+import { JournalsModule } from './modules/journals/journal.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -58,6 +61,9 @@ function buildDbOptions(): TypeOrmModuleOptions {
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot(buildDbOptions()),
+    SequenceModule,
+    PeriodsModule,
+    JournalsModule,
     BrandsModule,
     CategoriesModule,
     ItemsModule,

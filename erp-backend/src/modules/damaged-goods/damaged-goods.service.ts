@@ -12,6 +12,7 @@ import {
 import { CreateDamagedGoodDto } from './dto/create-damaged-good.dto';
 import { UpdateDamageStatusDto } from './dto/update-status.dto';
 import { StockService } from '../stock/stock.service';
+import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
 export class DamagedGoodsService {
@@ -20,6 +21,7 @@ export class DamagedGoodsService {
     private readonly repo: Repository<DamagedGood>,
     private readonly stockService: StockService,
     private readonly dataSource: DataSource,
+    private readonly sequences: SequenceService,
   ) {}
 
   async create(dto: CreateDamagedGoodDto): Promise<DamagedGood> {
@@ -53,8 +55,7 @@ export class DamagedGoodsService {
   }
 
   private async nextVoucherNo(repo: Repository<DamagedGood>): Promise<string> {
-    const count = await repo.count();
-    return `DMG-${(count + 1).toString().padStart(6, '0')}`;
+    return this.sequences.next('DMG', () => repo.count());
   }
 
   findAll(status?: DamageStatus) {

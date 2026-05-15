@@ -7,6 +7,12 @@ import { OutboxService } from '../outbox/outbox.service';
 import { SalesService } from '../sales/sales.service';
 import { PurchasesService } from '../purchases/purchases.service';
 import { SyncEventDto } from './dto/sync-push.dto';
+import {
+  signSyncRequest,
+  SYNC_SHOP_ID_HEADER,
+  SYNC_SIGNATURE_HEADER,
+  SYNC_TIMESTAMP_HEADER,
+} from './hmac.util';
 
 export interface SyncEventResult {
   id: string;
@@ -141,6 +147,19 @@ export class SyncService {
           'Cloud sync URL not configured. Set CLOUD_SYNC_URL or cloudSyncUrl in config.json.',
       };
     }
+    const shopId = process.env.SHOP_ID;
+    const shopSecret = process.env.SHOP_SYNC_SECRET;
+    if (!shopId || !shopSecret) {
+      return {
+        ok: false,
+        cloudConfigured: true,
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        message:
+          'SHOP_ID / SHOP_SYNC_SECRET not configured — refusing to push unsigned.',
+      };
+    }
     if (this.isPushing) {
       return {
         ok: false,
@@ -171,9 +190,22 @@ export class SyncService {
           payload: JSON.parse(e.payload),
         })),
       };
+      // Sign the canonical JSON.stringify of the body. The receiver verifies
+      // by re-stringifying its parsed body — works as long as both sides are
+      // Node.js (V8 preserves key insertion order through JSON.parse).
+      const bodyJson = JSON.stringify(body);
+      const timestamp = new Date().toISOString();
+      const signature = signSyncRequest(shopSecret, timestamp, bodyJson);
       try {
-        const res = await axios.post<SyncEventResult[]>(cloudUrl, body, {
+        const res = await axios.post<SyncEventResult[]>(cloudUrl, bodyJson, {
           timeout: 10000,
+          headers: {
+            'Content-Type': 'application/json',
+            [SYNC_SHOP_ID_HEADER]: shopId,
+            [SYNC_TIMESTAMP_HEADER]: timestamp,
+            [SYNC_SIGNATURE_HEADER]: signature,
+          },
+          transformRequest: [(d) => d],
         });
         const byId = new Map(res.data.map((r) => [r.id, r]));
         let succeeded = 0;

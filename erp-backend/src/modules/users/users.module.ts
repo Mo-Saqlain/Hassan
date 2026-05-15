@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 import { User } from './entities/user.entity';
@@ -8,7 +8,9 @@ import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
+import { ReauthService } from './reauth.service';
 
+@Global()
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, UserAccessRequest, UserLoginEvent]),
@@ -16,10 +18,11 @@ import { AuthGuard } from './auth.guard';
   controllers: [UsersController, AuthController],
   providers: [
     UsersService,
+    ReauthService,
     // Global guard — every controller route requires authentication
     // unless it carries the `@Public()` decorator.
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
-  exports: [UsersService],
+  exports: [UsersService, ReauthService],
 })
 export class UsersModule {}

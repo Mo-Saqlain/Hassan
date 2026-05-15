@@ -9,6 +9,7 @@ import { PurchaseOrder } from './entities/purchase-order.entity';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -16,6 +17,7 @@ export class PurchaseOrdersService {
     @InjectRepository(PurchaseOrder)
     private readonly orders: Repository<PurchaseOrder>,
     private readonly dataSource: DataSource,
+    private readonly sequences: SequenceService,
   ) {}
 
   async create(dto: CreatePurchaseOrderDto): Promise<PurchaseOrder> {
@@ -58,8 +60,7 @@ export class PurchaseOrdersService {
   }
 
   private async nextPoNo(repo: Repository<PurchaseOrder>): Promise<string> {
-    const count = await repo.count();
-    return `PO-${(count + 1).toString().padStart(6, '0')}`;
+    return this.sequences.next('PO', () => repo.count());
   }
 
   findAll(supplierId?: string, status?: string) {

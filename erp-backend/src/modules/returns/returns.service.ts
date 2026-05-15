@@ -9,6 +9,7 @@ import { CreateSaleReturnDto } from './dto/create-sale-return.dto';
 import { CreatePurchaseReturnDto } from './dto/create-purchase-return.dto';
 import { Item } from '../items/entities/item.entity';
 import { StockService } from '../stock/stock.service';
+import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
 export class ReturnsService {
@@ -19,6 +20,7 @@ export class ReturnsService {
     private readonly purchaseReturns: Repository<PurchaseReturn>,
     private readonly stockService: StockService,
     private readonly dataSource: DataSource,
+    private readonly sequences: SequenceService,
   ) {}
 
   async createSaleReturn(dto: CreateSaleReturnDto): Promise<SaleReturn> {
@@ -133,8 +135,7 @@ export class ReturnsService {
     repo: Repository<SaleReturn> | Repository<PurchaseReturn>,
     prefix: string,
   ) {
-    const count = await repo.count();
-    return `${prefix}-${(count + 1).toString().padStart(6, '0')}`;
+    return this.sequences.next(prefix, () => repo.count());
   }
 
   listSaleReturns() {

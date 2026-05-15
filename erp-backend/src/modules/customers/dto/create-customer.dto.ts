@@ -34,6 +34,15 @@ export class CreateCustomerDto {
   @IsOptional()
   openingBalance?: number;
 
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  creditLimit?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  creditEnabled?: boolean;
+
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;

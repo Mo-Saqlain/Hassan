@@ -18,6 +18,7 @@ import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
 import { EmployeeIncentivesService } from '../employee-incentives/employee-incentives.service';
 import { Employee } from '../employees/entities/employee.entity';
 import { EmployeeTransaction } from '../employee-transactions/entities/employee-transaction.entity';
+import { JournalLine } from '../journals/entities/journal-line.entity';
 
 type LedgerEntry = {
   date: Date;
@@ -51,6 +52,8 @@ export class ReportsService {
     @InjectRepository(Employee) private readonly employees: Repository<Employee>,
     @InjectRepository(EmployeeTransaction)
     private readonly employeeTxns: Repository<EmployeeTransaction>,
+    @InjectRepository(JournalLine)
+    private readonly journalLines: Repository<JournalLine>,
   ) {}
 
   // ──────────────────────────────────────────────────────────
@@ -1281,6 +1284,517 @@ export class ReportsService {
       Number(saleSum?.sum ?? 0)
     );
   }
+
+  // ──────────────────────────────────────────────────────────
+  // A/R + A/P aging
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Customer A/R aging — for each customer with a non-zero outstanding
+   * balance as of `asOf`, allocate received cash to their unpaid sales FIFO
+   * (oldest first) and bucket the residuals by age.
+   *
+   * Limitations: this is a snapshot, not a re-statement. Sale returns are
+   * NOT netted into the unpaid sales here — they're handled separately in
+   * the customer ledger. The opening balance is treated as a "very old"
+   * receivable that's first in line to be consumed by receipts.
+   */
+  async arAging(asOfStr?: string): Promise<{
+    asOf: string;
+    rows: Array<{
+      customerId: string;
+      name: string;
+      d0_30: number;
+      d31_60: number;
+      d61_90: number;
+      d90: number;
+      total: number;
+    }>;
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+    const customers = await this.customers.find({ order: { name: 'ASC' } });
+    const rows: Array<{
+      customerId: string;
+      name: string;
+      d0_30: number;
+      d31_60: number;
+      d61_90: number;
+      d90: number;
+      total: number;
+    }> = [];
+
+    for (const c of customers) {
+      const sales = await this.sales.find({
+        where: {
+          customerId: c.id,
+          createdAt: LessThanOrEqual(asOf),
+        },
+        order: { createdAt: 'ASC' },
+      });
+      const receipts = await this.payments.find({
+        where: {
+          customerId: c.id,
+          direction: 'IN' as any,
+          createdAt: LessThanOrEqual(asOf),
+        },
+      });
+      const receiptsTotal = receipts.reduce((s, p) => s + Number(p.amount), 0);
+      let remaining = receiptsTotal;
+      const buckets = { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 };
+
+      // Opening balance is oldest by definition — consume receipts here first.
+      const opening = Number(c.openingBalance) || 0;
+      if (opening > 0) {
+        const consume = Math.min(opening, remaining);
+        remaining -= consume;
+        const leftover = opening - consume;
+        if (leftover > 0) buckets.d90 += leftover;
+      }
+
+      for (const s of sales) {
+        let residual = Number(s.dueAmount);
+        if (residual <= 0) continue;
+        const consume = Math.min(residual, remaining);
+        residual -= consume;
+        remaining -= consume;
+        if (residual > 0) {
+          const ageDays = Math.floor(
+            (asOf.getTime() - new Date(s.createdAt).getTime()) /
+              (1000 * 60 * 60 * 24),
+          );
+          if (ageDays <= 30) buckets.d0_30 += residual;
+          else if (ageDays <= 60) buckets.d31_60 += residual;
+          else if (ageDays <= 90) buckets.d61_90 += residual;
+          else buckets.d90 += residual;
+        }
+      }
+
+      const total = round2(
+        buckets.d0_30 + buckets.d31_60 + buckets.d61_90 + buckets.d90,
+      );
+      if (total > 0) {
+        rows.push({
+          customerId: c.id,
+          name: c.name,
+          d0_30: round2(buckets.d0_30),
+          d31_60: round2(buckets.d31_60),
+          d61_90: round2(buckets.d61_90),
+          d90: round2(buckets.d90),
+          total,
+        });
+      }
+    }
+    return { asOf: asOf.toISOString(), rows };
+  }
+
+  /**
+   * Supplier A/P aging — symmetric to A/R but using purchases (we owe them)
+   * minus payments OUT.
+   */
+  async apAging(asOfStr?: string): Promise<{
+    asOf: string;
+    rows: Array<{
+      supplierId: string;
+      name: string;
+      d0_30: number;
+      d31_60: number;
+      d61_90: number;
+      d90: number;
+      total: number;
+    }>;
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+    const suppliers = await this.suppliers.find({ order: { name: 'ASC' } });
+    const rows: Array<{
+      supplierId: string;
+      name: string;
+      d0_30: number;
+      d31_60: number;
+      d61_90: number;
+      d90: number;
+      total: number;
+    }> = [];
+
+    for (const sp of suppliers) {
+      const purchases = await this.purchases.find({
+        where: {
+          supplierId: sp.id,
+          createdAt: LessThanOrEqual(asOf),
+        },
+        order: { createdAt: 'ASC' },
+      });
+      const payments = await this.payments.find({
+        where: {
+          supplierId: sp.id,
+          direction: 'OUT' as any,
+          createdAt: LessThanOrEqual(asOf),
+        },
+      });
+      const paymentsTotal = payments.reduce((s, p) => s + Number(p.amount), 0);
+      let remaining = paymentsTotal;
+      const buckets = { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 };
+
+      const opening = Number(sp.openingBalance) || 0;
+      if (opening > 0) {
+        const consume = Math.min(opening, remaining);
+        remaining -= consume;
+        const leftover = opening - consume;
+        if (leftover > 0) buckets.d90 += leftover;
+      }
+
+      for (const p of purchases) {
+        let residual = Number(p.dueAmount);
+        if (residual <= 0) continue;
+        const consume = Math.min(residual, remaining);
+        residual -= consume;
+        remaining -= consume;
+        if (residual > 0) {
+          const ageDays = Math.floor(
+            (asOf.getTime() - new Date(p.createdAt).getTime()) /
+              (1000 * 60 * 60 * 24),
+          );
+          if (ageDays <= 30) buckets.d0_30 += residual;
+          else if (ageDays <= 60) buckets.d31_60 += residual;
+          else if (ageDays <= 90) buckets.d61_90 += residual;
+          else buckets.d90 += residual;
+        }
+      }
+
+      const total = round2(
+        buckets.d0_30 + buckets.d31_60 + buckets.d61_90 + buckets.d90,
+      );
+      if (total > 0) {
+        rows.push({
+          supplierId: sp.id,
+          name: sp.name,
+          d0_30: round2(buckets.d0_30),
+          d31_60: round2(buckets.d31_60),
+          d61_90: round2(buckets.d61_90),
+          d90: round2(buckets.d90),
+          total,
+        });
+      }
+    }
+    return { asOf: asOf.toISOString(), rows };
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Item profitability
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * For every item that sold at least once in [from, to], compute:
+   *   - qty sold (units)
+   *   - revenue (lineTotal sum)
+   *   - COGS (current item.purchasePrice × qty — a stand-in for a weighted-
+   *     average cost; refined when the journal refactor introduces an
+   *     inventory layer with per-batch cost tracking)
+   *   - gross profit
+   *   - margin % (gross / revenue)
+   *
+   * Sale returns are subtracted from qty and revenue. Discount-driven
+   * negative margins are visible (they don't get clipped).
+   */
+  async itemMargins(fromStr?: string, toStr?: string): Promise<{
+    from: string | null;
+    to: string | null;
+    rows: Array<{
+      itemId: string;
+      name: string;
+      sku: string;
+      qty: number;
+      revenue: number;
+      cogs: number;
+      grossProfit: number;
+      marginPct: number;
+    }>;
+  }> {
+    const from = fromStr ? new Date(fromStr) : undefined;
+    const to = toStr ? new Date(toStr) : undefined;
+    const dateBetween =
+      from && to
+        ? Between(from, to)
+        : from
+          ? Between(from, new Date('9999-12-31'))
+          : to
+            ? Between(new Date(0), to)
+            : undefined;
+
+    const sales = await this.sales.find({
+      where: dateBetween ? { createdAt: dateBetween } : {},
+    });
+    const saleIds = sales.map((s) => s.id);
+    const saleLines = saleIds.length
+      ? await this.saleItems.find({ where: { saleId: In(saleIds) } })
+      : [];
+
+    const saleReturns = await this.saleReturns.find({
+      where: dateBetween ? { createdAt: dateBetween } : {},
+      relations: ['lines'],
+    });
+
+    // Aggregate per item
+    const agg = new Map<
+      string,
+      { qty: number; revenue: number }
+    >();
+    for (const ln of saleLines) {
+      const entry = agg.get(ln.itemId) ?? { qty: 0, revenue: 0 };
+      entry.qty += Number(ln.quantity);
+      entry.revenue += Number(ln.lineTotal);
+      agg.set(ln.itemId, entry);
+    }
+    for (const r of saleReturns) {
+      for (const ln of r.lines ?? []) {
+        const entry = agg.get(ln.itemId) ?? { qty: 0, revenue: 0 };
+        entry.qty -= Number(ln.quantity);
+        entry.revenue -= Number(ln.quantity) * Number(ln.unitPrice);
+        agg.set(ln.itemId, entry);
+      }
+    }
+
+    if (agg.size === 0) {
+      return {
+        from: fromStr ?? null,
+        to: toStr ?? null,
+        rows: [],
+      };
+    }
+
+    const items = await this.items.find({
+      where: { id: In(Array.from(agg.keys())) },
+    });
+    const byId = new Map(items.map((i) => [i.id, i]));
+
+    const rows = Array.from(agg.entries())
+      .map(([itemId, v]) => {
+        const item = byId.get(itemId);
+        const cogs = round2(v.qty * Number(item?.purchasePrice ?? 0));
+        const revenue = round2(v.revenue);
+        const grossProfit = round2(revenue - cogs);
+        const marginPct = revenue > 0 ? round2((grossProfit / revenue) * 100) : 0;
+        return {
+          itemId,
+          name: item?.name ?? '(deleted item)',
+          sku: item?.sku ?? '—',
+          qty: v.qty,
+          revenue,
+          cogs,
+          grossProfit,
+          marginPct,
+        };
+      })
+      .sort((a, b) => b.grossProfit - a.grossProfit);
+
+    return {
+      from: fromStr ?? null,
+      to: toStr ?? null,
+      rows,
+    };
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Trial balance — derived from journal_lines (P1 ledger)
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Sum of debits and credits per account from all journal entries dated
+   * `≤ asOf`. The `balanced` flag is the headline check: every well-formed
+   * journal entry posts `SUM(debit) === SUM(credit)`, so the rollup across
+   * all accounts must also balance. Any divergence means a posting got past
+   * the JournalService invariant — surface it loudly.
+   */
+  async trialBalance(asOfStr?: string): Promise<{
+    asOf: string;
+    rows: Array<{
+      accountId: string;
+      code: string | null;
+      name: string;
+      accountCategory: string;
+      isSystem: boolean;
+      debit: number;
+      credit: number;
+      balance: number;
+    }>;
+    totalDebit: number;
+    totalCredit: number;
+    balanced: boolean;
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+
+    const raw = await this.journalLines
+      .createQueryBuilder('ln')
+      .innerJoin('ln.entry', 'je')
+      .where('je.entry_date <= :asOf', { asOf })
+      .select('ln.account_id', 'accountId')
+      .addSelect('COALESCE(SUM(ln.debit), 0)', 'debit')
+      .addSelect('COALESCE(SUM(ln.credit), 0)', 'credit')
+      .groupBy('ln.account_id')
+      .getRawMany<{ accountId: string; debit: string; credit: string }>();
+
+    const accountIds = raw.map((r) => r.accountId);
+    const accountList = accountIds.length
+      ? await this.accounts.find({ where: { id: In(accountIds) } })
+      : [];
+    const byId = new Map(accountList.map((a) => [a.id, a]));
+
+    let totalDebit = 0;
+    let totalCredit = 0;
+    const rows = raw
+      .map((r) => {
+        const acc = byId.get(r.accountId);
+        const debit = Number(r.debit);
+        const credit = Number(r.credit);
+        totalDebit += debit;
+        totalCredit += credit;
+        return {
+          accountId: r.accountId,
+          code: acc?.code ?? null,
+          name: acc?.name ?? '(deleted account)',
+          accountCategory: acc?.accountCategory ?? 'ASSET',
+          isSystem: acc?.isSystem ?? false,
+          debit: round2(debit),
+          credit: round2(credit),
+          balance: round2(debit - credit),
+        };
+      })
+      .sort((a, b) => (a.code ?? '').localeCompare(b.code ?? ''));
+
+    return {
+      asOf: asOf.toISOString(),
+      rows,
+      totalDebit: round2(totalDebit),
+      totalCredit: round2(totalCredit),
+      balanced: Math.abs(totalDebit - totalCredit) < 0.005,
+    };
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Journal-driven reports (parallel ledger)
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Aggregates `journal_lines` by account category for the given date
+   * window. Used by the journal-driven Income Statement / Balance Sheet.
+   *
+   * Sign convention: assets / expenses are debit-natured so the natural
+   * balance is `debit - credit`; liabilities / equity / income are credit-
+   * natured so the natural balance is `credit - debit`. The returned values
+   * follow each category's natural sign so a positive number is what the
+   * reader expects.
+   */
+  private async balancesByCategory(opts: {
+    from?: Date;
+    to?: Date;
+  }): Promise<{
+    asset: number;
+    liability: number;
+    equity: number;
+    income: number;
+    expense: number;
+  }> {
+    const qb = this.journalLines
+      .createQueryBuilder('ln')
+      .innerJoin('ln.entry', 'je')
+      .innerJoin(Account, 'a', 'a.id = ln.account_id')
+      .select('a.account_category', 'category')
+      .addSelect('COALESCE(SUM(ln.debit), 0)', 'debit')
+      .addSelect('COALESCE(SUM(ln.credit), 0)', 'credit')
+      .groupBy('a.account_category');
+    if (opts.from) qb.andWhere('je.entry_date >= :from', { from: opts.from });
+    if (opts.to) qb.andWhere('je.entry_date <= :to', { to: opts.to });
+
+    const rows = await qb.getRawMany<{
+      category: string;
+      debit: string;
+      credit: string;
+    }>();
+
+    const out = { asset: 0, liability: 0, equity: 0, income: 0, expense: 0 };
+    for (const r of rows) {
+      const d = Number(r.debit);
+      const c = Number(r.credit);
+      switch (r.category) {
+        case 'ASSET':     out.asset     = round2(d - c); break;
+        case 'LIABILITY': out.liability = round2(c - d); break;
+        case 'EQUITY':    out.equity    = round2(c - d); break;
+        case 'INCOME':    out.income    = round2(c - d); break;
+        case 'EXPENSE':   out.expense   = round2(d - c); break;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Income Statement derived from `journal_lines`. Revenue is the sum of
+   * INCOME-category credits; COGS+OpEx is the sum of EXPENSE-category
+   * debits; netIncome = income - expense.
+   *
+   * Parallel to `incomeStatement()` which still derives from operational
+   * tables. Run them both, compare totals — divergence means a posting
+   * went sideways and needs investigation.
+   */
+  async incomeStatementFromJournals(
+    fromStr?: string,
+    toStr?: string,
+  ): Promise<{
+    from: string | null;
+    to: string | null;
+    revenue: number;
+    expense: number;
+    netIncome: number;
+    source: 'journals';
+  }> {
+    const from = fromStr ? new Date(fromStr) : undefined;
+    const to = toStr ? new Date(toStr) : undefined;
+    const b = await this.balancesByCategory({ from, to });
+    return {
+      from: fromStr ?? null,
+      to: toStr ?? null,
+      revenue: b.income,
+      expense: b.expense,
+      netIncome: round2(b.income - b.expense),
+      source: 'journals',
+    };
+  }
+
+  /**
+   * Balance Sheet derived from `journal_lines`. Equity here includes
+   * `current period earnings` = income − expense for the period up to
+   * `asOf`, since journals don't auto-close retained earnings.
+   *
+   * Identity check: `assets === liabilities + equity + earnings`. Surfaced
+   * as `balanced` so the UI can flag a problem at-a-glance.
+   */
+  async balanceSheetFromJournals(asOfStr?: string): Promise<{
+    asOf: string;
+    assets: number;
+    liabilities: number;
+    equity: number;
+    currentPeriodEarnings: number;
+    totalLiabilitiesAndEquity: number;
+    balanced: boolean;
+    source: 'journals';
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+    const b = await this.balancesByCategory({ to: asOf });
+    const earnings = round2(b.income - b.expense);
+    const totalLE = round2(b.liability + b.equity + earnings);
+    return {
+      asOf: asOf.toISOString(),
+      assets: b.asset,
+      liabilities: b.liability,
+      equity: b.equity,
+      currentPeriodEarnings: earnings,
+      totalLiabilitiesAndEquity: totalLE,
+      balanced: Math.abs(b.asset - totalLE) < 0.005,
+      source: 'journals',
+    };
+  }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 function labelForType(t: string): string {

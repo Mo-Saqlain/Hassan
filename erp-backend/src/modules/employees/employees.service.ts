@@ -5,11 +5,13 @@ import { Employee } from './entities/employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
 export class EmployeesService implements OnModuleInit {
   constructor(
     @InjectRepository(Employee) private readonly repo: Repository<Employee>,
+    private readonly sequences: SequenceService,
   ) {}
 
   async onModuleInit() {
@@ -47,8 +49,7 @@ export class EmployeesService implements OnModuleInit {
   }
 
   private async nextCode(): Promise<string> {
-    const count = await this.repo.count();
-    return `EMP-${String(count + 1).padStart(6, '0')}`;
+    return this.sequences.next('EMP', () => this.repo.count());
   }
 
   private async backfillCodes() {
