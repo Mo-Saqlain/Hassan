@@ -133,12 +133,30 @@ button.brand-toggle:focus-visible { outline: 2px solid var(--info); outline-offs
   position: sticky; top: 0;
   height: 44px;
   display: flex; align-items: center; gap: 10px;
-  padding: 0 16px;
+  /* Reserve room on the right for the Windows title-bar-overlay (min /
+     max / close). `env(titlebar-area-*)` is defined inside Electron when
+     titleBarStyle is 'hidden' with a titleBarOverlay; the fallback (0) is
+     used in the browser dev server where there is no overlay. */
+  padding: 0 calc(100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 0px) + 12px) 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-elev);
   backdrop-filter: none;
   z-index: 9;
   box-shadow: none;
+  /* Whole topbar is the window drag region; interactive children opt out
+     via .no-drag (set on every <button>, <input>, <a> below). */
+  -webkit-app-region: drag;
+  user-select: none;
+}
+/* Anything the user clicks/types in the topbar must opt out of the drag
+   region or it won't receive pointer events under Electron's WCO. */
+.topbar button,
+.topbar input,
+.topbar a,
+.topbar .search,
+.topbar .user-chip,
+.topbar [role="button"] {
+  -webkit-app-region: no-drag;
 }
 .crumbs { color: var(--text-muted); display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .crumbs .cur { color: var(--text); font-weight: 600; }

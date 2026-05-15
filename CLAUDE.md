@@ -79,7 +79,10 @@ BACKUP_DIR=      # daily backups land here; Electron forces <userData>/backups
 - `erp-desktop/src/main.js` spawns the compiled backend (`node dist/main.js` via `ELECTRON_RUN_AS_NODE=1`) as a child process, pointing `SQLITE_PATH` at Electron's `userData` dir and `BACKEND_PORT` at 3001. Polls `/api/health` then loads the React build.
 - Reads `<userData>/config.json` on every launch for `cloudSyncUrl` and `databaseUrl` — the shop owner can wire the install to Supabase without rebuilding.
 - Pushes the user's OS accent colour into the renderer via `did-finish-load` (Windows / macOS only); user override in `localStorage.hassan-accent-color` wins.
+- **Custom `app://` protocol.** Main registers `app://` as privileged (standard / secure / supportFetchAPI) and a `protocol.handle('app', …)` callback serves files from the React build dir with an SPA fallback to `index.html`. The renderer is loaded via `app://localhost/index.html` — **not** `file://`. The native menu (File / Edit / View / …) is killed with `Menu.setApplicationMenu(null)`, the native title bar is hidden via `titleBarStyle: 'hidden'`, and `titleBarOverlay` keeps the Windows min/max/close controls drawn on the right at 44 px tall. The in-app `.topbar` is the drag region. A small `preload.js` exposes `window.erpBridge.setTitleBarTheme(theme)` over IPC so the overlay colours flip with the React theme.
 - **Electron pinned to `^40`** because better-sqlite3 v12.10 only ships a prebuilt for `electron-v145` (= Electron 40). Bumping to 41+ either needs a new better-sqlite3 prebuilt or a working MSVC toolchain to compile from source.
+
+> **Don't ever switch the renderer back to `file://`.** `file://` makes `window.location.origin` evaluate to the string `"null"` in Chromium. React Router 7 internals call `new URL(path, location.origin)`, which throws `Failed to construct 'URL': Invalid URL`. The `app://localhost` origin is the only thing keeping that quiet — any change that bypasses `mainWindow.loadURL('app://localhost/index.html')` (e.g. dropping back to `loadFile`) will resurrect the crash.
 
 ### Branding
 - Source: `erp-frontend/logo.jpeg` (HE monogram, white H + blue E on black).
@@ -105,6 +108,19 @@ BACKUP_DIR=      # daily backups land here; Electron forces <userData>/backups
 - `SALE_CREATED`, `PURCHASE_CREATED` — Phase 1 transactions
 - `POS_SALE_CREATED` — Phase 2 POS sale (treated as `SALE_CREATED` on the cloud receiver; session metadata stripped)
 - `POS_SESSION_STARTED`, `POS_SESSION_CLOSED` — audit-only on cloud (no DB writes)
+
+## Sync trigger model
+
+Cloud push is **manual**, not scheduled. There is no `@Cron` on `SyncService.pushPending` — it runs only when:
+- the user clicks the "Sync" button in the topbar (calls `POST /api/sync/flush`), or
+- a server-side caller invokes `SyncService.pushPending()` directly (no current callers; reserved for future tooling).
+
+`pushPending()` returns a `SyncRunSummary` (`{ ok, cloudConfigured, attempted, succeeded, failed, message, error? }`) so the UI can show a result toast. The `<SyncButton/>` in `Layout`:
+- polls `GET /api/sync/status` every 30 s to keep the pending-count badge fresh
+- hides itself entirely when `CLOUD_SYNC_URL` is unset (no point offering a button that always errors)
+- shows a spinner while the request is in flight and a coloured pill (success / warn / error) with the summary message
+
+Don't add a `@Cron` back unless the product direction explicitly changes — the user asked for manual sync precisely so a flaky network doesn't bury the till in retry traffic.
 
 ## Conventions
 
@@ -155,7 +171,9 @@ Untested (intentional): `accounts`, `brands`, `customers`, `suppliers`, `stores`
 - Don't add separate sidebar entries for master-data entities — they go as tabs inside the Customer / Supplier / Item / Account / Stock / Employee hubs.
 - Don't add separate sidebar entries for transaction types — they go as tabs inside the relevant hub (Sales History + Returns under Sales; Purchases + Returns under Purchase; etc.).
 - Don't make `SalesModule` or `PurchasesModule` depend on `SyncModule` — use `OutboxModule` instead. Circular.
-- Don't switch the frontend back to BrowserRouter — HashRouter is required for the Electron `file://` build.
+- Don't switch the renderer back to `file://` (`loadFile` / direct path) — the React Router 7 internals call `new URL(path, location.origin)`, and Chromium reports `"null"` for the origin under `file://`, which throws "Failed to construct 'URL': Invalid URL". Stay on `app://localhost/index.html`.
+- Don't re-introduce the 30-second sync `@Cron`. The user asked for manual sync via the topbar button so unattended retries can't burn through cellular data on a flaky link.
+- Don't bring back the native menu bar (File / Edit / View). `Menu.setApplicationMenu(null)` is intentional; the topbar carries the brand + actions.
 - Don't put writes in `ReportsService` — it's read-only.
 - Don't bring back the manual "+ New Sale" form on the Sales page — sales are POS-driven; that page is read-only history.
 - Don't use `@Column({ type: 'timestamp' })` or `@Column({ type: 'datetime' })` — both crash one of the two supported dialects. Use `@Column({ type: Date })`.

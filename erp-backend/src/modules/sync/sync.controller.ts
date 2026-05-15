@@ -36,9 +36,13 @@ export class SyncController {
     };
   }
 
+  /**
+   * Manually trigger a sync push. Returns a summary the UI can show in a
+   * toast ("Synced 3 events." / "Nothing to sync." / "Cloud push failed: …").
+   * There is no background cron — syncing happens only when invoked.
+   */
   @Post('flush')
-  async flush() {
-    await this.service.pushPending();
-    return { ok: true };
+  flush() {
+    return this.service.pushPending();
   }
 }

@@ -3,6 +3,7 @@ import { Link, NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
 import Brand from './Brand';
 import Icon from './Icon';
 import ThemeToggle from './ThemeToggle';
+import SyncButton from './SyncButton';
 import GlobalSearch from './GlobalSearch';
 import { api } from '../api/client';
 import { SIDEBAR } from '../nav/hubs';
@@ -105,6 +106,7 @@ export default function Layout() {
           <GlobalSearch />
 
           <div className="spacer" />
+          <SyncButton />
           <LoginBell />
           <UserChip />
           <ThemeToggle />

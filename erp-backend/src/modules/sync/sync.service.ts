@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
@@ -13,6 +12,17 @@ export interface SyncEventResult {
   id: string;
   status: SyncEventStatus;
   resultId?: string;
+  error?: string;
+}
+
+/** Summary returned by an on-demand sync run, for UI display. */
+export interface SyncRunSummary {
+  ok: boolean;
+  cloudConfigured: boolean;
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  message: string;
   error?: string;
 }
 
@@ -113,16 +123,47 @@ export class SyncService {
     return this.outbox.countPending();
   }
 
-  /** Worker: pushes PENDING queue entries to the configured cloud sync URL. */
-  @Cron(CronExpression.EVERY_30_SECONDS)
-  async pushPending() {
+  /**
+   * Pushes PENDING outbox entries to the configured cloud sync URL.
+   * Triggered manually from the UI ("Sync now" button) — there is no
+   * background cron. Returns a summary so the UI can show what happened.
+   */
+  async pushPending(): Promise<SyncRunSummary> {
     const cloudUrl = process.env.CLOUD_SYNC_URL;
-    if (!cloudUrl) return;
-    if (this.isPushing) return;
+    if (!cloudUrl) {
+      return {
+        ok: false,
+        cloudConfigured: false,
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        message:
+          'Cloud sync URL not configured. Set CLOUD_SYNC_URL or cloudSyncUrl in config.json.',
+      };
+    }
+    if (this.isPushing) {
+      return {
+        ok: false,
+        cloudConfigured: true,
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        message: 'A sync is already in progress — try again in a moment.',
+      };
+    }
     this.isPushing = true;
     try {
       const pending = await this.outbox.pending(50);
-      if (pending.length === 0) return;
+      if (pending.length === 0) {
+        return {
+          ok: true,
+          cloudConfigured: true,
+          attempted: 0,
+          succeeded: 0,
+          failed: 0,
+          message: 'Nothing to sync — outbox is already empty.',
+        };
+      }
       const body = {
         events: pending.map((e) => ({
           id: e.id,
@@ -135,6 +176,8 @@ export class SyncService {
           timeout: 10000,
         });
         const byId = new Map(res.data.map((r) => [r.id, r]));
+        let succeeded = 0;
+        let failed = 0;
         for (const entry of pending) {
           const result = byId.get(entry.id);
           if (!result) continue;
@@ -142,13 +185,28 @@ export class SyncService {
           if (result.status === 'PROCESSED' || result.status === 'DUPLICATE') {
             entry.status = 'SYNCED';
             entry.error = undefined;
+            succeeded += 1;
           } else {
             entry.status = 'FAILED';
             entry.error = result.error ?? 'Unknown error';
+            failed += 1;
           }
           await this.outbox.save(entry);
         }
-        this.logger.log(`Pushed ${pending.length} sync events to cloud`);
+        this.logger.log(
+          `Sync pushed ${pending.length} events (succeeded=${succeeded}, failed=${failed})`,
+        );
+        return {
+          ok: failed === 0,
+          cloudConfigured: true,
+          attempted: pending.length,
+          succeeded,
+          failed,
+          message:
+            failed === 0
+              ? `Synced ${succeeded} event${succeeded === 1 ? '' : 's'}.`
+              : `Synced ${succeeded} event${succeeded === 1 ? '' : 's'}; ${failed} failed.`,
+        };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Cloud push failed: ${msg}`);
@@ -157,6 +215,15 @@ export class SyncService {
           entry.error = msg;
           await this.outbox.save(entry);
         }
+        return {
+          ok: false,
+          cloudConfigured: true,
+          attempted: pending.length,
+          succeeded: 0,
+          failed: pending.length,
+          error: msg,
+          message: `Cloud push failed: ${msg}`,
+        };
       }
     } finally {
       this.isPushing = false;

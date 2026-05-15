@@ -115,9 +115,9 @@ A real cashier's day book.
 - **Statement of Changes in Equity** — Opening + Adjusted Net Income − Drawings = Closing.
 - **Stock Ledger** with category / brand / supplier filters.
 
-### 9. Cloud sync (offline-first)
+### 9. Cloud sync (offline-first, manual trigger)
 - Every business transaction at the local node enqueues an event in the `sync_queue` outbox table (`SALE_CREATED`, `PURCHASE_CREATED`, `POS_SALE_CREATED`, `POS_SESSION_STARTED`, `POS_SESSION_CLOSED`).
-- A background `@Cron` worker pushes pending entries to `CLOUD_SYNC_URL` every 30 seconds when set.
+- **Sync is manual, not scheduled.** A "Sync" button in the topbar shows the pending count as a badge, spins while the request is in flight, and toasts the result ("Synced 3 events.", "Nothing to sync.", or the error message from the cloud). Clicking it calls `POST /api/sync/flush`, which drains up to 50 pending entries and returns a `{ ok, cloudConfigured, attempted, succeeded, failed, message }` summary. The button hides itself entirely when `CLOUD_SYNC_URL` is not configured.
 - The cloud receiver (`POST /api/sync/push`) is **another instance of this same NestJS backend** deployed against Supabase Postgres. It applies events with idempotency by event ID — duplicate event IDs return `DUPLICATE`, never re-applied. So Supabase is always eventually-consistent with what the shop did, with no special online-mode in the cashier UI.
 
 ### 10. Backups
@@ -180,13 +180,13 @@ A real cashier's day book.
   │   │   ├─ TypeORM → SQLite          │                   │ (idempotent
   │   │   │   <userData>/erp.sqlite    │                   │  by event.id)
   │   │   ├─ OutboxModule              │                   │
-  │   │   ├─ SyncModule (worker @30s)──┼───────────────────┘
-  │   │   ├─ ReportsModule (read-only) │
-  │   │   ├─ AuditSubscriber           │
-  │   │   └─ ErrorLogFilter            │
+  │   │   ├─ SyncModule (manual flush)─┼───────────────────┘ ▲
+  │   │   ├─ ReportsModule (read-only) │      Sync button in │
+  │   │   ├─ AuditSubscriber           │      topbar triggers│
+  │   │   └─ ErrorLogFilter            │      POST /sync/flush
   │   │
-  │   └─ React build via file://       │
-  │       └─ HashRouter pages          │
+  │   └─ React build via app://localhost│
+  │       (custom protocol; HashRouter) │
   └────────────────────────────────────┘
 
                 Cloud (same NestJS code)
@@ -240,7 +240,7 @@ erp-backend/
 │  │  ├─ stock-transfers/     # inter-store transfers
 │  │  ├─ stores/
 │  │  ├─ suppliers/
-│  │  ├─ sync/                # cron worker (out) + /sync/push receiver (in)
+│  │  ├─ sync/                # manual push (POST /sync/flush) + /sync/push receiver (cloud side)
 │  │  └─ users/               # auth, users CRUD, access requests, login events
 │  └─ testing/test-db.ts      # in-memory TypeORM helper for spec files
 
@@ -299,7 +299,7 @@ On first boot the backend seeds a SUPERUSER (`admin` / `Tech@123`). Change the p
 ### Production builds
 ```bash
 cd erp-backend && npm run build      # → erp-backend/dist
-cd erp-frontend && npm run build     # → erp-frontend/build (single-page bundle for file:// or any static host)
+cd erp-frontend && npm run build     # → erp-frontend/build (single-page bundle for app://localhost in Electron, or any static host on the web)
 ```
 
 ---
@@ -319,7 +319,7 @@ DB_SYNC=true             # auto-create schema on boot — Postgres only; SQLite 
 DB_SSL=true              # Postgres only
 
 # Optional
-CLOUD_SYNC_URL=https://your-host.example.com/api/sync/push   # local node pushes outbox here every 30 s
+CLOUD_SYNC_URL=https://your-host.example.com/api/sync/push   # local node pushes outbox here when the user clicks "Sync"
 BACKUP_DIR=              # default erp-backend/backups/; Electron forces <userData>/backups
 ```
 
@@ -333,7 +333,7 @@ The CRA dev server binds to `0.0.0.0`. From a phone on the same network, visit `
 
 To find your LAN IP on Windows: `ipconfig` → look for an IPv4 address starting with `192.168.…` or `10.0.…`.
 
-The Electron build doesn't need LAN — the renderer loads from `file://` and the API client falls back to `localhost:3001`.
+The Electron build doesn't need LAN — the renderer loads from the custom `app://localhost` scheme and the API client targets `http://localhost:3001`.
 
 ---
 
@@ -343,7 +343,11 @@ The Electron wrapper produces a fully self-contained NSIS installer. The shop PC
 
 - The Electron shell (asar)
 - `resources/backend/{dist,node_modules,package.json}` — the NestJS API the shell launches at startup. Native `better-sqlite3` rebuilt against Electron's Node ABI.
-- `resources/frontend/build/` — the React build the shell loads via `file://`
+- `resources/frontend/build/` — the React build the shell serves via a custom `app://localhost` protocol (registered in `erp-desktop/src/main.js` with `protocol.handle('app', …)` and an SPA fallback to `index.html`). The renderer is **not** loaded with `file://` — under `file://` Chromium reports `window.location.origin === "null"`, which makes React Router 7 throw "Failed to construct 'URL': Invalid URL" inside `new URL(path, origin)`. `app://localhost` gives the renderer a real origin and the crash disappears.
+
+### Window chrome (VS Code-style)
+
+The Electron window deliberately drops the native menu bar (`Menu.setApplicationMenu(null)`) and hides the native title bar (`titleBarStyle: 'hidden'`). Windows still draws the minimize / maximize / close controls in the top-right via `titleBarOverlay` (44 px tall, theme-aware). The in-app `.topbar` becomes the drag region (`-webkit-app-region: drag`), with `no-drag` opt-outs on every interactive child so buttons, the search box, and the user chip still receive clicks. A tiny [erp-desktop/src/preload.js](erp-desktop/src/preload.js) exposes `window.erpBridge.setTitleBarTheme(theme)` so the overlay colours flip light↔dark when the user toggles the theme.
 
 ### Build the installer
 
@@ -427,7 +431,10 @@ Tests use an isolated in-memory SQLite TypeORM data source per spec ([src/testin
 - **Delete = safe** — every master-data delete is wrapped in `deleteOrConflict` ([erp-backend/src/common/delete-guard.ts](erp-backend/src/common/delete-guard.ts)) which catches DB foreign-key violations (Postgres `23503` / SQLite `FOREIGN KEY constraint failed`) and turns them into a friendly 409 telling the user to use Close instead.
 - **Reports are read-only** — no writes allowed inside `ReportsService` or its controller.
 - **Outbox decouples sales from sync** — `OutboxService` is the only thing both sales / purchases / POS and the sync worker depend on. Do not make `SalesModule` import `SyncModule` (circular).
-- **HashRouter, not BrowserRouter** — required for the Electron `file://` build.
+- **HashRouter, not BrowserRouter** — required so the SPA fallback inside the `app://` protocol handler works on any sub-route.
+- **Renderer loads through `app://localhost`, never `file://`** — `file://` makes `window.location.origin === "null"` in Chromium, which crashes React Router 7's internal `new URL()` calls with "Failed to construct 'URL': Invalid URL".
+- **Sync runs only on the user's command** — the topbar "Sync" button calls `POST /api/sync/flush`. There is no background cron; don't add one back without product agreement.
+- **No native menu bar** — `Menu.setApplicationMenu(null)` in the Electron main is deliberate. Surface new app-level actions inside the React topbar / sidebar instead.
 - **Auth** — opaque server tokens (not JWT), 12-hour sliding window. `AuthGuard` is global; mark public endpoints with `@Public()`.
 - **No DB triggers** — cross-cutting concerns use TypeORM `EntitySubscriber` (already done for audit logs).
 - **No migrations yet** — `synchronize: true` on SQLite, gated by `DB_SYNC=true` on Postgres. Switch to migrations before treating Supabase as production.

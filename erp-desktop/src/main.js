@@ -1,12 +1,107 @@
-const { app, BrowserWindow, dialog, systemPreferences } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  protocol,
+  systemPreferences,
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const http = require('http');
 
+// Drop the default File/Edit/View/Window/Help menu. The app has its own
+// in-canvas chrome (sidebar + topbar) — the native menu bar adds visual
+// noise without adding capability.
+Menu.setApplicationMenu(null);
+
+// Title-bar overlay colour pair per theme (matches tokens.css surfaces).
+const TITLEBAR_OVERLAY_HEIGHT = 44;
+const TITLEBAR_COLORS = {
+  light: { color: '#fafafa', symbolColor: '#1f1f1f' },
+  dark:  { color: '#2c2c2c', symbolColor: '#f5f5f5' },
+};
+
 const isDev = process.env.ERP_DESKTOP_DEV === '1';
 const BACKEND_PORT = Number(process.env.ERP_BACKEND_PORT || 3001);
 const BACKEND_HOST = '127.0.0.1';
+
+// Register a custom `app://` scheme BEFORE app.whenReady so the renderer
+// can be served over `app://localhost/...` instead of `file://`. Loading
+// over `file://` breaks any library that does `new URL(path, location.origin)`
+// — Chromium reports `location.origin === "null"` for file:// pages and the
+// URL constructor throws "Invalid URL". React Router 7's internals hit this.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+]);
+
+// Minimal mime map for the static assets the React build ships.
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js':   'application/javascript; charset=utf-8',
+  '.mjs':  'application/javascript; charset=utf-8',
+  '.css':  'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map':  'application/json; charset=utf-8',
+  '.txt':  'text/plain; charset=utf-8',
+  '.svg':  'image/svg+xml',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif':  'image/gif',
+  '.webp': 'image/webp',
+  '.ico':  'image/x-icon',
+  '.woff':  'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf':  'font/ttf',
+};
+
+function frontendBuildDir() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'frontend', 'build');
+  }
+  return path.resolve(__dirname, '..', '..', 'erp-frontend', 'build');
+}
+
+function registerAppProtocol() {
+  const buildDir = frontendBuildDir();
+  protocol.handle('app', (req) => {
+    try {
+      const url = new URL(req.url);
+      let pathname = decodeURIComponent(url.pathname || '/');
+      if (pathname === '/' || pathname === '') pathname = '/index.html';
+      // Normalise + prevent path traversal outside the build dir.
+      let filePath = path.normalize(path.join(buildDir, pathname));
+      if (!filePath.startsWith(buildDir)) {
+        filePath = path.join(buildDir, 'index.html');
+      }
+      // SPA fallback: anything that isn't a real file resolves to index.html
+      // so client-side routing (HashRouter or future BrowserRouter) works.
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        filePath = path.join(buildDir, 'index.html');
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const mime = MIME[ext] || 'application/octet-stream';
+      const data = fs.readFileSync(filePath);
+      return new Response(data, {
+        status: 200,
+        headers: { 'Content-Type': mime, 'Cache-Control': 'no-cache' },
+      });
+    } catch (e) {
+      return new Response(`app:// handler error: ${e.message}`, { status: 500 });
+    }
+  });
+}
 
 let backendProcess = null;
 let mainWindow = null;
@@ -19,13 +114,6 @@ function backendEntry() {
     return path.join(process.resourcesPath, 'backend', 'dist', 'main.js');
   }
   return path.resolve(__dirname, '..', '..', 'erp-backend', 'dist', 'main.js');
-}
-
-function frontendBuild() {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'frontend', 'build', 'index.html');
-  }
-  return path.resolve(__dirname, '..', '..', 'erp-frontend', 'build', 'index.html');
 }
 
 function frontendDevUrl() {
@@ -146,27 +234,48 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    title: 'ERP · Phase 1',
+    title: 'Hassan Electronics ERP',
+    // VS Code-style integrated title bar: no native title bar, but Windows
+    // still draws the minimize / maximize / close controls on the right via
+    // `titleBarOverlay`. The in-app `.topbar` becomes the drag region.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      ...TITLEBAR_COLORS.light,
+      height: TITLEBAR_OVERLAY_HEIGHT,
+    },
+    autoHideMenuBar: true,
+    backgroundColor: '#f3f3f3',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
+  // Defensive: even with titleBarStyle: 'hidden' some Electron versions
+  // still surface the menu via Alt — make sure it stays gone.
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.setAutoHideMenuBar(true);
 
   if (isDev) {
     await mainWindow.loadURL(frontendDevUrl());
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    const build = frontendBuild();
-    if (!fs.existsSync(build)) {
+    const buildDir = frontendBuildDir();
+    const index = path.join(buildDir, 'index.html');
+    if (!fs.existsSync(index)) {
       dialog.showErrorBox(
         'Frontend build missing',
-        `Could not find React build at:\n${build}\n\nRun \`npm run build\` inside erp-frontend first.`,
+        `Could not find React build at:\n${index}\n\nRun \`npm run build\` inside erp-frontend first.`,
       );
       app.quit();
       return;
     }
-    await mainWindow.loadFile(build);
+    // Use the custom `app://` scheme registered above. Loading via this
+    // scheme gives the renderer a valid origin (`app://localhost`), which
+    // is what every URL-constructor in the codebase (axios, react-router
+    // internals, …) needs. `loadFile()` would use file:// and crash with
+    // "Failed to construct 'URL': Invalid URL".
+    await mainWindow.loadURL('app://localhost/index.html');
   }
 
   mainWindow.on('closed', () => {
@@ -249,7 +358,21 @@ function applyOsAccentColor() {
   mainWindow.webContents.executeJavaScript(js).catch(() => {});
 }
 
+ipcMain.on('erp:set-titlebar-theme', (_event, theme) => {
+  if (!mainWindow) return;
+  const colors = TITLEBAR_COLORS[theme === 'dark' ? 'dark' : 'light'];
+  try {
+    mainWindow.setTitleBarOverlay({
+      ...colors,
+      height: TITLEBAR_OVERLAY_HEIGHT,
+    });
+  } catch {
+    /* setTitleBarOverlay is Windows-only; ignore on macOS / Linux */
+  }
+});
+
 app.whenReady().then(async () => {
+  registerAppProtocol();
   startBackend();
   try {
     await waitForBackend();

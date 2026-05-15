@@ -19,6 +19,11 @@ export function ThemeProvider({ children }) {
     } catch {
       /* ignore storage errors */
     }
+    // When running inside Electron, repaint the Windows title-bar-overlay
+    // controls (min / max / close) so they match the React theme.
+    if (typeof window !== 'undefined' && window.erpBridge?.setTitleBarTheme) {
+      window.erpBridge.setTitleBarTheme(theme);
+    }
   }, [theme]);
 
   const toggle = useCallback(
