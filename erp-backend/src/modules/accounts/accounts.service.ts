@@ -60,6 +60,7 @@ function categoryForType(type: AccountType): AccountCategory {
     case 'WALLET':
     case 'INVENTORY':
     case 'A_R':
+    case 'CASH_ON_HAND':
       return 'ASSET';
     case 'CREDIT':
     case 'A_P':

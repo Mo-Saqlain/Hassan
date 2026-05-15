@@ -9,7 +9,13 @@ export type StockReferenceType =
   | 'SALE'
   | 'PURCHASE_RETURN'
   | 'SALE_RETURN'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  // Inverse-direction movements booked when a sale/purchase is voided via
+  // `POST /{sales,purchases}/:id/reverse`. Tagged distinctly so the stock
+  // ledger can show "Sale reversal — INV-000123" rather than a bare
+  // SALE/PURCHASE that doesn't match any sale/purchase row.
+  | 'SALE_REVERSAL'
+  | 'PURCHASE_REVERSAL';
 
 @Entity('stock_movements')
 @Index(['itemId'])
