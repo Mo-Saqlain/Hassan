@@ -57,3 +57,5 @@ coverage/
 .cache/
 *.local
 Changes.txt
+erp-desktop/build-resources/installer.nsh
+

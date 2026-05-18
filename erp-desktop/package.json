@@ -1,5 +1,6 @@
 {
   "name": "erp-desktop",
+  "productName": "Hassan Electronics",
   "version": "1.0.0",
   "description": "Hassan Electronics",
   "main": "src/main.js",

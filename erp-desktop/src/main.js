@@ -17,6 +17,24 @@ const http = require('http');
 // noise without adding capability.
 Menu.setApplicationMenu(null);
 
+// Single-instance lock. Without this, double-clicking the shortcut /
+// re-launching the .exe spawns a fresh Electron process AND a fresh
+// backend, both racing to bind :::3001 — the second loses with
+// EADDRINUSE and the dialog gives the user a "Backend stopped" error
+// for what should have been a no-op re-launch. With the lock, the
+// second launch quits immediately and we just focus the existing
+// window (handled in the 'second-instance' listener below).
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 // Title-bar overlay colour pair per theme. MUST match `--surface-elev`
 // from tokens.css exactly — the same token paints the sidebar header
 // (.brand) and the topbar, and any drift here produces a visible seam
@@ -108,6 +126,70 @@ function registerAppProtocol() {
 
 let backendProcess = null;
 let mainWindow = null;
+let splashWindow = null;
+
+/**
+ * Show a tiny frameless splash while the backend is booting. On first
+ * launch the backend can take 30-60 s (TypeORM schema sync, CoA seed,
+ * Defender scan, optional Supabase TLS handshake) and without a splash
+ * the user just sees a black taskbar entry and assumes the app is broken.
+ */
+function showSplash(message) {
+  if (splashWindow) {
+    try {
+      splashWindow.webContents.executeJavaScript(
+        `document.getElementById('msg').textContent = ${JSON.stringify(message)}`,
+      );
+    } catch { /* window may be closing */ }
+    return;
+  }
+  splashWindow = new BrowserWindow({
+    width: 420,
+    height: 220,
+    frame: false,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    show: true,
+    backgroundColor: '#1f1f1f',
+    title: 'Hassan Electronics',
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  splashWindow.setMenuBarVisibility(false);
+  const html =
+    `<!doctype html><html><head><meta charset="utf-8"><style>
+      html,body{margin:0;height:100%;background:#1f1f1f;color:#f5f5f5;
+        font:14px "Segoe UI Variable","Segoe UI",sans-serif;}
+      .wrap{height:100%;display:flex;flex-direction:column;
+        align-items:center;justify-content:center;gap:14px;
+        padding:24px;text-align:center;}
+      .brand{font-size:18px;font-weight:600;letter-spacing:.3px;}
+      .msg{opacity:.8;}
+      .bar{width:80%;height:3px;background:#333;overflow:hidden;}
+      .bar::after{content:"";display:block;height:100%;width:40%;
+        background:#3a8dde;animation:slide 1.2s infinite ease-in-out;}
+      @keyframes slide{0%{transform:translateX(-100%);}
+        100%{transform:translateX(250%);}}
+    </style></head><body><div class="wrap">
+      <div class="brand">Hassan Electronics ERP</div>
+      <div id="msg" class="msg">${message}</div>
+      <div class="bar"></div>
+      <div class="msg" style="font-size:12px;opacity:.55;">
+        First launch may take up to a minute.</div>
+    </div></body></html>`;
+  splashWindow.loadURL(
+    'data:text/html;charset=utf-8,' + encodeURIComponent(html),
+  );
+  splashWindow.on('closed', () => { splashWindow = null; });
+}
+
+function closeSplash() {
+  if (splashWindow) {
+    try { splashWindow.close(); } catch { /* already gone */ }
+    splashWindow = null;
+  }
+}
 
 function backendEntry() {
   // When packaged (`app.isPackaged`) the compiled backend is unpacked into
@@ -209,6 +291,18 @@ function startBackend() {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // Log spawn details to backend.log so a silent failure produces SOMETHING
+  // we can read post-mortem. Without the pid line, an Electron child that
+  // is killed by Defender (or any other security software) before its first
+  // console.log() leaves zero trace and the only error the user sees is the
+  // 90s timeout.
+  if (backendLog) {
+    backendLog.write(
+      `  spawn pid: ${backendProcess.pid}\n` +
+        `  execPath:  ${process.execPath}\n\n`,
+    );
+  }
+
   backendProcess.stdout.on('data', (b) => {
     process.stdout.write(`[backend] ${b}`);
     if (backendLog) backendLog.write(b);
@@ -218,7 +312,22 @@ function startBackend() {
     if (backendLog) backendLog.write(b);
   });
 
-  backendProcess.on('exit', (code) => {
+  // Spawn-level errors (executable not found / not executable / blocked
+  // by an EDR product / ENOENT) fire as 'error' events, not 'exit'. We
+  // previously had no listener — Node would unhandled-error and crash
+  // silently inside the packaged exe. Now we surface it.
+  backendProcess.on('error', (err) => {
+    const msg = `[spawn error] ${err && err.message ? err.message : String(err)}\n`;
+    process.stderr.write(msg);
+    if (backendLog) backendLog.write(msg);
+  });
+
+  backendProcess.on('exit', (code, signal) => {
+    if (backendLog) {
+      backendLog.write(
+        `[backend exit] code=${code} signal=${signal}\n`,
+      );
+    }
     backendProcess = null;
     if (code !== 0 && !app.isQuiting) {
       dialog.showErrorBox(
@@ -234,12 +343,16 @@ function startBackend() {
 
 /**
  * Polls /api/health until the backend responds 200 OR the backend process
- * dies. First-boot of a fresh SQLite database is slow — TypeORM has to
- * synchronise 41 entities and AccountsService seeds the chart of accounts —
- * so we give it 90 s before declaring failure. If the backend process exits
- * before then, short-circuit instead of polling a dead port.
+ * dies. First-boot is slow — TypeORM has to synchronise 41 entities,
+ * AccountsService seeds the chart of accounts, the journals/CoA hierarchy
+ * is provisioned, and (when DATABASE_URL is set) the Supabase Session-Pooler
+ * TLS handshake adds another few seconds. On a cold install Windows Defender
+ * also scans the unsigned exe before letting Node execute it. Five minutes
+ * is enough headroom that the user never sees a spurious timeout on a slow
+ * laptop or flaky network. If the backend process exits before then, we
+ * short-circuit instead of polling a dead port.
  */
-function waitForBackend(timeoutMs = 90_000) {
+function waitForBackend(timeoutMs = 300_000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -422,15 +535,19 @@ ipcMain.on('erp:set-titlebar-theme', (_event, theme) => {
 
 app.whenReady().then(async () => {
   registerAppProtocol();
+  showSplash('Starting backend…');
   startBackend();
   try {
     await waitForBackend();
   } catch (err) {
+    closeSplash();
     dialog.showErrorBox('Startup error', err.message);
     app.quit();
     return;
   }
+  showSplash('Loading interface…');
   await createWindow();
+  closeSplash();
 });
 
 app.on('window-all-closed', () => {

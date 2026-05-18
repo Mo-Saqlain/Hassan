@@ -34,6 +34,13 @@
 ; ─────────────────────────────────────────────────────────────────────────
 
 !macro customInit
+  ; Force the details panel open at runtime. `ShowInstDetails show` in
+  ; customHeader sets the script-level default, but electron-builder's NSIS
+  ; template re-applies its own value during the InstFiles page, which is
+  ; why details were visible for uninstall (no override there) but hidden
+  ; for install. SetDetailsView here overrides the template at runtime.
+  SetDetailsView show
+
   DetailPrint "════════════════════════════════════════════════════════"
   DetailPrint "  Hassan Electronics — Installation"
   DetailPrint "  Version ${VERSION}"
@@ -50,6 +57,7 @@
   ; DetailPrint lines below are the user-facing recap that appears in the
   ; details panel — they describe what was just installed, module by module,
   ; rather than the file-by-file extraction noise.
+  SetDetailsView show
   DetailPrint ""
   DetailPrint "[2/6] Installing Electron runtime..."
   DetailPrint "      → Hassan Electronics.exe (main process)"
