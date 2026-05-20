@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { Account, AccountCategory, AccountSubType, AccountType } from './entities/account.entity';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
@@ -170,11 +170,23 @@ export class AccountsService implements OnModuleInit {
    * journal-driven reports.
    */
   private async backfillCategories() {
-    // Find rows where the category column doesn't match what the type implies.
-    const all = await this.repo.find();
-    const stale = all.filter(
-      (a) => a.accountCategory !== categoryForType(a.type ?? 'CASH'),
-    );
+    // Targets only the rows that could plausibly be wrong:
+    //   - `accountCategory IS NULL` (column added in a later migration; old
+    //     rows never wrote it)
+    //   - `accountCategory = 'ASSET'` with a type of CAPITAL or CREDIT (the
+    //     column's pre-fix default left these two miscategorised)
+    // Previously this loaded EVERY account row and filtered in JS — fine for
+    // a few dozen rows, but a needless O(accounts) read on every boot. The
+    // filtered query keeps the work bounded to actually-stale rows.
+    const stale = await this.repo.find({
+      where: [
+        { accountCategory: IsNull() },
+        {
+          accountCategory: 'ASSET' as AccountCategory,
+          type: In(['CAPITAL', 'CREDIT'] as AccountType[]),
+        },
+      ],
+    });
     if (stale.length === 0) return;
     for (const row of stale) {
       row.accountCategory = categoryForType(row.type ?? 'CASH');

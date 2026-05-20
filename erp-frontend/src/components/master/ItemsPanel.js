@@ -14,6 +14,13 @@ const empty = {
   unit: 'pcs',
   minStockLevel: '',
   isActive: true,
+  // Three-mode tracking defaults match the most common case (appliances):
+  // serialised with required serial entry and a manufacturer warranty.
+  tracksSerials: true,
+  serialRequiredOnSale: true,
+  hasWarranty: true,
+  warrantyType: 'COMPANY',
+  warrantyDays: '365',
 };
 
 export default function ItemsPanel() {
@@ -61,6 +68,12 @@ export default function ItemsPanel() {
           unit: row.unit ?? 'pcs',
           minStockLevel: row.minStockLevel ?? '',
           isActive: row.isActive ?? true,
+          tracksSerials: row.tracksSerials ?? true,
+          serialRequiredOnSale: row.serialRequiredOnSale ?? true,
+          hasWarranty: row.hasWarranty ?? true,
+          warrantyType: row.warrantyType ?? 'COMPANY',
+          warrantyDays:
+            row.warrantyDays == null ? '' : String(row.warrantyDays),
         }
       : empty;
     setForm(next);
@@ -81,16 +94,20 @@ export default function ItemsPanel() {
 
   const submit = async (e) => {
     e.preventDefault();
+    // Bulk accessories ("Stand Large", "Cable 3m", "Local Speaker 12\"") may
+    // not have a model number at all — only the display name is required.
+    // The backend auto-generates the SKU when one isn't supplied.
     const modelNo = form.modelNo.trim();
-    if (!modelNo) {
-      setSubmitError('Model No. is required');
+    const displayName = modelNo || form.sku.trim();
+    if (!displayName) {
+      setSubmitError('Either Model No. or SKU is required.');
       return;
     }
     const payload = {
-      modelNo,
-      // name auto-derives from modelNo on the backend; send it explicitly so
-      // the displayed name updates in lockstep when the user edits modelNo.
-      name: modelNo,
+      modelNo: modelNo || undefined,
+      // Keep `name` in lockstep with whatever the user typed. When modelNo
+      // is blank the display falls back to the user-supplied SKU.
+      name: displayName,
       sku: form.sku.trim() || undefined,
       brandId: form.brandId || undefined,
       categoryIds: form.categoryIds,
@@ -100,6 +117,16 @@ export default function ItemsPanel() {
       minStockLevel:
         form.minStockLevel === '' ? undefined : Number(form.minStockLevel),
       isActive: form.isActive,
+      tracksSerials: form.tracksSerials,
+      serialRequiredOnSale: form.tracksSerials
+        ? form.serialRequiredOnSale
+        : false,
+      hasWarranty: form.hasWarranty,
+      warrantyType: form.hasWarranty ? form.warrantyType : 'NONE',
+      warrantyDays:
+        form.hasWarranty && form.warrantyDays !== ''
+          ? Number(form.warrantyDays)
+          : undefined,
     };
     try {
       if (editing) {
@@ -196,17 +223,17 @@ export default function ItemsPanel() {
           {submitError && <div className="alert alert-error">{submitError}</div>}
           <div className="form-row">
             <div>
-              <label>Model No. *</label>
+              <label>Model No.</label>
               <input
-                required
                 autoFocus
                 value={form.modelNo}
-                placeholder="e.g. DAWLANCE LVS-15"
+                placeholder="e.g. DAWLANCE LVS-15 (optional for accessories)"
                 onChange={(e) => setForm({ ...form, modelNo: e.target.value })}
               />
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                The model number is used as this item's name. SKU is
-                auto-generated from it.
+                Optional. Appliances use the manufacturer model number; bulk
+                accessories ("Stand Large", "Cable 3m") can leave it blank —
+                the auto-generated SKU is enough.
               </div>
             </div>
             <div>
@@ -269,6 +296,100 @@ export default function ItemsPanel() {
               />
             </div>
           </div>
+
+          <fieldset
+            style={{
+              marginTop: 12,
+              border: '1px solid var(--border)',
+              padding: '10px 12px',
+            }}
+          >
+            <legend style={{ fontSize: 12, padding: '0 6px' }}>
+              Tracking & warranty
+            </legend>
+            <div className="form-row">
+              <div>
+                <label title="Off for bulk accessories (stands, cables, remotes). On for appliances and gray-market items where you want to capture the manufacturer serial.">
+                  Track serials per unit
+                </label>
+                <input
+                  type="checkbox"
+                  checked={form.tracksSerials}
+                  onChange={(e) =>
+                    setForm({ ...form, tracksSerials: e.target.checked })
+                  }
+                />
+              </div>
+              {form.tracksSerials && (
+                <div>
+                  <label title="When on, the POS blocks checkout until one serial per unit is scanned. Turn off for gray-market items whose serials may not be reliable.">
+                    Serial required at sale
+                  </label>
+                  <input
+                    type="checkbox"
+                    checked={form.serialRequiredOnSale}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        serialRequiredOnSale: e.target.checked,
+                      })
+                    }
+                  />
+                </div>
+              )}
+              <div>
+                <label title="Master warranty switch. Off prints 'NO WARRANTY COVERAGE / SOLD AS-IS' on the receipt under this line.">
+                  Offer a warranty
+                </label>
+                <input
+                  type="checkbox"
+                  checked={form.hasWarranty}
+                  onChange={(e) =>
+                    setForm({ ...form, hasWarranty: e.target.checked })
+                  }
+                />
+              </div>
+              {form.hasWarranty && (
+                <>
+                  <div>
+                    <label title="COMPANY = manufacturer-backed. SHOP = shop-issued cover. CHECKING_ONLY = bench-tested at sale, no real cover. NONE = no warranty (still prints a line on the receipt).">
+                      Warranty type
+                    </label>
+                    <select
+                      value={form.warrantyType}
+                      onChange={(e) =>
+                        setForm({ ...form, warrantyType: e.target.value })
+                      }
+                    >
+                      <option value="COMPANY">Company (manufacturer)</option>
+                      <option value="SHOP">Shop (issued by us)</option>
+                      <option value="CHECKING_ONLY">
+                        Checking only (bench-tested)
+                      </option>
+                      <option value="NONE">None (no cover)</option>
+                    </select>
+                  </div>
+                  {(form.warrantyType === 'COMPANY' ||
+                    form.warrantyType === 'SHOP') && (
+                    <div>
+                      <label title="Warranty length in days. 365 = 1 year, 30 = one month. Copied onto every sold unit at checkout.">
+                        Warranty (days)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={form.warrantyDays}
+                        onChange={(e) =>
+                          setForm({ ...form, warrantyDays: e.target.value })
+                        }
+                        placeholder="365"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </fieldset>
 
           <div style={{ marginTop: 6 }}>
             <button

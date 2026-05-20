@@ -6,6 +6,7 @@ import { inMemoryTypeOrm } from '../../testing/test-db';
 import { Item } from '../items/entities/item.entity';
 import { Brand } from '../brands/entities/brand.entity';
 import { Category } from '../categories/entities/category.entity';
+import { Customer } from '../customers/entities/customer.entity';
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
@@ -24,6 +25,8 @@ import { JournalLine } from '../journals/entities/journal-line.entity';
 import { JournalService } from '../journals/journal.service';
 import { AccountingPeriod } from '../periods/entities/accounting-period.entity';
 import { PeriodsService } from '../periods/periods.service';
+import { ItemSerial } from '../item-serials/entities/item-serial.entity';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 
 describe('PurchasesService', () => {
   let service: PurchasesService;
@@ -37,19 +40,19 @@ describe('PurchasesService', () => {
 
         TypeOrmModule.forRoot(
           inMemoryTypeOrm([
-            Item, Brand, Category, Supplier, Store,
+            Item, Brand, Category, Customer, Supplier, Store,
             StockMovement, Purchase, PurchaseItem, SyncQueueEntry, Sequence,
-            Account, JournalEntry, JournalLine, AccountingPeriod,
+            Account, JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
           ]),
         ),
         TypeOrmModule.forFeature([
           Item, StockMovement, Purchase, PurchaseItem, SyncQueueEntry, Sequence,
-          Account, JournalEntry, JournalLine, AccountingPeriod,
+          Account, JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
         ]),
       ],
       providers: [
         PurchasesService, StockService, OutboxService, SequenceService,
-        AccountsService, JournalService, PeriodsService,
+        AccountsService, JournalService, PeriodsService, ItemSerialsService,
       ],
     }).compile();
     await module.init();

@@ -2,6 +2,7 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -10,6 +11,14 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { WarrantyType } from '../entities/item.entity';
+
+const WARRANTY_TYPES: WarrantyType[] = [
+  'COMPANY',
+  'SHOP',
+  'CHECKING_ONLY',
+  'NONE',
+];
 
 export class CreateItemDto {
   /**
@@ -72,4 +81,25 @@ export class CreateItemDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  tracksSerials?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  serialRequiredOnSale?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  hasWarranty?: boolean;
+
+  @IsIn(WARRANTY_TYPES)
+  @IsOptional()
+  warrantyType?: WarrantyType;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  warrantyDays?: number;
 }

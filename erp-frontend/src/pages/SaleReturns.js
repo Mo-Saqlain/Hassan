@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 
-const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0 });
+const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0, serials: '' });
 
 export default function SaleReturns() {
   const { data: returns, loading, error, reload } = useResource('/sale-returns');
@@ -64,11 +64,18 @@ export default function SaleReturns() {
       reason: form.reason || undefined,
       lines: form.lines
         .filter((ln) => ln.itemId)
-        .map((ln) => ({
-          itemId: ln.itemId,
-          quantity: Number(ln.quantity),
-          unitPrice: Number(ln.unitPrice),
-        })),
+        .map((ln) => {
+          const serials = (ln.serials ?? '')
+            .split(/[\n,]+/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+          return {
+            itemId: ln.itemId,
+            quantity: Number(ln.quantity),
+            unitPrice: Number(ln.unitPrice),
+            serials: serials.length > 0 ? serials : undefined,
+          };
+        }),
     };
     if (payload.lines.length === 0) {
       setSubmitError('At least one line is required');
@@ -164,6 +171,24 @@ export default function SaleReturns() {
                         </option>
                       ))}
                     </select>
+                    {(() => {
+                      const it = items.find((i) => i.id === ln.itemId);
+                      if (!it || it.tracksSerials === false) return null;
+                      return (
+                        <input
+                          value={ln.serials}
+                          onChange={(e) =>
+                            updateLine(idx, { serials: e.target.value })
+                          }
+                          placeholder="Serial(s) being returned (optional, comma-sep)"
+                          style={{
+                            marginTop: 4,
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 12,
+                          }}
+                        />
+                      );
+                    })()}
                   </td>
                   <td>
                     <input

@@ -99,6 +99,13 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
+  // Wire NestJS lifecycle hooks (beforeApplicationShutdown / onApplicationShutdown)
+  // into the OS signal handlers so SqliteCheckpointService gets a chance to
+  // checkpoint+truncate the SQLite WAL before exit. Without this, NestJS
+  // never invokes `beforeApplicationShutdown` and the next boot has to replay
+  // the full WAL on open.
+  app.enableShutdownHooks();
+
   // Apply any pending TypeORM migrations BEFORE we open the port — the
   // Electron main process sets DB_MIGRATE_ON_BOOT=true so installed
   // deployments self-update their schema on launch. Dev (`npm run start:dev`)

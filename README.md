@@ -115,7 +115,8 @@ A real cashier's day book.
 - **Cash Flow Statement** — operating + investing-style cash movement, including fund transfer deltas per account.
 - **Statement of Changes in Equity** — Opening + Adjusted Net Income − Drawings = Closing.
 - **Stock Ledger** with category / brand / supplier filters.
-- **A/R aging** (`GET /reports/ar-aging?asOf=…`) — for every customer with an outstanding balance, residual amounts bucketed 0-30 / 31-60 / 61-90 / 90+ days. Receipts are consumed FIFO against the oldest unpaid sale; opening balance is treated as oldest and consumed first.
+- **A/R aging** (`GET /reports/ar-aging?asOf=…`) — for every customer with an outstanding balance, residual amounts bucketed 0-30 / 31-60 / 61-90 / 90+ days. Receipts are consumed FIFO against the oldest unpaid sale; opening balance is treated as oldest and consumed first. Each row also carries a `pastPromise` overlay — residual where `expectedPaymentDate` is set on the sale and has already passed — so the UI can flag missed "pay half now, half in 15 days" promises that would otherwise hide inside the 0-30 bucket.
+- **Promise-to-pay date on sales** — POS captures an optional `expectedPaymentDate` on every credit / partial-pay invoice. Persisted as `sales.expected_payment_date`, consumed by the A/R aging `pastPromise` overlay above. Sales History shows a chip (info-colored before the date, danger-colored past it) so the salesman can spot overdue promises at a glance.
 - **A/P aging** (`GET /reports/ap-aging?asOf=…`) — symmetric for suppliers: unpaid purchases minus payments-out, bucketed by age.
 - **Item profitability** (`GET /reports/item-margins?from=…&to=…`) — qty sold, revenue, COGS (using current `item.purchasePrice` as the cost basis), gross profit, margin %, sortable by gross profit. Sale returns are netted out of qty and revenue. The "current purchase price as cost basis" simplification is replaced with a true weighted-average cost when the planned journal refactor introduces per-batch inventory cost tracking.
 
@@ -526,9 +527,17 @@ A directional roadmap, agreed for a single-shop install operated by the owner an
 
 ### Appliance-specific features
 
-- **Serial-number tracking per unit** — `item_serials (serial UNIQUE, status, purchasedAt, purchasePrice, soldAt, soldToCustomerId, soldInvoiceId, warrantyStartAt, warrantyMonths, currentLocationStoreId)`. Item-level `tracksSerials` toggle (default true for appliances). Purchase flow prompts for N serials; POS flow prompts for the picked serial; returns require a matching sold serial linked to the same customer.
-- **Warranty management** — receipt prints warranty expiry per serialised line. Public `GET /warranty/lookup?serial=…` (rate-limited) returns only purchase date + expiry (no PII). Reports: warranty claims register, warranties expiring this month.
-- **Installment (qist) sales** — `installment_plans (saleId, downPayment, installmentAmount, installmentCount, frequencyDays, startDate, lateFeePercent)` + `installment_schedule (planId, dueDate, expectedAmount, paidAmount, status, lateFeeApplied)`. New POS payment mode `INSTALLMENT`. Daily cron marks OVERDUE and applies late fees. Installments aging report.
+- ✅ **Hybrid serialised + bulk inventory** — `item_serials (serial UNIQUE, status, purchaseBillNo, purchasedAt, purchasePrice, currentStoreId, saleInvoiceNo, soldAt, soldToCustomerId, warrantyStartAt, warrantyDays, warrantyType, warrantyEndAt)`. Items have two independent flags: `tracksSerials` (capture per-unit serials) and `serialRequiredOnSale` (block POS checkout if missing). Three operating modes:
+  - **Serialised + required** (default) — appliances. Salesman must scan one serial per unit at POS or checkout blocks.
+  - **Serialised + optional** — gray-market imports. Capture the manufacturer serial if available, accept the sale if not.
+  - **Bulk** — accessories, cables, stands. Quantity-only; no serial UI ever shown.
+  Purchase form accepts an optional newline-separated serial textarea per `tracksSerials` line; whatever isn't captured at purchase can still be captured at sale time. Sale returns re-flag the serial as `RETURNED`; sale reversals re-flag every serial bound to the voided invoice.
+- ✅ **Warranty management** — per-item master switch `hasWarranty` + `warrantyType ∈ { COMPANY, SHOP, CHECKING_ONLY, NONE }` + `warrantyDays`. The receipt prints a per-line block:
+  - `hasWarranty=false` → "⚠ NO WARRANTY COVERAGE / SOLD AS-IS"
+  - `warrantyType=CHECKING_ONLY` → "No warranty. Item checked at time of sale."
+  - `warrantyType=NONE` → "No Warranty"
+  - `warrantyType=COMPANY|SHOP` → cover length + per-unit serial + expiry date
+  Warranty fields freeze on the `item_serials` row at sale time, so a later edit to the Item template doesn't rewrite what was promised. Public `GET /api/item-serials/warranty/:serial` returns only non-PII data (model, status, sold date, expiry, active flag) — safe to expose to walk-in customers via a counter terminal. A Customer-hub tab `/warranty-lookup` wraps the endpoint with a counter-friendly UI.
 - **Delivery / dispatch tracking** — `deliveries (saleId, address, phone, assignedDriverId, vehicle, status, scheduledFor, deliveredAt, customerSignatureUrl)`. POS checkout offers a "deliver" toggle. Dashboard tile: pending deliveries today.
 - **Service / repair tickets** — `service_tickets (customerId, itemSerialId, complaint, status, estimatedCost, actualCost, inWarranty)`. Parts consumed → `Dr Service COGS / Cr Inventory`; revenue → `Dr Cash / Cr Service Income`.
 

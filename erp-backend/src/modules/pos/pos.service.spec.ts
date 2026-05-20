@@ -30,6 +30,8 @@ import { JournalService } from '../journals/journal.service';
 import { AccountingPeriod } from '../periods/entities/accounting-period.entity';
 import { PeriodsService } from '../periods/periods.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { ItemSerial } from '../item-serials/entities/item-serial.entity';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 
 describe('PosService', () => {
   let service: PosService;
@@ -46,19 +48,19 @@ describe('PosService', () => {
             Item, Brand, Category, Customer, Supplier, Store, Account,
             StockMovement, Sale, SaleItem,
             PosSession, PosCartItem, SyncQueueEntry, Sequence, Payment,
-            JournalEntry, JournalLine, AccountingPeriod,
+            JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
           ]),
         ),
         TypeOrmModule.forFeature([
           Item, Category, StockMovement, Sale, SaleItem,
           PosSession, PosCartItem, SyncQueueEntry, Sequence,
-          Account, JournalEntry, JournalLine, AccountingPeriod,
+          Account, JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
         ]),
       ],
       providers: [
         PosService, ItemsService, SalesService,
         StockService, OutboxService, SequenceService,
-        AccountsService, JournalService, PeriodsService,
+        AccountsService, JournalService, PeriodsService, ItemSerialsService,
       ],
     }).compile();
     await module.init();
@@ -68,9 +70,14 @@ describe('PosService', () => {
     stock = module.get(StockService);
     ds = module.get(DataSource);
 
+    // Most checkout-flow tests below don't care about serial tracking, so
+    // we seed the item as a non-tracked SKU. The new serial-required tests
+    // (added separately) override these flags per spec.
     const item = await items.create({
       name: 'Phone', sku: 'PHN-1', barcode: '999',
       purchasePrice: 300, salePrice: 500,
+      tracksSerials: false,
+      hasWarranty: false,
     });
     itemId = item.id;
 

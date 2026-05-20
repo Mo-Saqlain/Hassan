@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PosSession } from './entities/pos-session.entity';
 import { PosCartItem } from './entities/pos-cart-item.entity';
+import { Item } from '../items/entities/item.entity';
 import { PosService } from './pos.service';
 import { PosController } from './pos.controller';
 import { ItemsModule } from '../items/items.module';
@@ -10,7 +11,7 @@ import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PosSession, PosCartItem]),
+    TypeOrmModule.forFeature([PosSession, PosCartItem, Item]),
     ItemsModule,
     SalesModule,
     OutboxModule,

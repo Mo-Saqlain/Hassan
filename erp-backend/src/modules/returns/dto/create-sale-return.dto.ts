@@ -22,6 +22,17 @@ export class CreateSaleReturnLineDto {
   @IsNumber()
   @Min(0)
   unitPrice: number;
+
+  /**
+   * Manufacturer serials of the physical units coming back. Optional, but
+   * for `tracksSerials` items the salesman should provide one serial per
+   * unit so the warranty status flips back to RETURNED on the original
+   * appliance.
+   */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  serials?: string[];
 }
 
 export class CreateSaleReturnDto {

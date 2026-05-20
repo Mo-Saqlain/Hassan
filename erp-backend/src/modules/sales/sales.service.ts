@@ -12,6 +12,7 @@ import { Customer } from '../customers/entities/customer.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 
 @Injectable()
 export class SalesService {
@@ -24,6 +25,7 @@ export class SalesService {
     private readonly sequences: SequenceService,
     private readonly journals: JournalService,
     private readonly accounts: AccountsService,
+    private readonly itemSerials: ItemSerialsService,
   ) {}
 
   /**
@@ -127,6 +129,14 @@ export class SalesService {
         }
       }
 
+      // Promise-to-pay only meaningful when there's actually a receivable;
+      // silently drop the date on fully-paid sales so the aging report
+      // doesn't have to filter it out later.
+      const expectedPaymentDate =
+        dueAmount > 0 && dto.expectedPaymentDate
+          ? new Date(dto.expectedPaymentDate)
+          : undefined;
+
       const sale = saleRepo.create({
         invoiceNo,
         customerId: dto.customerId,
@@ -139,6 +149,7 @@ export class SalesService {
         paymentMethod,
         accountId,
         notes: dto.notes,
+        expectedPaymentDate,
         lines,
       });
       const persisted = await saleRepo.save(sale);
@@ -308,6 +319,11 @@ export class SalesService {
           manager,
         );
       }
+
+      // Flip every serial bound to this invoice back to RETURNED so the
+      // warranty lookup ("is this unit still under cover from us?") returns
+      // the right answer post-reversal. No-op if no serials were captured.
+      await this.itemSerials.unbindFromInvoice(sale.invoiceNo, manager);
 
       sale.reversedAt = new Date();
       sale.reversedBy = opts.userId;

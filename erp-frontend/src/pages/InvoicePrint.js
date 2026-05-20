@@ -2,9 +2,78 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
 
+/**
+ * Renders the per-line warranty notice block on the printed receipt. The
+ * shape of the block is driven by the item's warranty config (set in the
+ * Items hub) — four mutually-exclusive branches:
+ *
+ *   1. hasWarranty === false               → "NO WARRANTY COVERAGE / SOLD AS-IS"
+ *   2. warrantyType === 'CHECKING_ONLY'    → "No warranty. Item checked at
+ *                                              time of sale."
+ *   3. warrantyType === 'NONE'             → "No Warranty"
+ *   4. warrantyType === 'COMPANY' | 'SHOP' → "Warranty: COMPANY · expires <date>"
+ *                                              plus per-unit serial listing
+ */
+function LineWarrantyNotice({ item, serials }) {
+  if (!item) return null;
+  if (item.hasWarranty === false) {
+    return (
+      <div className="line-warranty line-no-warranty">
+        ⚠ NO WARRANTY COVERAGE / SOLD AS-IS
+      </div>
+    );
+  }
+  if (item.warrantyType === 'CHECKING_ONLY') {
+    return (
+      <div className="line-warranty line-no-warranty">
+        No warranty. Item checked at time of sale.
+      </div>
+    );
+  }
+  if (item.warrantyType === 'NONE') {
+    return <div className="line-warranty line-no-warranty">No Warranty</div>;
+  }
+  // COMPANY / SHOP — show per-unit serial + expiry.
+  const fmt = (d) => (d ? new Date(d).toLocaleDateString() : '—');
+  return (
+    <div className="line-warranty line-has-warranty">
+      <div>
+        Warranty: {item.warrantyType}
+        {item.warrantyDays ? ` · ${item.warrantyDays} days` : ''}
+      </div>
+      {serials.length > 0 && (
+        <ul className="line-serials">
+          {serials.map((s) => (
+            <li key={s.id}>
+              {s.serial}
+              {s.warrantyEndAt ? ` — expires ${fmt(s.warrantyEndAt)}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** True if ANY sold line carries real warranty cover (COMPANY or SHOP). */
+function hasAnyWarrantyCover(sale, serials) {
+  for (const ln of sale.lines ?? []) {
+    if (!ln.item) continue;
+    if (ln.item.hasWarranty === false) continue;
+    if (ln.item.warrantyType === 'COMPANY' || ln.item.warrantyType === 'SHOP') {
+      return true;
+    }
+    if (serials.some((s) => s.itemId === ln.itemId && s.warrantyEndAt)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export default function InvoicePrint({ type }) {
   const { id } = useParams();
   const [data, setData] = useState(null);
+  const [serials, setSerials] = useState([]);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -14,6 +83,18 @@ export default function InvoicePrint({ type }) {
       .then((r) => setData(r.data))
       .catch((e) => setError(e.uiMessage ?? 'Failed to load'));
   }, [id, type]);
+
+  // After the sale loads, fetch any serials sold against this invoice so the
+  // warranty block renders the actual unit identifiers customers can quote
+  // when claiming warranty. Purchases never produce warranties for the buyer,
+  // so this is sale-only.
+  useEffect(() => {
+    if (type !== 'sale' || !data?.invoiceNo) return;
+    api
+      .get(`/item-serials?saleInvoiceNo=${encodeURIComponent(data.invoiceNo)}`)
+      .then((r) => setSerials(r.data ?? []))
+      .catch(() => setSerials([]));
+  }, [type, data?.invoiceNo]);
 
   useEffect(() => {
     if (data) {
@@ -65,18 +146,31 @@ export default function InvoicePrint({ type }) {
           </tr>
         </thead>
         <tbody>
-          {(data.lines ?? []).map((ln, i) => (
-            <tr key={ln.id}>
-              <td>{i + 1}</td>
-              <td>
-                {ln.item?.name ?? ln.itemId}
-                {ln.item?.sku && <span className="muted"> ({ln.item.sku})</span>}
-              </td>
-              <td className="right">{ln.quantity}</td>
-              <td className="right">{Number(ln.unitPrice).toFixed(2)}</td>
-              <td className="right">{Number(ln.lineTotal).toFixed(2)}</td>
-            </tr>
-          ))}
+          {(data.lines ?? []).map((ln, i) => {
+            const lineSerials = serials.filter(
+              (s) => s.itemId === ln.itemId,
+            );
+            return (
+              <tr key={ln.id}>
+                <td>{i + 1}</td>
+                <td>
+                  {ln.item?.name ?? ln.itemId}
+                  {ln.item?.sku && (
+                    <span className="muted"> ({ln.item.sku})</span>
+                  )}
+                  {isSale && (
+                    <LineWarrantyNotice
+                      item={ln.item}
+                      serials={lineSerials}
+                    />
+                  )}
+                </td>
+                <td className="right">{ln.quantity}</td>
+                <td className="right">{Number(ln.unitPrice).toFixed(2)}</td>
+                <td className="right">{Number(ln.lineTotal).toFixed(2)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
@@ -97,6 +191,31 @@ export default function InvoicePrint({ type }) {
         <div className="print-notes">
           <div className="muted" style={{ fontSize: 12 }}>Notes</div>
           <div>{data.notes}</div>
+        </div>
+      )}
+
+      {isSale && hasAnyWarrantyCover(data, serials) && (
+        <div className="print-warranty">
+          <div className="warranty-title">Warranty Terms &amp; Conditions</div>
+          <ol className="warranty-terms">
+            <li>
+              Warranty covers manufacturing defects only. Physical damage,
+              water damage, voltage surges, and unauthorised repairs void the
+              warranty.
+            </li>
+            <li>
+              Bring this receipt and the original packaging when claiming
+              warranty. Quote the serial number printed under the item line.
+            </li>
+            <li>
+              Warranty is non-transferable. The unit is covered for the
+              original purchaser only.
+            </li>
+            <li>
+              Walk-in customers can check live warranty status by scanning
+              the serial number on this receipt at the shop counter.
+            </li>
+          </ol>
         </div>
       )}
 

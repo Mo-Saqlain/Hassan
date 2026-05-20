@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsDateString,
   IsIn,
   IsInt,
   IsNumber,
@@ -59,6 +60,15 @@ export class CreateSaleDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  /**
+   * Promise-to-pay date for credit / partial sales (ISO `YYYY-MM-DD`).
+   * Persisted to `sales.expected_payment_date`; consumed by the A/R aging
+   * report's "past promise" bucket.
+   */
+  @IsDateString()
+  @IsOptional()
+  expectedPaymentDate?: string;
 
   @IsArray()
   @ArrayMinSize(1)

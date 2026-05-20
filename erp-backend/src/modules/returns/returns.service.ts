@@ -10,6 +10,7 @@ import { CreatePurchaseReturnDto } from './dto/create-purchase-return.dto';
 import { Item } from '../items/entities/item.entity';
 import { StockService } from '../stock/stock.service';
 import { SequenceService } from '../sequences/sequence.service';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 
 @Injectable()
 export class ReturnsService {
@@ -21,6 +22,7 @@ export class ReturnsService {
     private readonly stockService: StockService,
     private readonly dataSource: DataSource,
     private readonly sequences: SequenceService,
+    private readonly itemSerials: ItemSerialsService,
   ) {}
 
   async createSaleReturn(dto: CreateSaleReturnDto): Promise<SaleReturn> {
@@ -71,6 +73,25 @@ export class ReturnsService {
           },
           manager,
         );
+      }
+
+      // Flip each returned serial back to RETURNED. We honour what the user
+      // supplied — best-effort, since a damaged or torn-label return may
+      // legitimately come back without a readable serial. The stock side
+      // already balanced above; the serial mapping is purely a warranty
+      // bookkeeping nicety here.
+      for (const ln of dto.lines) {
+        for (const s of ln.serials ?? []) {
+          const cleaned = s.trim();
+          if (!cleaned) continue;
+          try {
+            await this.itemSerials.markReturned(cleaned, manager);
+          } catch {
+            // Tolerate "not found" / "not currently sold" — the goods are
+            // physically back regardless, and an audit trail of the failed
+            // attempt isn't worth blocking the return.
+          }
+        }
       }
       return saved;
     });

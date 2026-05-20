@@ -47,6 +47,7 @@ import SupplierLedger from './pages/SupplierLedger';
 import AccountLedger from './pages/AccountLedger';
 import Financials from './pages/Financials';
 import InvoicePrint from './pages/InvoicePrint';
+import WarrantyLookup from './pages/WarrantyLookup';
 
 export default function App() {
   return (
@@ -75,6 +76,7 @@ export default function App() {
               <Route path="customers" element={<MasterData entity="customers" />} />
               <Route path="receipts" element={<Receipts />} />
               <Route path="customer-ledger" element={<CustomerLedger />} />
+              <Route path="warranty-lookup" element={<WarrantyLookup />} />
               <Route path="customer-ledger/:id" element={<CustomerLedger />} />
             </Route>
 

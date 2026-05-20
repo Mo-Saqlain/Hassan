@@ -11,6 +11,7 @@ import { Item } from '../items/entities/item.entity';
 import { ItemsService } from '../items/items.service';
 import { SalesService } from '../sales/sales.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 import { StartSessionDto } from './dto/start-session.dto';
 import { CloseSessionDto } from './dto/close-session.dto';
 import { AddToCartDto } from './dto/add-to-cart.dto';
@@ -27,6 +28,9 @@ export class PosService {
     private readonly items: ItemsService,
     private readonly sales: SalesService,
     private readonly outbox: OutboxService,
+    private readonly itemSerials: ItemSerialsService,
+    @InjectRepository(Item)
+    private readonly itemsRepo: Repository<Item>,
   ) {}
 
   // ─── Sessions ─────────────────────────────────────────────
@@ -171,6 +175,50 @@ export class PosService {
       );
     }
 
+    // Serial-tracking validation. Three modes per item:
+    //   - tracksSerials=false                       → ignore serial map entirely
+    //   - tracksSerials=true, serialRequiredOnSale=false → optional capture, accept
+    //     whatever the salesman provided (0..N entries)
+    //   - tracksSerials=true, serialRequiredOnSale=true  → strict: one serial per
+    //     unit, duplicates rejected
+    const itemIds = Array.from(new Set(cartLines.map((l) => l.itemId)));
+    const itemsByCart = await this.itemsRepo.find({
+      where: itemIds.map((id) => ({ id })),
+    });
+    const itemMap = new Map(itemsByCart.map((i) => [i.id, i]));
+    const serialMap = new Map<string, string[]>();
+    for (const b of dto.serials ?? []) {
+      const cleaned = b.serials.map((s) => s.trim()).filter(Boolean);
+      serialMap.set(b.itemId, cleaned);
+    }
+    for (const ln of cartLines) {
+      const it = itemMap.get(ln.itemId);
+      if (!it || !it.tracksSerials) continue;
+      const provided = serialMap.get(ln.itemId) ?? [];
+      if (it.serialRequiredOnSale) {
+        if (provided.length !== ln.quantity) {
+          throw new BadRequestException(
+            `${it.name}: ${ln.quantity} serial number${ln.quantity === 1 ? '' : 's'} required (got ${provided.length}). Scan or type one serial per unit on the cart row.`,
+          );
+        }
+      } else {
+        // Optional mode: accept partial / empty, but if anything was supplied
+        // it must cover full units (no half-serials).
+        if (provided.length > 0 && provided.length !== ln.quantity) {
+          throw new BadRequestException(
+            `${it.name}: either provide ${ln.quantity} serial${ln.quantity === 1 ? '' : 's'} (one per unit) or leave the box empty.`,
+          );
+        }
+      }
+      // Reject duplicates inside one checkout — two units in the same cart
+      // can't share a serial.
+      if (provided.length > 0 && new Set(provided).size !== provided.length) {
+        throw new BadRequestException(
+          `${it.name}: duplicate serial numbers in the cart row.`,
+        );
+      }
+    }
+
     const saleDto = {
       customerId: dto.customerId,
       storeId: session.storeId,
@@ -179,6 +227,7 @@ export class PosService {
       paymentMethod,
       accountId: paymentMethod === 'CREDIT' ? undefined : dto.accountId,
       notes: dto.notes,
+      expectedPaymentDate: dto.expectedPaymentDate,
       lines: cartLines.map((ln) => ({
         itemId: ln.itemId,
         quantity: ln.quantity,
@@ -189,6 +238,29 @@ export class PosService {
     // POS already enqueues its own POS_SALE_CREATED event below; tell the
     // SalesService to skip its own outbox enqueue so we don't double-push.
     const sale = await this.sales.create(saleDto as any, { skipOutbox: true });
+
+    // Bind every tracksSerials cart line's serials to the sale. Done after
+    // the sale is persisted because we need the invoice number; runs outside
+    // the SalesService transaction but is idempotent — a re-run won't double-
+    // bind the same serial (the service rejects already-SOLD serials). When
+    // the item's warranty master switch is off, we still create the serial
+    // row (for ownership history) but with no warranty fields populated.
+    for (const ln of cartLines) {
+      const it = itemMap.get(ln.itemId);
+      if (!it || !it.tracksSerials) continue;
+      const provided = serialMap.get(ln.itemId) ?? [];
+      for (const serial of provided) {
+        await this.itemSerials.bindToSale({
+          serial,
+          itemId: ln.itemId,
+          saleInvoiceNo: sale.invoiceNo,
+          soldAt: sale.createdAt,
+          soldToCustomerId: dto.customerId,
+          warrantyDays: it.hasWarranty ? it.warrantyDays ?? undefined : undefined,
+          warrantyType: it.hasWarranty ? it.warrantyType : undefined,
+        });
+      }
+    }
 
     // Update session running totals.
     session.salesTotal = Number(

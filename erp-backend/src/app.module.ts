@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { SqliteCheckpointService } from './common/sqlite-checkpoint.service';
 
 import { BrandsModule } from './modules/brands/brands.module';
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -37,6 +38,7 @@ import { UsersModule } from './modules/users/users.module';
 import { SequenceModule } from './modules/sequences/sequence.module';
 import { PeriodsModule } from './modules/periods/periods.module';
 import { JournalsModule } from './modules/journals/journal.module';
+import { ItemSerialsModule } from './modules/item-serials/item-serials.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -108,8 +110,9 @@ function buildDbOptions(): TypeOrmModuleOptions {
     AuditLogsModule,
     ErrorLogsModule,
     UsersModule,
+    ItemSerialsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, SqliteCheckpointService],
 })
 export class AppModule {}

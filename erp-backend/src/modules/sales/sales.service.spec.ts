@@ -26,6 +26,8 @@ import { JournalService } from '../journals/journal.service';
 import { AccountingPeriod } from '../periods/entities/accounting-period.entity';
 import { PeriodsService } from '../periods/periods.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { ItemSerial } from '../item-serials/entities/item-serial.entity';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 
 describe('SalesService', () => {
   let service: SalesService;
@@ -40,17 +42,17 @@ describe('SalesService', () => {
           inMemoryTypeOrm([
             Item, Brand, Category, Customer, Supplier, Store, Account,
             StockMovement, Sale, SaleItem, SyncQueueEntry, Sequence, Payment,
-            JournalEntry, JournalLine, AccountingPeriod,
+            JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
           ]),
         ),
         TypeOrmModule.forFeature([
           Item, StockMovement, Sale, SaleItem, SyncQueueEntry, Sequence,
-          Account, JournalEntry, JournalLine, AccountingPeriod,
+          Account, JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
         ]),
       ],
       providers: [
         SalesService, StockService, OutboxService, SequenceService,
-        AccountsService, JournalService, PeriodsService,
+        AccountsService, JournalService, PeriodsService, ItemSerialsService,
       ],
     }).compile();
     // .init() triggers onModuleInit lifecycle hooks. AccountsService.onModuleInit

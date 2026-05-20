@@ -56,6 +56,7 @@ export default function Sales() {
               <th className="right">Net</th>
               <th className="right">Paid at sale</th>
               <th>Method</th>
+              <th>Promise</th>
               <th className="right">Actions</th>
             </tr>
           </thead>
@@ -69,6 +70,30 @@ export default function Sales() {
                 <td className="right">{Number(s.netAmount).toFixed(2)}</td>
                 <td className="right">{Number(s.paidAmount ?? 0).toFixed(2)}</td>
                 <td>{s.paymentMethod}</td>
+                <td>
+                  {s.expectedPaymentDate
+                    ? (() => {
+                        const due = Number(s.dueAmount ?? 0);
+                        const promise = new Date(s.expectedPaymentDate);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const overdue = due > 0 && promise < today;
+                        const promiseStr = promise.toLocaleDateString();
+                        return (
+                          <span
+                            className={`chip ${overdue ? 'chip-danger' : 'chip-info'}`}
+                            title={
+                              overdue
+                                ? `Promised by ${promiseStr} — overdue`
+                                : `Promised by ${promiseStr}`
+                            }
+                          >
+                            {overdue ? `Overdue · ${promiseStr}` : promiseStr}
+                          </span>
+                        );
+                      })()
+                    : '—'}
+                </td>
                 <td className="right">
                   <div
                     style={{

@@ -1,10 +1,16 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from '../components/ReverseAction';
 
-const emptyLine = () => ({ itemId: '', storeId: '', quantity: 1, unitPrice: 0 });
+const emptyLine = () => ({
+  itemId: '',
+  storeId: '',
+  quantity: 1,
+  unitPrice: 0,
+  serials: '', // newline-separated; split on submit
+});
 
 const emptyItem = () => ({
   modelNo: '',
@@ -157,12 +163,19 @@ export default function Purchases() {
       notes: form.notes || undefined,
       lines: form.lines
         .filter((ln) => ln.itemId)
-        .map((ln) => ({
-          itemId: ln.itemId,
-          storeId: ln.storeId || undefined,
-          quantity: Number(ln.quantity),
-          unitPrice: Number(ln.unitPrice),
-        })),
+        .map((ln) => {
+          const serials = (ln.serials ?? '')
+            .split(/[\n,]+/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+          return {
+            itemId: ln.itemId,
+            storeId: ln.storeId || undefined,
+            quantity: Number(ln.quantity),
+            unitPrice: Number(ln.unitPrice),
+            serials: serials.length > 0 ? serials : undefined,
+          };
+        }),
     };
     if (payload.lines.length === 0) {
       setSubmitError('At least one line is required');
@@ -255,8 +268,13 @@ export default function Purchases() {
               </tr>
             </thead>
             <tbody>
-              {form.lines.map((ln, idx) => (
-                <tr key={idx}>
+              {form.lines.map((ln, idx) => {
+                const lineItem = items.find((i) => i.id === ln.itemId);
+                const showSerialBox =
+                  lineItem && lineItem.tracksSerials !== false;
+                return (
+                <Fragment key={idx}>
+                <tr>
                   <td>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <select
@@ -333,7 +351,36 @@ export default function Purchases() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                {showSerialBox && (
+                  <tr>
+                    <td colSpan={6} style={{ paddingTop: 0 }}>
+                      <label
+                        style={{ fontSize: 11.5, color: 'var(--text-muted)' }}
+                        title="One serial per line (or comma-separated). Leave blank to capture serials at POS time instead."
+                      >
+                        Serials for this line (optional ·{' '}
+                        {ln.serials
+                          ? ln.serials.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).length
+                          : 0}{' '}
+                        / {ln.quantity})
+                      </label>
+                      <textarea
+                        rows={Math.min(3, Number(ln.quantity) || 1)}
+                        value={ln.serials}
+                        onChange={(e) =>
+                          updateLine(idx, { serials: e.target.value })
+                        }
+                        placeholder={
+                          'e.g. SN-A12B34\nSN-A12B35\nSN-A12B36 (one per line)'
+                        }
+                        style={{ fontFamily: 'var(--font-mono)' }}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+              );
+              })}
             </tbody>
           </table>
           <button type="button" className="btn" onClick={addLine}>

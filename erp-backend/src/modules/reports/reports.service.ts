@@ -1308,6 +1308,7 @@ export class ReportsService {
       d31_60: number;
       d61_90: number;
       d90: number;
+      pastPromise: number;
       total: number;
     }>;
   }> {
@@ -1320,6 +1321,7 @@ export class ReportsService {
       d31_60: number;
       d61_90: number;
       d90: number;
+      pastPromise: number;
       total: number;
     }> = [];
 
@@ -1340,7 +1342,11 @@ export class ReportsService {
       });
       const receiptsTotal = receipts.reduce((s, p) => s + Number(p.amount), 0);
       let remaining = receiptsTotal;
-      const buckets = { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 };
+      // `pastPromise` is reported alongside the date-bucketed columns so the
+      // UI can highlight customers who missed a specific 15-day promise even
+      // when their residual still sits in the 0-30 bucket. It's an overlay,
+      // not a separate aging slice — the dN totals + pastPromise overlap.
+      const buckets = { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0, pastPromise: 0 };
 
       // Opening balance is oldest by definition — consume receipts here first.
       const opening = Number(c.openingBalance) || 0;
@@ -1366,6 +1372,16 @@ export class ReportsService {
           else if (ageDays <= 60) buckets.d31_60 += residual;
           else if (ageDays <= 90) buckets.d61_90 += residual;
           else buckets.d90 += residual;
+
+          // Past-promise overlay: customer was given an explicit "pay by"
+          // date at the POS and it's now in the past. Tracked in addition
+          // to the age bucket so the UI can sort / highlight separately.
+          if (
+            s.expectedPaymentDate &&
+            new Date(s.expectedPaymentDate) < asOf
+          ) {
+            buckets.pastPromise += residual;
+          }
         }
       }
 
@@ -1380,6 +1396,7 @@ export class ReportsService {
           d31_60: round2(buckets.d31_60),
           d61_90: round2(buckets.d61_90),
           d90: round2(buckets.d90),
+          pastPromise: round2(buckets.pastPromise),
           total,
         });
       }

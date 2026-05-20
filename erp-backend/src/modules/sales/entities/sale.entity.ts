@@ -67,6 +67,18 @@ export class Sale extends BaseEntity {
   notes?: string;
 
   /**
+   * Promise-to-pay date for sales that leave a receivable (credit or partial).
+   * Captured at POS in the "pay half now, half by …" workflow. The A/R aging
+   * report flags any sale where `due_amount > 0 AND expected_payment_date <
+   * today` regardless of which generic 0-30 / 31-60 bucket it would land in
+   * by `createdAt`. Null on cash sales and on credit sales where no promise
+   * was given.
+   */
+  @Column({ name: 'expected_payment_date', type: Date, nullable: true })
+  @Index()
+  expectedPaymentDate?: Date;
+
+  /**
    * Reversal metadata. A non-null `reversedAt` means this sale has been voided
    * via `POST /sales/:id/reverse`; the row stays visible in history with a
    * REVERSED chip and is netted out by the reports. The balancing journal

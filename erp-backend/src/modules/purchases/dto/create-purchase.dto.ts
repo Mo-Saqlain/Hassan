@@ -30,6 +30,17 @@ export class CreatePurchaseLineDto {
   @IsNumber()
   @Min(0)
   unitPrice: number;
+
+  /**
+   * Optional list of manufacturer serials for serialised items. Empty / omitted
+   * is fine — the salesman can capture serials later at POS time. When provided,
+   * count should match `quantity` but doesn't have to: any deficit is filled at
+   * sale time, any excess is fine (the extra units are recorded as IN_STOCK).
+   */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  serials?: string[];
 }
 
 export class CreatePurchaseDto {

@@ -441,7 +441,11 @@ Empty state: `"No cash activity on this date."`
 
 ### 5.4 Customer hub — `/customers`
 
-Hub title `"Customers"` · subtitle `"Customer info, receipts received, and per-customer ledger."`
+Hub title `"Customers"` · subtitle `"Customer info, receipts received, per-customer ledger, and warranty lookup."`
+
+Tabs: **Info · Receipts · Ledger · Warranty**.
+
+The Warranty tab (`/warranty-lookup`) is a counter-friendly serial lookup. Input: `"Serial number"` (autoFocus, mono font, placeholder `"e.g. SN-A12B34"`). Button: `"Lookup"` (busy → `"Looking up…"`). On success renders a `<WarrantyCard>` showing model, status chip, serial, sold-on date, warranty type, warranty start/end, length in days. Status chip variants: `"Active warranty"` (success), `"Warranty expired"` (danger), `"Returned to shop"` (warn), `"No warranty"` (danger when type = NONE), `"Checked at sale · no warranty"` (warn when type = CHECKING_ONLY). On miss: `"No record found for serial "{serial}"."`. Backed by the public endpoint `GET /api/item-serials/warranty/:serial`.
 
 Tabs: **Info · Receipts · Ledger**.
 

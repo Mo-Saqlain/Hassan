@@ -45,6 +45,8 @@ import { JournalLine } from '../journals/entities/journal-line.entity';
 import { JournalService } from '../journals/journal.service';
 import { AccountingPeriod } from '../periods/entities/accounting-period.entity';
 import { PeriodsService } from '../periods/periods.service';
+import { ItemSerial } from '../item-serials/entities/item-serial.entity';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 
 describe('ReportsService', () => {
   let reports: ReportsService;
@@ -68,7 +70,7 @@ describe('ReportsService', () => {
             SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
             Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
             FundTransfer, Employee, EmployeeTransaction, EmployeeIncentiveRule,
-            Sequence, JournalEntry, JournalLine, AccountingPeriod,
+            Sequence, JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
           ]),
         ),
         TypeOrmModule.forFeature([
@@ -77,14 +79,14 @@ describe('ReportsService', () => {
           SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
           Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,
           FundTransfer, Employee, EmployeeTransaction, EmployeeIncentiveRule,
-          Sequence, JournalEntry, JournalLine, AccountingPeriod,
+          Sequence, JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
         ]),
       ],
       providers: [
         ReportsService, ItemsService, StockService, OutboxService,
         SalesService, PurchasesService, IncentivesService,
         FundTransfersService, EmployeeIncentivesService, SequenceService,
-        AccountsService, JournalService, PeriodsService,
+        AccountsService, JournalService, PeriodsService, ItemSerialsService,
       ],
     }).compile();
     await module.init();

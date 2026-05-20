@@ -10,6 +10,7 @@ import { OutboxService } from '../outbox/outbox.service';
 import { SequenceService } from '../sequences/sequence.service';
 import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { ItemSerialsService } from '../item-serials/item-serials.service';
 
 @Injectable()
 export class PurchasesService {
@@ -22,6 +23,7 @@ export class PurchasesService {
     private readonly sequences: SequenceService,
     private readonly journals: JournalService,
     private readonly accounts: AccountsService,
+    private readonly itemSerials: ItemSerialsService,
   ) {}
 
   async create(
@@ -79,7 +81,8 @@ export class PurchasesService {
       });
       const persisted = await purchaseRepo.save(purchase);
 
-      for (const ln of persisted.lines) {
+      for (let i = 0; i < persisted.lines.length; i += 1) {
+        const ln = persisted.lines[i];
         await this.stockService.recordMovement(
           {
             itemId: ln.itemId,
@@ -91,6 +94,26 @@ export class PurchasesService {
           },
           manager,
         );
+
+        // Optional per-line serial intake: the salesman can paste a list of
+        // manufacturer serials into the form. Mismatched count vs quantity
+        // is tolerated — the deficit gets filled at sale time, the surplus
+        // is recorded as extra IN_STOCK rows. Duplicate serials within the
+        // same paste are deduped server-side; cross-item collisions throw.
+        const serials = dto.lines[i]?.serials ?? [];
+        if (serials.length > 0) {
+          await this.itemSerials.registerStock(
+            {
+              itemId: ln.itemId,
+              serials,
+              purchaseBillNo: persisted.billNo,
+              purchasedAt: persisted.createdAt.toISOString(),
+              purchasePrice: Number(ln.unitPrice),
+              currentStoreId: ln.storeId ?? dto.storeId,
+            },
+            manager,
+          );
+        }
       }
 
       // Journal posting:

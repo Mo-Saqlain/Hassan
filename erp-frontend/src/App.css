@@ -683,6 +683,45 @@ tr:last-child td { border-bottom: none; }
 .print-totals .bold { font-weight: 700; }
 
 .print-notes { margin-top: 20px; }
+
+.line-warranty {
+  margin-top: 4px;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.line-warranty.line-no-warranty {
+  font-weight: 700;
+  color: #555;
+  letter-spacing: 0.02em;
+}
+.line-warranty.line-has-warranty { color: #333; }
+.line-warranty .line-serials {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  font-family: monospace;
+}
+
+.print-warranty {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px dashed #999;
+}
+.print-warranty .warranty-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.print-warranty .warranty-terms {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #444;
+}
+.print-warranty .warranty-terms li { margin-bottom: 2px; }
+
 .print-footer {
   margin-top: 30px;
   text-align: center;

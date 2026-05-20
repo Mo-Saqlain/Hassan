@@ -20,15 +20,22 @@ export const HUBS = {
   customer: {
     label: 'Customer',
     title: 'Customers',
-    subtitle: 'Customer info, receipts received, and per-customer ledger.',
+    subtitle:
+      'Customer info, receipts received, per-customer ledger, and warranty lookup.',
     icon: 'user',
     colorVar: '--nav-customer',
     defaultTo: '/customers',
-    paths: ['/customers', '/receipts', '/customer-ledger'],
+    paths: [
+      '/customers',
+      '/receipts',
+      '/customer-ledger',
+      '/warranty-lookup',
+    ],
     tabs: [
       { to: '/customers', label: 'Info', icon: 'user' },
       { to: '/receipts', label: 'Receipts', icon: 'card' },
       { to: '/customer-ledger', label: 'Ledger', icon: 'ledger' },
+      { to: '/warranty-lookup', label: 'Warranty', icon: 'shield' },
     ],
   },
   sales: {

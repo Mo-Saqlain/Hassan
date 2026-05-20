@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import Icon from '../components/Icon';
@@ -16,9 +16,16 @@ export default function POS() {
 
   const [customerId, setCustomerId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
+  // Promise-to-pay date for credit/partial sales. Backend persists it as
+  // sales.expected_payment_date and the A/R aging report flags it.
+  const [expectedPaymentDate, setExpectedPaymentDate] = useState('');
   const [accountId, setAccountId] = useState('');
   const [discount, setDiscount] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
+  // Per-cart-line serials. Keyed by cart-line id; value is a comma/newline
+  // separated string entered by the salesman. Only applies to tracksSerials
+  // items — split + validated against line.quantity at checkout time.
+  const [lineSerials, setLineSerials] = useState({});
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastSale, setLastSale] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -220,6 +227,46 @@ export default function POS() {
     setBusy(true);
     setCheckoutError(null);
     try {
+      const willHaveReceivable = isCredit || (paidAmount !== '' && paid < net);
+
+      // Collect serials per (unique) itemId. Cart aggregates qty per item, so
+      // we union the strings and split on newlines/commas. Client-side gate
+      // mirrors the backend: strict for `serialRequiredOnSale`, optional but
+      // all-or-nothing otherwise. The server still has the final say.
+      const serialsByItem = new Map();
+      for (const ln of cart) {
+        if (!ln.item?.tracksSerials) continue;
+        const raw = lineSerials[ln.id] ?? '';
+        const list = raw
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (ln.item.serialRequiredOnSale && list.length !== ln.quantity) {
+          setCheckoutError(
+            `${ln.item.name}: ${ln.quantity} serial number${ln.quantity === 1 ? '' : 's'} required (got ${list.length}).`,
+          );
+          setBusy(false);
+          return;
+        }
+        if (
+          !ln.item.serialRequiredOnSale &&
+          list.length > 0 &&
+          list.length !== ln.quantity
+        ) {
+          setCheckoutError(
+            `${ln.item.name}: either ${ln.quantity} serial${ln.quantity === 1 ? '' : 's'} or none.`,
+          );
+          setBusy(false);
+          return;
+        }
+        if (list.length === 0) continue;
+        const existing = serialsByItem.get(ln.itemId) ?? [];
+        serialsByItem.set(ln.itemId, [...existing, ...list]);
+      }
+      const serialsPayload = Array.from(serialsByItem.entries()).map(
+        ([itemId, serials]) => ({ itemId, serials }),
+      );
+
       const r = await api.post(`/pos/sessions/${session.id}/checkout`, {
         paymentMethod,
         customerId: customerId || undefined,
@@ -230,12 +277,19 @@ export default function POS() {
           : paidAmount === ''
             ? undefined
             : paid,
+        expectedPaymentDate:
+          willHaveReceivable && expectedPaymentDate
+            ? expectedPaymentDate
+            : undefined,
+        serials: serialsPayload.length > 0 ? serialsPayload : undefined,
       });
       setLastSale(r.data);
       setCart([]);
+      setLineSerials({});
       setDiscount('');
       setPaidAmount('');
       setCustomerId('');
+      setExpectedPaymentDate('');
       // refresh session totals
       const refreshed = await api.get(`/pos/sessions/${session.id}`);
       setSession(refreshed.data);
@@ -421,8 +475,21 @@ export default function POS() {
                 </tr>
               </thead>
               <tbody>
-                {cart.map((ln) => (
-                  <tr key={ln.id}>
+                {cart.map((ln) => {
+                  const showSerialBox = ln.item?.tracksSerials !== false;
+                  const required =
+                    showSerialBox && ln.item?.serialRequiredOnSale !== false;
+                  const raw = lineSerials[ln.id] ?? '';
+                  const enteredCount = raw
+                    .split(/[\n,]+/)
+                    .map((s) => s.trim())
+                    .filter(Boolean).length;
+                  const serialsOk = required
+                    ? enteredCount === ln.quantity
+                    : enteredCount === 0 || enteredCount === ln.quantity;
+                  return (
+                  <Fragment key={ln.id}>
+                  <tr>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--text)' }}>
                         {ln.item?.modelNo ?? ln.item?.name ?? ln.itemId}
@@ -466,7 +533,62 @@ export default function POS() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  {showSerialBox && (
+                    <tr>
+                      <td colSpan={5} style={{ paddingTop: 0 }}>
+                        <label
+                          style={{
+                            fontSize: 11,
+                            color: serialsOk
+                              ? 'var(--success)'
+                              : required
+                                ? 'var(--warning)'
+                                : 'var(--text-muted)',
+                            fontFamily: 'var(--font-mono)',
+                          }}
+                          title={
+                            required
+                              ? 'Scan or type one serial per unit. Required to check out.'
+                              : 'Optional — capture if available. Leave blank otherwise.'
+                          }
+                        >
+                          Serial{ln.quantity === 1 ? '' : 's'} (
+                          {enteredCount}/{ln.quantity})
+                          {serialsOk
+                            ? required
+                              ? ' ✓'
+                              : enteredCount > 0
+                                ? ' ✓'
+                                : ' · optional'
+                            : required
+                              ? ' — required'
+                              : ' · need 0 or all'}
+                        </label>
+                        <textarea
+                          rows={Math.min(3, ln.quantity)}
+                          value={raw}
+                          onChange={(e) =>
+                            setLineSerials((prev) => ({
+                              ...prev,
+                              [ln.id]: e.target.value,
+                            }))
+                          }
+                          placeholder={
+                            ln.quantity === 1
+                              ? 'Scan or type the appliance serial…'
+                              : 'One serial per unit (newline-separated)'
+                          }
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 12,
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -522,21 +644,36 @@ export default function POS() {
           </div>
 
           {(isCredit || isPartial) && (
-            <div
-              className="alert"
-              style={{
-                background: 'var(--info-soft)',
-                color: 'var(--info)',
-                borderColor: 'var(--info)',
-                fontSize: 12,
-                padding: '8px 10px',
-                marginBottom: 10,
-              }}
-            >
-              {isCredit
-                ? `Full ${net.toFixed(2)} will be added to customer's A/R.`
-                : `${receivable.toFixed(2)} will be added to customer's A/R.`}
-            </div>
+            <>
+              <div
+                className="alert"
+                style={{
+                  background: 'var(--info-soft)',
+                  color: 'var(--info)',
+                  borderColor: 'var(--info)',
+                  fontSize: 12,
+                  padding: '8px 10px',
+                  marginBottom: 10,
+                }}
+              >
+                {isCredit
+                  ? `Full ${net.toFixed(2)} will be added to customer's A/R.`
+                  : `${receivable.toFixed(2)} will be added to customer's A/R.`}
+              </div>
+              <label
+                style={{ fontSize: 12, marginTop: 0 }}
+                title="If the customer promised to pay by a specific date (e.g. 15 days from now), set it here. The A/R aging report flags overdue promises."
+              >
+                Promise to pay by (optional)
+              </label>
+              <input
+                type="date"
+                value={expectedPaymentDate}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setExpectedPaymentDate(e.target.value)}
+                style={{ marginBottom: 10 }}
+              />
+            </>
           )}
 
           <label>Customer</label>
