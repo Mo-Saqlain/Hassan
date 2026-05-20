@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import ReverseAction from './ReverseAction';
 
 /**
  * direction = 'IN' (Receipt from customer) or 'OUT' (Payment to supplier)
@@ -191,6 +192,7 @@ export default function VoucherPage({ direction }) {
               <th>Account</th>
               <th className="right">Amount</th>
               <th>Notes</th>
+              <th className="right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -206,6 +208,14 @@ export default function VoucherPage({ direction }) {
                 <td>{v.account?.name ?? '—'}</td>
                 <td className="right">{Number(v.amount).toFixed(2)}</td>
                 <td>{v.notes ?? ''}</td>
+                <td className="right">
+                  <ReverseAction
+                    endpoint="/payments"
+                    row={v}
+                    label={`voucher ${v.voucherNo}`}
+                    onDone={reload}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

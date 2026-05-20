@@ -67,7 +67,7 @@ Master data lives inside the operational hubs in the sidebar, not in a separate 
 | Employee | Info · Attendance · Payments · Incentive Rules · Ledger |
 | Account | Info · Transfers · Ledger |
 | Users (admin) | Info · Allow Access · Recent Login · Change Password |
-| System | Backups · Audit · Errors · Accent |
+| System | Backups · Audit · Errors |
 
 **Item identifier:** Model No is the primary identifier (used as the item's display name). SKU auto-derives from Model No on save (suffixed `-2`, `-3` … on collision). Barcode is optional. **Quick search** at the top of every list filters as you type (`searchKeys={[...]}` per page).
 
@@ -167,12 +167,7 @@ A real cashier's day book.
 - **Status chips** — semantic-color filled rectangles. Used for payment states, low-stock badges, session status, sync-queue status.
 - **Unsaved-changes guard** — every CRUD form (items, categories, brands, customers, suppliers, stores, accounts, employees, users, vouchers, stock transfers, fund transfers, purchase orders, sale/purchase returns, damaged goods, stock adjustments, cash-register sessions, employee payments, incentive targets / awards / rules, POS new-customer modal, etc.) is tracked by a shared [`useUnsavedChangesPrompt` hook](erp-frontend/src/hooks/useUnsavedChangesPrompt.js). The hook diffs the live form against its initial snapshot; when it's dirty it (a) attaches a capture-phase `click` listener to `document` that intercepts any `<a href="#/…">` (sidebar NavLinks, hub-tab links) before React Router sees it, pops a confirm dialog, and only lets the navigation through if the user agrees, and (b) wires `beforeunload` so closing the tab / refreshing the window also asks. Saving / Cancel both clear the dirty flag first, so the prompt never fires on a legitimate completion. The click-interceptor approach was chosen over React Router's `useBlocker` because the app uses the declarative `<HashRouter>` (not a data router), and `useBlocker` only works with `createHashRouter` + `RouterProvider`. No more retyping a half-filled item form because you brushed the Dashboard link with the touchpad.
 - **Seamless title bar (Electron)** — the in-app `.topbar` and the sidebar header (`.brand`) share the exact same background as the Windows-drawn min/max/close overlay (`#fafafa` light, `#333333` dark, both pinned to `--surface-elev` in [tokens.css](erp-frontend/src/styles/tokens.css)). No 1 px border lines anywhere on the top 44 px band — the Windows overlay is opaque and sits on top of the topbar, so any border would appear truncated at the overlay seam. Visual separation from the page content below is supplied by the `--bg` vs `--surface-elev` colour contrast, not a divider line.
-- **Accent colour — three-layer resolution** (highest priority first):
-  1. **User pick** — `System → Accent` presents two explicit modes: **Follow Windows accent** (auto-syncs with Windows/macOS Personalisation) or **Use custom accent** (9 Win10-style preset swatches + an HTML5 color input + a hex text field). The custom-mode choice persists in `localStorage.hassan-accent-color` and is applied **before the first paint** via [erp-frontend/src/theme/accent.js](erp-frontend/src/theme/accent.js) so there's no flash of the old colour on cold load. The "Follow Windows" card is disabled outside the Electron wrapper.
-  2. **OS accent (Electron only)** — the desktop wrapper reads `systemPreferences.getAccentColor()` and pushes the hex value through the sandboxed preload bridge ([`erp-desktop/src/preload.js`](erp-desktop/src/preload.js)): synchronously at app launch as `window.erpBridge.osAccent`, and live via `onOsAccentChange()` when the user opens Windows Personalisation mid-session and switches accent. The accent flows over Electron IPC, **not** `webContents.executeJavaScript()` — the renderer's strict CSP (`script-src 'self'` in [index.html](erp-frontend/public/index.html)) blocks dynamic script evaluation inside the page context, which would otherwise silently break "Follow Windows accent" in production builds. The boot script in [theme-bootstrap.js](erp-frontend/public/theme-bootstrap.js) reads `window.erpBridge.osAccent` before React mounts and applies it as the first paint, so there's no flash of default blue when "Follow Windows" is active.
-  3. **Default Windows blue** — `#0078d4` (defined in [tokens.css](erp-frontend/src/styles/tokens.css)).
-
-  Every accent surface (primary buttons, hub-tab underline, active sidebar strip, focus rings, the Adjusted Net Income row on the Income Statement, etc.) resolves through `var(--primary)` / `var(--info)`. The same `applyAccent()` writes `--primary-hover` (12 % darker), `--primary-soft` (18 % alpha for chip fills), `--accent-pressed` (25 % darker), `--primary-fg` (auto-picked white or `#1f1f1f` for AAA contrast).
+- **Accent colour — hardcoded Windows blue (`#0078d4`).** Every accent surface (primary buttons, hub-tab underline, active sidebar strip, focus rings, the Adjusted Net Income row on the Income Statement, etc.) resolves through `var(--primary)` / `var(--info)` in [tokens.css](erp-frontend/src/styles/tokens.css). The palette ships fixed shades: `--primary-hover` (`#006abb`, 12% darker), `--primary-soft` (`rgba(0,120,212,0.18)` for chip fills), `--accent-pressed` (`#005a9f`, 25% darker), `--primary-fg` (`#ffffff`). The accent is not user-configurable — keeping it fixed avoids an OS-accent bridge, a Settings page, a boot-time shade-derivation script, and the colour-format edge cases that come with reading the OS accent on Windows vs macOS.
 
 ---
 
@@ -268,7 +263,7 @@ erp-backend/
 erp-frontend/
 ├─ logo.jpeg                  # source brand mark (HE monogram on black)
 ├─ public/
-│  ├─ index.html              # theme + accent bootstrap before React renders
+│  ├─ index.html              # theme bootstrap before React renders
 │  ├─ manifest.json           # PWA name + icon set
 │  ├─ favicon.ico             # generated by scripts/make-icons.ps1
 │  └─ logo192/512/1024.png    # generated; transparent
@@ -277,12 +272,12 @@ erp-frontend/
 │  ├─ auth/AuthContext.js     # token + user, auto /auth/me on boot
 │  ├─ components/             # Layout, Brand, Icon, ThemeToggle, HubFrame, etc.
 │  ├─ nav/hubs.js             # single source of truth for sidebar + hubs
-│  ├─ pages/                  # Dashboard, POS, Login, Accent, Financials, …
-│  ├─ theme/                  # ThemeContext, accent.js
+│  ├─ pages/                  # Dashboard, POS, Login, Financials, …
+│  ├─ theme/                  # ThemeContext
 │  └─ styles/                 # tokens.css, app.css (flat Windows 10)
 
 erp-desktop/
-├─ src/main.js                # Electron main: spawn backend, load build, OS accent push
+├─ src/main.js                # Electron main: spawn backend, load build, title-bar theme
 ├─ build-resources/
 │  ├─ icon.ico                # multi-resolution Windows icon
 │  └─ config.example.json     # template for <userData>/config.json
@@ -383,7 +378,7 @@ The Electron wrapper produces a fully self-contained NSIS installer. The shop PC
 
 ### Renderer sandboxing
 
-The Electron `BrowserWindow` runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface — `setTitleBarTheme(theme)`, `osAccent` (read at preload, used by the boot script in [theme-bootstrap.js](erp-frontend/public/theme-bootstrap.js)), and `onOsAccentChange(cb)`. A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out to the OS — it sees the same DOM a regular browser tab would see. The strict Helmet CSP on the backend and the `<meta http-equiv="Content-Security-Policy">` tag in [index.html](erp-frontend/public/index.html) (with `script-src 'self'`) further block dynamic script evaluation in the renderer.
+The Electron `BrowserWindow` runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface — just `setTitleBarTheme(theme)` so the Windows-drawn min/max/close overlay can flip light↔dark with the in-app theme. A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out to the OS — it sees the same DOM a regular browser tab would see. The strict Helmet CSP on the backend and the `<meta http-equiv="Content-Security-Policy">` tag in [index.html](erp-frontend/public/index.html) (with `script-src 'self'`) further block dynamic script evaluation in the renderer.
 
 ### Window chrome (VS Code-style)
 

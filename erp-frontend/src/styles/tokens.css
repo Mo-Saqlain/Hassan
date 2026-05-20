@@ -226,10 +226,18 @@ h3 { font-size: 15px; }
 .btn:active { background: var(--chip-bg-hover); }
 .btn:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
 
-/* `--primary` defaults to Windows blue but is overridden by the Electron
-   shell to the user's chosen Personalisation accent colour (see
-   erp-desktop/src/main.js applyOsAccentColor). All accent uses below
-   resolve through CSS variables so a single override re-themes the UI. */
+/* `--primary` is hard-coded Windows blue (#0078d4). The accent is not
+   user-configurable — keeping it fixed avoids the complexity of an OS
+   accent bridge, a Settings page, a boot-time shade derivation script,
+   and the colour-format edge cases that come with reading the OS accent
+   on Windows vs macOS. All accent uses below resolve through this token. */
+:root {
+  --primary:        #0078d4;
+  --primary-hover:  #006abb;
+  --primary-soft:   rgba(0, 120, 212, 0.18);
+  --primary-fg:     #ffffff;
+  --accent-pressed: #005a9f;
+}
 .btn-primary {
   background: var(--primary);
   color: var(--primary-fg, #ffffff);

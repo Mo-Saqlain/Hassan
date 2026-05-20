@@ -51,7 +51,7 @@ Each sidebar entry carries its own hue used only for the 24×24 icon chip (tinte
 | `--warning` | `#ca5010` | Partial / variance / pending |
 | `--danger`  | `#c50f1f` | Closed / failed / overdue / damaged / rejected |
 | `--info`    | `#0078d4` | Informational chips; also the active-tab underline |
-| `--primary` | accent | Buttons, focus rings, active sidebar strip. Overrideable by the OS accent on Electron via `window.erpBridge.osAccent` + the Accent settings page. |
+| `--primary` | `#0078d4` Windows blue | Buttons, focus rings, active sidebar strip. Hard-coded — there is no user-facing accent setting. |
 
 ### Theme
 
@@ -991,7 +991,7 @@ CSV/PDF exports use a flattened `{label, value}` list with slightly different la
 
 ### 5.14 System hub — `/backup` (default)
 
-Hub title `"System"` · subtitle `"Backups, audit trail, accent colour, and runtime error log."`. Tabs: **Backups · Audit · Errors · Accent** (Audit + Errors are superuser-only).
+Hub title `"System"` · subtitle `"Backups, audit trail, and runtime error log."`. Tabs: **Backups · Audit · Errors** (Audit + Errors are superuser-only).
 
 #### Tab — Backups (`/backup`)
 
@@ -1039,39 +1039,6 @@ File [pages/ErrorLog.js](erp-frontend/src/pages/ErrorLog.js).
 - Table: `"When"`, `"Level"`, `"Status"`, `"Method"`, `"Path"`, `"Message"`, `"Source"`, `"Detail"`. Level badges: `"ERROR"` (red), `"WARN"` (yellow). Detail cell `"view"` reveals stack (≤ 240 px) + context JSON.
 - Empty: `"No errors logged. Nice."` / `"No rows match the filter."`.
 
-#### Tab — Accent (`/accent`)
-
-File [pages/Accent.js](erp-frontend/src/pages/Accent.js).
-
-- Heading `"Accent colour"`.
-- Body: `"The accent colour is used for primary buttons, active tabs, focus rings, the Adjusted Net Income row on the Income Statement, and the active sidebar strip. Saved on this device only."`
-
-**Accent Source radiogroup (two cards):**
-
-1. Card `"Follow Windows accent"`
-   - With OS accent: `"Auto-syncs with Windows Personalisation. Currently {hex}."`
-   - Without: `"Available only inside the desktop app on Windows or macOS."` (card disabled)
-2. Card `"Use custom accent"`
-   - `"Pick a preset or type any hex value below."` (always enabled)
-
-**When custom is selected:**
-
-- Label `"Presets"` — a grid of 36×36 colored swatch buttons. Each swatch button has `aria-label="{name}"` and `title="{name} — {value}"`. Selected swatch gets a 2 px border in `var(--text)`.
-- Field `"Custom colour"` (`<input type="color">`).
-- Field `"Hex value"` (text, placeholder `"#0078d4"`, regex `/^#[0-9a-fA-F]{6}$/`).
-
-**Success flash messages (auto-dismiss 2.5 s):**
-
-- `"Now following the Windows accent colour."`
-- `"Switched to a custom accent. Pick any colour below."`
-- `"Accent colour updated."`
-
-**Footer info (muted, bordered top):**
-
-- `"**Current source:** Custom ({hex}) | Windows accent ({hex}) | Default ({hex})"`
-- Conditional `"When you change your Windows Personalisation colour the app picks it up automatically."`
-- Conditional `"Open this app through the Electron desktop wrapper on Windows or macOS to enable "Follow Windows accent"."`
-
 ---
 
 ## 6. Cross-cutting components
@@ -1117,7 +1084,7 @@ All other strings constant: `"Account *"`, `"Amount *"`, `"Notes"`, `"Save Vouch
 | Class | Text source |
 |---|---|
 | `.alert.alert-error` | `err.uiMessage` from API or fallback (`"Save failed"`, `"Sign-in failed"`, `"Could not change password"`, …) |
-| `.alert.alert-success` | confirmation message (e.g. `"Now following the Windows accent colour."`) |
+| `.alert.alert-success` | confirmation message (e.g. `"Password changed. Please sign in again with the new password."`) |
 
 Visual: 8 px padding, 13 px font, 1 px transparent border with a 3 px left strip (`--danger` or `--success`).
 
@@ -1217,7 +1184,6 @@ The Electron entry [erp-desktop/src/main.js](erp-desktop/src/main.js) is the sou
 | Backups | [pages/Backup.js](erp-frontend/src/pages/Backup.js) |
 | Audit log | [pages/AuditLog.js](erp-frontend/src/pages/AuditLog.js) |
 | Error log | [pages/ErrorLog.js](erp-frontend/src/pages/ErrorLog.js) |
-| Accent | [pages/Accent.js](erp-frontend/src/pages/Accent.js) |
 | Tokens / Theme | [styles/tokens.css](erp-frontend/src/styles/tokens.css), [theme/ThemeContext.js](erp-frontend/src/theme/ThemeContext.js) |
 | Hubs / Sidebar | [nav/hubs.js](erp-frontend/src/nav/hubs.js) |
 | Electron shell | [erp-desktop/src/main.js](erp-desktop/src/main.js) |

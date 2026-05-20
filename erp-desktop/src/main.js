@@ -5,7 +5,6 @@ const {
   ipcMain,
   Menu,
   protocol,
-  systemPreferences,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -467,58 +466,7 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-
-  // OS-accent push:
-  //
-  //   * preload.js fetches the accent synchronously at app launch via
-  //     IPC ('erp:get-os-accent') and exposes it as window.erpBridge.osAccent.
-  //   * When the user changes their Windows / macOS Personalisation
-  //     colour mid-session, we relay it via 'erp:os-accent-changed' so
-  //     the renderer can apply it live.
-  //
-  // The previous implementation used webContents.executeJavaScript on
-  // did-finish-load — that path is blocked by the renderer's strict CSP
-  // (`script-src 'self'` in index.html), which is why "Follow Windows
-  // accent" silently failed in the packaged build. IPC bypasses CSP.
-  if (process.platform === 'win32' || process.platform === 'darwin') {
-    try {
-      systemPreferences.on('accent-color-changed', () => {
-        const hex = readOsAccentHex();
-        if (mainWindow && hex) {
-          mainWindow.webContents.send('erp:os-accent-changed', hex);
-        }
-      });
-    } catch {
-      /* not all electron versions / platforms emit this — best effort */
-    }
-  }
 }
-
-/**
- * Read the current OS accent colour (Windows / macOS) and return it as
- * a lowercase `#rrggbb` hex string. Returns null on Linux / unsupported
- * builds, or if the OS reports an unparseable value.
- */
-function readOsAccentHex() {
-  let accent;
-  try {
-    accent = systemPreferences.getAccentColor();
-  } catch {
-    return null;
-  }
-  if (!accent || typeof accent !== 'string') return null;
-  // Windows returns AARRGGBB; macOS returns RRGGBB. Strip alpha if present.
-  const hex = accent.length === 8 ? accent.slice(2) : accent;
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
-  return `#${hex.toLowerCase()}`;
-}
-
-// Sync IPC. preload.js calls this at preload-time so the value is
-// available on window.erpBridge before React mounts (no flash of the
-// default Windows blue).
-ipcMain.on('erp:get-os-accent', (event) => {
-  event.returnValue = readOsAccentHex();
-});
 
 ipcMain.on('erp:set-titlebar-theme', (_event, theme) => {
   if (!mainWindow) return;

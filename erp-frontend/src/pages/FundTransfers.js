@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import ReverseAction from '../components/ReverseAction';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -41,16 +42,6 @@ export default function FundTransfers() {
       reload();
     } catch (err) {
       setSubmitErr(err.uiMessage ?? 'Save failed');
-    }
-  };
-
-  const remove = async (t) => {
-    if (!window.confirm(`Delete transfer ${t.transferNo}?`)) return;
-    try {
-      await api.delete(`/fund-transfers/${t.id}`);
-      reload();
-    } catch (e) {
-      alert(e.uiMessage ?? 'Delete failed');
     }
   };
 
@@ -185,12 +176,12 @@ export default function FundTransfers() {
                 <td className="right">{Number(t.amount).toFixed(2)}</td>
                 <td>{t.notes ?? ''}</td>
                 <td className="right">
-                  <button
-                    className="btn btn-sm btn-danger"
-                    onClick={() => remove(t)}
-                  >
-                    Delete
-                  </button>
+                  <ReverseAction
+                    endpoint="/fund-transfers"
+                    row={t}
+                    label={`transfer ${t.transferNo}`}
+                    onDone={reload}
+                  />
                 </td>
               </tr>
             ))}

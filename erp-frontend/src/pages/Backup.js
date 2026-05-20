@@ -1,5 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, apiBaseUrl } from '../api/client';
+import { api } from '../api/client';
+
+// Pulls the filename out of a Content-Disposition header. Falls back to the
+// caller-supplied default when the header is missing or malformed.
+function filenameFromHeaders(headers, fallback) {
+  const cd = headers?.['content-disposition'] || headers?.['Content-Disposition'];
+  if (!cd) return fallback;
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+  return m ? decodeURIComponent(m[1]) : fallback;
+}
+
+// Trigger a browser download from an axios Blob response. We can't navigate
+// via `window.location.href` because that fires a plain GET with no auth
+// header attached, and the global AuthGuard rejects it as 401.
+async function downloadBlob(path, fallbackName) {
+  const res = await api.get(path, { responseType: 'blob' });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filenameFromHeaders(res.headers, fallbackName);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 const fmtSize = (b) => {
   const n = Number(b ?? 0);
@@ -40,10 +64,17 @@ export default function Backup() {
     reload();
   }, [reload]);
 
-  const downloadNow = () => {
-    // Pure download — bypass axios and let the browser's native download
-    // handler write the file straight to disk.
-    window.location.href = `${apiBaseUrl()}/backup/download-now`;
+  const downloadNow = async () => {
+    setBusy('download-now');
+    setError(null);
+    try {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      await downloadBlob('/backup/download-now', `hassan-backup-${ts}.json`);
+    } catch (e) {
+      setError(e.uiMessage ?? 'Download failed');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const triggerStored = async () => {
@@ -59,8 +90,16 @@ export default function Backup() {
     }
   };
 
-  const downloadStored = (id) => {
-    window.location.href = `${apiBaseUrl()}/backup/${id}/download`;
+  const downloadStored = async (row) => {
+    setBusy(row.id);
+    setError(null);
+    try {
+      await downloadBlob(`/backup/${row.id}/download`, row.fileName);
+    } catch (e) {
+      setError(e.uiMessage ?? 'Download failed');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const removeStored = async (row) => {
@@ -233,7 +272,8 @@ export default function Backup() {
                 <td className="right">
                   <button
                     className="btn btn-sm"
-                    onClick={() => downloadStored(b.id)}
+                    onClick={() => downloadStored(b)}
+                    disabled={busy === b.id}
                   >
                     Download
                   </button>{' '}

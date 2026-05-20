@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import ReverseAction from '../components/ReverseAction';
 
 const emptyLine = () => ({ itemId: '', storeId: '', quantity: 1, unitPrice: 0 });
 
@@ -417,14 +418,29 @@ export default function Purchases() {
                 <td className="right">{Number(p.paidAmount ?? 0).toFixed(2)}</td>
                 <td>{p.paymentMethod}</td>
                 <td className="right">
-                  <a
-                    className="btn btn-sm"
-                    href={`#/print/purchase/${p.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      gap: 6,
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                    }}
                   >
-                    Print
-                  </a>
+                    <a
+                      className="btn btn-sm"
+                      href={`#/print/purchase/${p.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Print
+                    </a>
+                    <ReverseAction
+                      endpoint="/purchases"
+                      row={p}
+                      label={`bill ${p.billNo}`}
+                      onDone={reload}
+                    />
+                  </div>
                 </td>
               </tr>
             ))}

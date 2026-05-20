@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useResource } from '../hooks/useResource';
+import ReverseAction from '../components/ReverseAction';
 
 export default function Sales() {
-  const { data: sales, loading, error } = useResource('/sales');
+  const { data: sales, loading, error, reload } = useResource('/sales');
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -69,14 +70,29 @@ export default function Sales() {
                 <td className="right">{Number(s.paidAmount ?? 0).toFixed(2)}</td>
                 <td>{s.paymentMethod}</td>
                 <td className="right">
-                  <a
-                    className="btn btn-sm"
-                    href={`#/print/sale/${s.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      gap: 6,
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                    }}
                   >
-                    Print
-                  </a>
+                    <a
+                      className="btn btn-sm"
+                      href={`#/print/sale/${s.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Print
+                    </a>
+                    <ReverseAction
+                      endpoint="/sales"
+                      row={s}
+                      label={`sale ${s.invoiceNo}`}
+                      onDone={reload}
+                    />
+                  </div>
                 </td>
               </tr>
             ))}

@@ -261,6 +261,14 @@ a:hover { text-decoration: underline; }
 
 .btn-danger:hover { background: #a40d1a; border-color: #a40d1a; color: #fff; }
 
+.btn-warn {
+  background: var(--warning);
+  color: #fff;
+  border-color: var(--warning);
+}
+
+.btn-warn:hover { background: #a4400d; border-color: #a4400d; color: #fff; }
+
 .btn-sm {
   padding: 3px 8px;
   font-size: 12px;

@@ -176,18 +176,17 @@ export const HUBS = {
   system: {
     label: 'System',
     title: 'System',
-    subtitle: 'Backups, audit trail, accent colour, and runtime error log.',
+    subtitle: 'Backups, audit trail, and runtime error log.',
     icon: 'backup',
     colorVar: '--nav-system',
     defaultTo: '/backup',
-    paths: ['/backup', '/audit-log', '/error-log', '/accent'],
+    paths: ['/backup', '/audit-log', '/error-log'],
     tabs: [
       { to: '/backup', label: 'Backups', icon: 'backup' },
       // `superuserOnly` tabs are stripped from the strip in HubFrame for
       // regular users so they don't see (or 403) those pages.
       { to: '/audit-log', label: 'Audit', icon: 'ledger', superuserOnly: true },
       { to: '/error-log', label: 'Errors', icon: 'packageX', superuserOnly: true },
-      { to: '/accent', label: 'Accent', icon: 'sparkles' },
     ],
   },
 };

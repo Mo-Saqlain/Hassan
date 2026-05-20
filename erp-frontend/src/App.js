@@ -35,7 +35,6 @@ import EmployeeLedger from './pages/EmployeeLedger';
 import Backup from './pages/Backup';
 import AuditLog from './pages/AuditLog';
 import ErrorLog from './pages/ErrorLog';
-import Accent from './pages/Accent';
 import UsersInfo from './pages/users/UsersInfo';
 import UsersAllowAccess from './pages/users/UsersAllowAccess';
 import UsersRecentLogin from './pages/users/UsersRecentLogin';
@@ -250,7 +249,6 @@ export default function App() {
                   </RequireSuperuser>
                 }
               />
-              <Route path="accent" element={<Accent />} />
               <Route
                 path="error-log"
                 element={
