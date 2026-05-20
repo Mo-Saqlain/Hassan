@@ -142,6 +142,9 @@ export class CashRegisterService {
     session.expectedClosing = round(expectedClosing);
     session.actualClosing = round(dto.actualClosing);
     session.closingDifference = round(dto.actualClosing - expectedClosing);
+    if (dto.closingDenominations) {
+      session.closingDenominations = dto.closingDenominations;
+    }
     session.status = 'CLOSED';
     session.closedAt = new Date();
     if (dto.notes) {

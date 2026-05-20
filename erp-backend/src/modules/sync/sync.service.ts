@@ -129,6 +129,18 @@ export class SyncService {
     return this.outbox.countPending();
   }
 
+  failedCount() {
+    return this.outbox.countFailed();
+  }
+
+  listFailed() {
+    return this.outbox.failed();
+  }
+
+  retryFailed(id: string) {
+    return this.outbox.retry(id);
+  }
+
   /**
    * Pushes PENDING outbox entries to the configured cloud sync URL.
    * Triggered manually from the UI ("Sync now" button) — there is no
@@ -172,7 +184,10 @@ export class SyncService {
     }
     this.isPushing = true;
     try {
-      const pending = await this.outbox.pending(50);
+      // Pull every PENDING row, no chunk cap. Poison-pill isolation below
+      // flips per-event status independently so a stuck row can't stall
+      // the queue — the next healthy event is always tried.
+      const pending = await this.outbox.pending();
       if (pending.length === 0) {
         return {
           ok: true,
@@ -210,20 +225,41 @@ export class SyncService {
         const byId = new Map(res.data.map((r) => [r.id, r]));
         let succeeded = 0;
         let failed = 0;
+        const now = new Date();
+        // Per-event try/catch: a poison-pill record that the cloud rejects
+        // (schema mismatch, FK violation, corrupted payload) must NOT stop
+        // us from processing the next healthy event. We tag it FAILED with
+        // the server's error string and move on.
         for (const entry of pending) {
           const result = byId.get(entry.id);
           if (!result) continue;
           entry.attempts += 1;
-          if (result.status === 'PROCESSED' || result.status === 'DUPLICATE') {
-            entry.status = 'SYNCED';
-            entry.error = undefined;
-            succeeded += 1;
-          } else {
-            entry.status = 'FAILED';
-            entry.error = result.error ?? 'Unknown error';
-            failed += 1;
+          entry.lastAttemptAt = now;
+          try {
+            if (
+              result.status === 'PROCESSED' ||
+              result.status === 'DUPLICATE'
+            ) {
+              entry.status = 'SYNCED';
+              entry.error = undefined;
+              succeeded += 1;
+            } else {
+              entry.status = 'FAILED';
+              entry.error = result.error ?? 'Unknown error';
+              failed += 1;
+            }
+            await this.outbox.save(entry);
+          } catch (perRowErr) {
+            // Even the per-row save can hit a transient lock or constraint;
+            // log but never throw out of the loop.
+            const msg =
+              perRowErr instanceof Error
+                ? perRowErr.message
+                : String(perRowErr);
+            this.logger.warn(
+              `Failed to persist outbox status for ${entry.id}: ${msg}`,
+            );
           }
-          await this.outbox.save(entry);
         }
         this.logger.log(
           `Sync pushed ${pending.length} events (succeeded=${succeeded}, failed=${failed})`,

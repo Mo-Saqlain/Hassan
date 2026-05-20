@@ -1373,13 +1373,14 @@ export class ReportsService {
           else if (ageDays <= 90) buckets.d61_90 += residual;
           else buckets.d90 += residual;
 
-          // Past-promise overlay: customer was given an explicit "pay by"
-          // date at the POS and it's now in the past. Tracked in addition
-          // to the age bucket so the UI can sort / highlight separately.
-          if (
-            s.expectedPaymentDate &&
-            new Date(s.expectedPaymentDate) < asOf
-          ) {
+          // Past-promise overlay: customer committed to a "pay by" date at
+          // POS and at least one such commitment is now in the past with a
+          // PENDING status. Read from the structured commitments array;
+          // the legacy single-date field has been folded into commitments.
+          const firstPastPending = (s.paymentCommitments ?? []).find(
+            (c) => c.status === 'PENDING' && new Date(c.dueDate) < asOf,
+          );
+          if (firstPastPending) {
             buckets.pastPromise += residual;
           }
         }
@@ -1583,10 +1584,41 @@ export class ReportsService {
     });
     const byId = new Map(items.map((i) => [i.id, i]));
 
+    // COGS per item = sum of (qty × costAtSaleTime) across every sale line
+    // in the period. costAtSaleTime is the snapshot of the weighted-average
+    // cost at the moment the sale was rung up — the right answer for
+    // historical margin reports (item.purchasePrice would shift with the
+    // most recent purchase and rewrite history).
+    const cogsByItem = new Map<string, number>();
+    for (const ln of saleLines) {
+      const cur = cogsByItem.get(ln.itemId) ?? 0;
+      cogsByItem.set(
+        ln.itemId,
+        cur + Number(ln.quantity) * Number(ln.costAtSaleTime ?? 0),
+      );
+    }
+    for (const r of saleReturns) {
+      for (const ln of r.lines ?? []) {
+        // Sale returns net out the qty + revenue; for COGS we'd need to
+        // know the original line's cost. The matching SaleItem has it but
+        // joining here is overkill — fall back to the item's current avgCost
+        // which is a reasonable approximation for a small shop with stable
+        // costs. Materially the same as our existing reports.
+        const item = byId.get(ln.itemId);
+        const unit = item
+          ? Number(item.avgCost) > 0
+            ? Number(item.avgCost)
+            : Number(item.purchasePrice)
+          : 0;
+        const cur = cogsByItem.get(ln.itemId) ?? 0;
+        cogsByItem.set(ln.itemId, cur - Number(ln.quantity) * unit);
+      }
+    }
+
     const rows = Array.from(agg.entries())
       .map(([itemId, v]) => {
         const item = byId.get(itemId);
-        const cogs = round2(v.qty * Number(item?.purchasePrice ?? 0));
+        const cogs = round2(cogsByItem.get(itemId) ?? 0);
         const revenue = round2(v.revenue);
         const grossProfit = round2(revenue - cogs);
         const marginPct = revenue > 0 ? round2((grossProfit / revenue) * 100) : 0;
@@ -1806,6 +1838,306 @@ export class ReportsService {
       totalLiabilitiesAndEquity: totalLE,
       balanced: Math.abs(b.asset - totalLE) < 0.005,
       source: 'journals',
+    };
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Slow-moving stock + margin analytics (operational business decisions)
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * For every item that's still on hand, returns the days since the last
+   * sale movement (or "never" if it's never sold) and the inventory value
+   * locked at the current weighted-average cost. Sorted so the deadest
+   * stock is on top.
+   *
+   * Buckets:
+   *   - `fresh`        — sold within the last 30 days
+   *   - `slowing`      — 31–60 days since last sale
+   *   - `cold`         — 61–90 days
+   *   - `dead`         — > 90 days OR never sold but still in stock
+   */
+  async slowMovingStock(asOfStr?: string): Promise<{
+    asOf: string;
+    rows: Array<{
+      itemId: string;
+      name: string;
+      sku: string;
+      onHand: number;
+      avgCost: number;
+      valueAtCost: number;
+      daysSinceLastSale: number | null;
+      bucket: 'fresh' | 'slowing' | 'cold' | 'dead';
+    }>;
+    summary: {
+      fresh: number;
+      slowing: number;
+      cold: number;
+      dead: number;
+      deadValue: number;
+      coldValue: number;
+    };
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+    const items = await this.items.find({ where: { isActive: true } });
+    // Last sale per item — pulled in one indexed pass over sale_items joined
+    // on sales.createdAt. For our row counts this fits comfortably in memory.
+    const lines = await this.saleItems
+      .createQueryBuilder('sl')
+      .leftJoin('sl.sale', 's')
+      .where('s.reversedAt IS NULL')
+      .andWhere('s.createdAt <= :asOf', { asOf })
+      .select('sl.itemId', 'itemId')
+      .addSelect('MAX(s.createdAt)', 'lastSold')
+      .groupBy('sl.itemId')
+      .getRawMany<{ itemId: string; lastSold: string | Date }>();
+    const lastSoldByItem = new Map(
+      lines.map((r) => [r.itemId, new Date(r.lastSold)]),
+    );
+
+    const rows: {
+      itemId: string;
+      name: string;
+      sku: string;
+      onHand: number;
+      avgCost: number;
+      valueAtCost: number;
+      daysSinceLastSale: number | null;
+      bucket: 'fresh' | 'slowing' | 'cold' | 'dead';
+    }[] = [];
+    const summary = {
+      fresh: 0,
+      slowing: 0,
+      cold: 0,
+      dead: 0,
+      deadValue: 0,
+      coldValue: 0,
+    };
+
+    for (const it of items) {
+      const onHand = Number(it.costedQty) || 0;
+      if (onHand <= 0) continue;
+      const avgCost =
+        Number(it.avgCost) > 0
+          ? Number(it.avgCost)
+          : Number(it.purchasePrice) || 0;
+      const valueAtCost = round2(onHand * avgCost);
+      const lastSold = lastSoldByItem.get(it.id);
+      const days = lastSold
+        ? Math.floor(
+            (asOf.getTime() - lastSold.getTime()) / (1000 * 60 * 60 * 24),
+          )
+        : null;
+      let bucket: 'fresh' | 'slowing' | 'cold' | 'dead';
+      if (days == null || days > 90) bucket = 'dead';
+      else if (days <= 30) bucket = 'fresh';
+      else if (days <= 60) bucket = 'slowing';
+      else bucket = 'cold';
+      summary[bucket] += 1;
+      if (bucket === 'dead') summary.deadValue += valueAtCost;
+      if (bucket === 'cold') summary.coldValue += valueAtCost;
+      rows.push({
+        itemId: it.id,
+        name: it.name,
+        sku: it.sku,
+        onHand,
+        avgCost: round2(avgCost),
+        valueAtCost,
+        daysSinceLastSale: days,
+        bucket,
+      });
+    }
+
+    // Worst first — dead by descending value, then cold, then slowing, then
+    // fresh. Within a bucket the longest-since-sold wins.
+    const order: Record<string, number> = {
+      dead: 0,
+      cold: 1,
+      slowing: 2,
+      fresh: 3,
+    };
+    rows.sort((a, b) => {
+      if (a.bucket !== b.bucket) return order[a.bucket] - order[b.bucket];
+      return (b.daysSinceLastSale ?? 9999) - (a.daysSinceLastSale ?? 9999);
+    });
+
+    summary.deadValue = round2(summary.deadValue);
+    summary.coldValue = round2(summary.coldValue);
+
+    return { asOf: asOf.toISOString(), rows, summary };
+  }
+
+  /**
+   * Margin analytics for the Financials → Margins tab. Three slices over
+   * the chosen period:
+   *
+   *   - `byBrand`              — qty / revenue / cogs / margin% per brand
+   *   - `lowestMarginSales`    — 20 worst-margin individual sale lines,
+   *                              flagged for owner review
+   *   - `highDiscountSales`    — 20 sales with the largest header discount
+   *
+   * Used to spot pricing leaks ("salesman gave 30% off a CIF unit") rather
+   * than to lock anything down — the philosophy here is observation, not
+   * control.
+   */
+  async marginAnalytics(fromStr?: string, toStr?: string): Promise<{
+    from: string | null;
+    to: string | null;
+    byBrand: Array<{
+      brandId: string | null;
+      brandName: string;
+      qty: number;
+      revenue: number;
+      cogs: number;
+      grossProfit: number;
+      marginPct: number;
+    }>;
+    lowestMarginSales: Array<{
+      saleId: string;
+      invoiceNo: string;
+      createdAt: string;
+      itemName: string;
+      quantity: number;
+      unitPrice: number;
+      costAtSaleTime: number;
+      marginPct: number;
+    }>;
+    highDiscountSales: Array<{
+      saleId: string;
+      invoiceNo: string;
+      createdAt: string;
+      customerName: string;
+      totalAmount: number;
+      discount: number;
+      discountPct: number;
+    }>;
+  }> {
+    const from = fromStr ? new Date(fromStr) : undefined;
+    const to = toStr ? new Date(toStr) : undefined;
+    const dateBetween =
+      from && to
+        ? Between(from, to)
+        : from
+          ? Between(from, new Date('9999-12-31'))
+          : to
+            ? Between(new Date(0), to)
+            : undefined;
+
+    const sales = await this.sales.find({
+      where: dateBetween ? { createdAt: dateBetween } : {},
+      order: { createdAt: 'DESC' },
+    });
+    const saleIds = sales.map((s) => s.id);
+    const lines = saleIds.length
+      ? await this.saleItems.find({ where: { saleId: In(saleIds) } })
+      : [];
+    const items = await this.items.find({
+      where: { id: In(Array.from(new Set(lines.map((l) => l.itemId)))) },
+      relations: ['brand'],
+    });
+    const itemById = new Map(items.map((i) => [i.id, i]));
+    const saleById = new Map(sales.map((s) => [s.id, s]));
+
+    // Brand-level aggregation
+    const brandAgg = new Map<
+      string,
+      { brandId: string | null; brandName: string; qty: number; revenue: number; cogs: number }
+    >();
+    const lineMargins: Array<{
+      saleId: string;
+      itemId: string;
+      quantity: number;
+      unitPrice: number;
+      costAtSaleTime: number;
+      marginPct: number;
+    }> = [];
+
+    for (const ln of lines) {
+      const it = itemById.get(ln.itemId);
+      const brandId = it?.brandId ?? null;
+      const brandName = it?.brand?.name ?? '— Unbranded —';
+      const key = brandId ?? '__none__';
+      const cur =
+        brandAgg.get(key) ??
+        { brandId, brandName, qty: 0, revenue: 0, cogs: 0 };
+      cur.qty += Number(ln.quantity);
+      cur.revenue += Number(ln.lineTotal);
+      cur.cogs += Number(ln.quantity) * Number(ln.costAtSaleTime ?? 0);
+      brandAgg.set(key, cur);
+
+      const unitCost = Number(ln.costAtSaleTime ?? 0);
+      const unitPrice = Number(ln.unitPrice ?? 0);
+      const marginPct =
+        unitPrice > 0
+          ? round2(((unitPrice - unitCost) / unitPrice) * 100)
+          : 0;
+      lineMargins.push({
+        saleId: ln.saleId,
+        itemId: ln.itemId,
+        quantity: Number(ln.quantity),
+        unitPrice,
+        costAtSaleTime: unitCost,
+        marginPct,
+      });
+    }
+
+    const byBrand = Array.from(brandAgg.values())
+      .map((b) => {
+        const gp = round2(b.revenue - b.cogs);
+        const mp = b.revenue > 0 ? round2((gp / b.revenue) * 100) : 0;
+        return {
+          brandId: b.brandId,
+          brandName: b.brandName,
+          qty: b.qty,
+          revenue: round2(b.revenue),
+          cogs: round2(b.cogs),
+          grossProfit: gp,
+          marginPct: mp,
+        };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const lowestMarginSales = lineMargins
+      .filter((l) => l.unitPrice > 0)
+      .sort((a, b) => a.marginPct - b.marginPct)
+      .slice(0, 20)
+      .map((l) => {
+        const s = saleById.get(l.saleId);
+        const it = itemById.get(l.itemId);
+        return {
+          saleId: l.saleId,
+          invoiceNo: s?.invoiceNo ?? '?',
+          createdAt: s?.createdAt.toISOString() ?? '',
+          itemName: it?.name ?? l.itemId,
+          quantity: l.quantity,
+          unitPrice: round2(l.unitPrice),
+          costAtSaleTime: round2(l.costAtSaleTime),
+          marginPct: l.marginPct,
+        };
+      });
+
+    const highDiscountSales = sales
+      .filter((s) => Number(s.discount) > 0 && Number(s.totalAmount) > 0)
+      .sort((a, b) => Number(b.discount) - Number(a.discount))
+      .slice(0, 20)
+      .map((s) => ({
+        saleId: s.id,
+        invoiceNo: s.invoiceNo,
+        createdAt: s.createdAt.toISOString(),
+        customerName: s.customer?.name ?? 'Walk-in',
+        totalAmount: round2(Number(s.totalAmount)),
+        discount: round2(Number(s.discount)),
+        discountPct: round2(
+          (Number(s.discount) / Number(s.totalAmount)) * 100,
+        ),
+      }));
+
+    return {
+      from: fromStr ?? null,
+      to: toStr ?? null,
+      byBrand,
+      lowestMarginSales,
+      highDiscountSales,
     };
   }
 }

@@ -39,6 +39,8 @@ import { SequenceModule } from './modules/sequences/sequence.module';
 import { PeriodsModule } from './modules/periods/periods.module';
 import { JournalsModule } from './modules/journals/journal.module';
 import { ItemSerialsModule } from './modules/item-serials/item-serials.module';
+import { ServiceTicketsModule } from './modules/service-tickets/service-tickets.module';
+import { DeliveriesModule } from './modules/deliveries/deliveries.module';
 
 function buildDbOptions(): TypeOrmModuleOptions {
   const useSqlite = !process.env.DATABASE_URL;
@@ -111,6 +113,8 @@ function buildDbOptions(): TypeOrmModuleOptions {
     ErrorLogsModule,
     UsersModule,
     ItemSerialsModule,
+    ServiceTicketsModule,
+    DeliveriesModule,
   ],
   controllers: [AppController],
   providers: [AppService, SqliteCheckpointService],

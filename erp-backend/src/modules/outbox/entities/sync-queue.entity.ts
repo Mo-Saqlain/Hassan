@@ -36,6 +36,15 @@ export class SyncQueueEntry {
   @Column({ type: 'text', nullable: true })
   error?: string;
 
+  /**
+   * When we last tried to push this row. Used by the poison-pill skip logic
+   * — once a row is FAILED we don't retry it on every Sync click (an
+   * intermittent server-side bug would never stop spamming the user with
+   * banner notifications). The user has to explicitly clear / fix the row.
+   */
+  @Column({ name: 'last_attempt_at', type: Date, nullable: true })
+  lastAttemptAt?: Date;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

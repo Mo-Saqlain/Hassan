@@ -68,6 +68,13 @@ export class BackupController {
     return this.service.setScheduledHour(dto.hour);
   }
 
+  /** Re-hash the stored file and confirm it matches the saved checksum. */
+  @SuperuserOnly()
+  @Post(':id/verify')
+  verify(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.verify(id);
+  }
+
   /** Download a previously-saved backup file by id. SUPERUSER role required. */
   @SuperuserOnly()
   @Get(':id/download')

@@ -11,7 +11,6 @@ export default function VoucherPage({ direction }) {
   const title = direction === 'IN' ? 'Receipts' : 'Payments';
   const partyLabel = direction === 'IN' ? 'Customer' : 'Supplier';
   const partyKey = direction === 'IN' ? 'customerId' : 'supplierId';
-  const partyPath = direction === 'IN' ? '/customers' : '/suppliers';
   // Surface a per-party running balance next to the picker so cashiers
   // can see how much is outstanding before deciding the amount. For
   // suppliers a positive balance means we owe them; for customers a

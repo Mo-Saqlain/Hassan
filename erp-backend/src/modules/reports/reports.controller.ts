@@ -115,6 +115,23 @@ export class ReportsController {
     return this.service.itemMargins(from, to);
   }
 
+  /** Sales aged by item: how long since the unit last moved off the shelf.
+   *  Surfaces dead-stock value + the slowest brands. Query: `asOf`. */
+  @Get('slow-moving-stock')
+  slowMovingStock(@Query('asOf') asOf?: string) {
+    return this.service.slowMovingStock(asOf);
+  }
+
+  /** Brand-level margin roll-up + lowest-margin sales + high-discount sales.
+   *  Powers the "Margins" tab on Financials. */
+  @Get('margin-analytics')
+  marginAnalytics(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.marginAnalytics(from, to);
+  }
+
   @Get('trial-balance')
   trialBalance(@Query('asOf') asOf?: string) {
     return this.service.trialBalance(asOf);

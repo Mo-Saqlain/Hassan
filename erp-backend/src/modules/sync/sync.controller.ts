@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { SyncService } from './sync.service';
 import { SyncPushDto } from './dto/sync-push.dto';
 import { Public } from '../users/auth.decorators';
@@ -36,7 +36,20 @@ export class SyncController {
       cloudConfigured: !!process.env.CLOUD_SYNC_URL,
       cloudUrl: process.env.CLOUD_SYNC_URL ?? null,
       pending: await this.service.pendingCount(),
+      failed: await this.service.failedCount(),
     };
+  }
+
+  /** Poison-pill review list — every FAILED row + its last error message. */
+  @Get('failed')
+  failed() {
+    return this.service.listFailed();
+  }
+
+  /** Reset a single FAILED row to PENDING so the next flush retries it. */
+  @Post('failed/:id/retry')
+  retryFailed(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.retryFailed(id);
   }
 
   /**

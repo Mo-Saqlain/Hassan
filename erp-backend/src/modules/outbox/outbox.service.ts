@@ -34,12 +34,39 @@ export class OutboxService {
     return this.repo.count({ where: { status: 'PENDING' as SyncQueueStatus } });
   }
 
-  pending(limit = 50) {
+  countFailed() {
+    return this.repo.count({ where: { status: 'FAILED' as SyncQueueStatus } });
+  }
+
+  /**
+   * Returns every PENDING row, no row limit. Poison-pill isolation in the
+   * sync service handles per-event failures so a misbehaving row never
+   * stalls the queue — there's no benefit to chunking and a real cost to
+   * leaving healthy events behind every click.
+   */
+  pending() {
     return this.repo.find({
       where: { status: 'PENDING' as SyncQueueStatus },
       order: { createdAt: 'ASC' },
-      take: limit,
     });
+  }
+
+  /** FAILED rows — surfaced in the banner so the operator can review/clear. */
+  failed() {
+    return this.repo.find({
+      where: { status: 'FAILED' as SyncQueueStatus },
+      order: { lastAttemptAt: 'DESC' },
+      take: 200,
+    });
+  }
+
+  /** Reset a FAILED row to PENDING so the next Sync click retries it. */
+  async retry(id: string) {
+    const row = await this.repo.findOne({ where: { id } });
+    if (!row) return null;
+    row.status = 'PENDING' as SyncQueueStatus;
+    row.error = undefined;
+    return this.repo.save(row);
   }
 
   save(entry: SyncQueueEntry) {

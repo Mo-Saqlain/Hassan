@@ -95,6 +95,31 @@ export class PurchasesService {
           manager,
         );
 
+        // Weighted-average cost roll-up. New avgCost is the value-weighted
+        // mean of the existing stock and this batch:
+        //   newAvg = (oldQty * oldAvg + inQty * unitPrice) / (oldQty + inQty)
+        // When existing stock is zero we just take the batch price. The
+        // `purchasePrice` field on the Item is kept for UI defaulting but
+        // is no longer used for COGS.
+        const itemForCost = await itemRepo.findOne({ where: { id: ln.itemId } });
+        if (itemForCost) {
+          const oldQty = Number(itemForCost.costedQty) || 0;
+          const oldAvg = Number(itemForCost.avgCost) || 0;
+          const inQty = Number(ln.quantity);
+          const inCost = Number(ln.unitPrice);
+          const newQty = oldQty + inQty;
+          const newAvg =
+            newQty > 0
+              ? Number(
+                  ((oldQty * oldAvg + inQty * inCost) / newQty).toFixed(2),
+                )
+              : 0;
+          itemForCost.costedQty = newQty;
+          itemForCost.avgCost = newAvg;
+          itemForCost.purchasePrice = inCost; // latest-cost reference for UI
+          await itemRepo.save(itemForCost);
+        }
+
         // Optional per-line serial intake: the salesman can paste a list of
         // manufacturer serials into the form. Mismatched count vs quantity
         // is tolerated — the deficit gets filled at sale time, the surplus
@@ -227,6 +252,7 @@ export class PurchasesService {
         );
       }
 
+      const itemRepo = manager.getRepository(Item);
       for (const ln of p.lines) {
         await this.stockService.recordMovement(
           {
@@ -240,6 +266,15 @@ export class PurchasesService {
           },
           manager,
         );
+        // Decrement costedQty. avgCost is left in place — we can't reliably
+        // un-roll a weighted average without remembering the prior state,
+        // and the next purchase will recompute it correctly from the new
+        // (lower) qty anyway.
+        const it = await itemRepo.findOne({ where: { id: ln.itemId } });
+        if (it) {
+          it.costedQty = Math.max(0, Number(it.costedQty) - Number(ln.quantity));
+          await itemRepo.save(it);
+        }
       }
 
       p.reversedAt = new Date();

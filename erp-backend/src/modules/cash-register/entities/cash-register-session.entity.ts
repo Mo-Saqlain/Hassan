@@ -58,6 +58,19 @@ export class CashRegisterSession extends BaseEntity {
   })
   actualClosing?: number;
 
+  /**
+   * Denomination breakdown captured at close time. Map of note value → count.
+   * Persisted as JSON so reconciliation reports can show "two 5000s short"
+   * rather than just a numeric variance. The close modal auto-sums to
+   * `actualClosing` so the cashier never types the total directly.
+   */
+  @Column({
+    type: 'simple-json',
+    name: 'closing_denominations',
+    nullable: true,
+  })
+  closingDenominations?: Record<string, number>;
+
   @Column('decimal', {
     precision: 14,
     scale: 2,

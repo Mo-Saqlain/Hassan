@@ -554,24 +554,51 @@ function OpenSessionForm({ accounts, date, expectedOpening, onCancel, onSaved })
   );
 }
 
+// Note denominations the cashier might see in a Pakistani till — owner can
+// ignore any rows that aren't relevant on the day. Order from biggest to
+// smallest so the "5000 short by one" pattern is the first thing you spot.
+const DENOMINATIONS = [5000, 1000, 500, 100, 50, 20, 10];
+
 function CloseSessionForm({ session, expectedClosing, onCancel, onSaved }) {
-  const [actual, setActual] = useState('');
+  // Counts keyed by note value. Auto-sums into `actual` so the cashier
+  // never types the total directly — fewer fat-fingered closings, easier
+  // variance investigation.
+  const [counts, setCounts] = useState({});
+  const [actualOverride, setActualOverride] = useState(''); // optional manual override
   const [notes, setNotes] = useState('');
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  useUnsavedChangesPrompt(actual !== '' || notes !== '');
-
-  const actualNum = Number(actual || 0);
+  const denomTotal = DENOMINATIONS.reduce(
+    (s, d) => s + d * (Number(counts[d]) || 0),
+    0,
+  );
+  const actualNum =
+    actualOverride !== '' ? Number(actualOverride || 0) : denomTotal;
   const diff = actualNum - Number(expectedClosing);
+
+  useUnsavedChangesPrompt(
+    Object.values(counts).some((v) => v) ||
+      actualOverride !== '' ||
+      notes !== '',
+  );
 
   const submit = async (e) => {
     e.preventDefault();
     setErr(null);
     setSaving(true);
     try {
+      // Drop zero / blank counts so the persisted JSON stays small and the
+      // variance report doesn't show "0 × 50" rows for every shift.
+      const compactDenoms = Object.fromEntries(
+        Object.entries(counts)
+          .filter(([, v]) => Number(v) > 0)
+          .map(([k, v]) => [k, Number(v)]),
+      );
       await api.post(`/cash-register/sessions/${session.sessionDate}/close`, {
         actualClosing: actualNum,
+        closingDenominations:
+          Object.keys(compactDenoms).length > 0 ? compactDenoms : undefined,
         notes: notes || undefined,
       });
       onSaved();
@@ -594,13 +621,10 @@ function CloseSessionForm({ session, expectedClosing, onCancel, onSaved }) {
         <div>
           <label>Actual Cash Counted *</label>
           <input
-            type="number"
-            step="any"
-            min="0"
-            required
-            value={actual}
-            onChange={(e) => setActual(e.target.value)}
-            autoFocus
+            value={fmt(actualNum)}
+            readOnly
+            style={{ fontWeight: 600 }}
+            title="Auto-summed from the denomination counts below. Override manually only if you don't have time to count by note."
           />
         </div>
         <div>
@@ -619,6 +643,86 @@ function CloseSessionForm({ session, expectedClosing, onCancel, onSaved }) {
           />
         </div>
       </div>
+
+      <fieldset
+        style={{
+          marginTop: 10,
+          border: '1px solid var(--border)',
+          padding: '8px 12px',
+        }}
+      >
+        <legend style={{ fontSize: 12, padding: '0 6px' }}>
+          Denomination breakdown
+        </legend>
+        <table style={{ width: 'auto', minWidth: 360 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'right' }}>Note</th>
+              <th style={{ textAlign: 'right' }}>Count</th>
+              <th style={{ textAlign: 'right' }}>Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {DENOMINATIONS.map((d) => {
+              const c = Number(counts[d]) || 0;
+              return (
+                <tr key={d}>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                    Rs {d.toLocaleString()}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={counts[d] ?? ''}
+                      onChange={(e) =>
+                        setCounts({ ...counts, [d]: e.target.value })
+                      }
+                      style={{ width: 80, textAlign: 'right' }}
+                    />
+                  </td>
+                  <td
+                    style={{
+                      textAlign: 'right',
+                      fontFamily: 'var(--font-mono)',
+                      color: c > 0 ? 'var(--text)' : 'var(--text-muted)',
+                    }}
+                  >
+                    {fmt(d * c)}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr>
+              <td colSpan={2} style={{ textAlign: 'right', fontWeight: 600 }}>
+                Total
+              </td>
+              <td
+                style={{
+                  textAlign: 'right',
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                {fmt(denomTotal)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+          Or override the total directly:{' '}
+          <input
+            type="number"
+            step="any"
+            min="0"
+            value={actualOverride}
+            onChange={(e) => setActualOverride(e.target.value)}
+            placeholder="e.g. 187550"
+            style={{ width: 120, marginLeft: 6 }}
+          />
+        </div>
+      </fieldset>
       <div>
         <label>Closing Notes</label>
         <textarea

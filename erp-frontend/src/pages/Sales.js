@@ -71,28 +71,32 @@ export default function Sales() {
                 <td className="right">{Number(s.paidAmount ?? 0).toFixed(2)}</td>
                 <td>{s.paymentMethod}</td>
                 <td>
-                  {s.expectedPaymentDate
-                    ? (() => {
-                        const due = Number(s.dueAmount ?? 0);
-                        const promise = new Date(s.expectedPaymentDate);
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        const overdue = due > 0 && promise < today;
-                        const promiseStr = promise.toLocaleDateString();
-                        return (
-                          <span
-                            className={`chip ${overdue ? 'chip-danger' : 'chip-info'}`}
-                            title={
-                              overdue
-                                ? `Promised by ${promiseStr} — overdue`
-                                : `Promised by ${promiseStr}`
-                            }
-                          >
-                            {overdue ? `Overdue · ${promiseStr}` : promiseStr}
-                          </span>
-                        );
-                      })()
-                    : '—'}
+                  {(() => {
+                    // First PENDING commitment is the next thing the
+                    // customer owes by a specific date. If they're already
+                    // past it and still haven't paid in full, flag danger.
+                    const next = (s.paymentCommitments ?? []).find(
+                      (c) => c.status === 'PENDING',
+                    );
+                    if (!next) return '—';
+                    const promise = new Date(next.dueDate);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const overdue = promise < today;
+                    const promiseStr = promise.toLocaleDateString();
+                    return (
+                      <span
+                        className={`chip ${overdue ? 'chip-danger' : 'chip-info'}`}
+                        title={
+                          overdue
+                            ? `Promised by ${promiseStr} — overdue`
+                            : `Promised by ${promiseStr}`
+                        }
+                      >
+                        {overdue ? `Overdue · ${promiseStr}` : promiseStr}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="right">
                   <div

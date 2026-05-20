@@ -3,6 +3,43 @@ import { api } from '../api/client';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import Icon from '../components/Icon';
 
+/**
+ * Keyboard shortcuts wired into the POS shell:
+ *   F2  → focus the scan input (jump back to scanning without using the mouse)
+ *   F4  → focus the customer picker
+ *   F8  → trigger checkout
+ *   F9  → clear cart (with confirm)
+ * Reduces mouse trips during a busy till session.
+ */
+function usePosShortcuts({ scanInputRef, onClearCart, onCheckout }) {
+  useEffect(() => {
+    const handler = (e) => {
+      // F-keys are unmodified by convention; any modifier means the user is
+      // doing something else (Alt+F8, Ctrl+F4, etc.) so we bail out.
+      if (e.altKey || e.metaKey || e.ctrlKey) return;
+      if (e.key === 'F2') {
+        e.preventDefault();
+        scanInputRef.current?.focus();
+        scanInputRef.current?.select?.();
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        const sel = document.querySelector(
+          'aside.pos-summary select[aria-label="Customer"], aside.pos-summary select',
+        );
+        sel?.focus();
+      } else if (e.key === 'F8') {
+        e.preventDefault();
+        onCheckout?.();
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        onClearCart?.();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [scanInputRef, onClearCart, onCheckout]);
+}
+
 export default function POS() {
   const [session, setSession] = useState(null);
   const [cart, setCart] = useState([]);
@@ -196,6 +233,20 @@ export default function POS() {
       alert(err.uiMessage ?? 'Remove failed');
     }
   };
+
+  // Keyboard shortcuts: F2 scan, F4 customer, F8 checkout, F9 clear cart.
+  usePosShortcuts({
+    scanInputRef,
+    onClearCart: () => clearCart(),
+    onCheckout: () => {
+      // Click the actual checkout button so we go through whatever guards
+      // the form has (busy-state, validation messages).
+      const btn = document.querySelector(
+        'aside.pos-summary button[type="submit"], aside.pos-summary .btn-primary',
+      );
+      if (btn instanceof HTMLButtonElement && !btn.disabled) btn.click();
+    },
+  });
 
   const clearCart = async () => {
     if (cart.length === 0) return;

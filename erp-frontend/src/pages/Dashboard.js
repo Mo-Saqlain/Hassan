@@ -41,6 +41,7 @@ export default function Dashboard() {
     activity: [],
     incentive: null,
     allSales: [],
+    deferred: [],
   });
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -69,6 +70,7 @@ export default function Dashboard() {
           payments,
           transfers,
           targets,
+          deferred,
         ] = await Promise.all([
           api.get(`/cash-register/day?date=${todayStr}`),
           api.get('/stock/summary'),
@@ -80,6 +82,7 @@ export default function Dashboard() {
           api.get('/payments'),
           api.get('/fund-transfers'),
           api.get('/incentives/targets/progress').catch(() => ({ data: [] })),
+          api.get('/sales/deferred/upcoming').catch(() => ({ data: [] })),
         ]);
 
         // ─ Today's sales (cash + non-cash, from sale.netAmount)
@@ -195,6 +198,7 @@ export default function Dashboard() {
           activity,
           incentive,
           allSales: sales.data ?? [],
+          deferred: deferred.data ?? [],
         });
       } catch (e) {
         setError(e.uiMessage ?? 'Failed to load dashboard');
@@ -417,6 +421,66 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {data.deferred.length > 0 && (
+          <div className="card" style={{ padding: 20 }}>
+            <div className="eyebrow">Upcoming deferred collections</div>
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+              Customer pay-later promises landing within the next 7 days.
+            </div>
+            <div style={{ marginTop: 10 }}>
+              {data.deferred.slice(0, 6).map((c) => (
+                <div
+                  key={`${c.saleId}-${c.commitmentIndex}`}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 0',
+                    borderBottom: '1px dashed var(--border)',
+                    gap: 8,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{c.customerName}</div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--text-muted)',
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {c.invoiceNo}
+                      {c.customerPhone ? ` · ${c.customerPhone}` : ''}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {Rs(c.remainingAmount)}
+                    </div>
+                    <span
+                      className={`chip ${c.overdue ? 'chip-danger' : 'chip-info'}`}
+                      style={{ fontSize: 10.5 }}
+                    >
+                      {c.overdue ? 'Overdue · ' : 'Due '}
+                      {new Date(c.dueDate).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {data.deferred.length > 6 && (
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  + {data.deferred.length - 6} more in the next week
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div
           className="card"

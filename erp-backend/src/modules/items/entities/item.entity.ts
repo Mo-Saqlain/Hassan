@@ -59,8 +59,47 @@ export class Item extends BaseEntity {
   })
   categories: Category[];
 
+  /**
+   * Last vendor purchase price. Kept as a UI "recommended cost" reference
+   * only — COGS is computed from the weighted-average running cost below.
+   * Reading this field for accounting purposes is a bug; reading it as a
+   * default for the next purchase form is the intended use.
+   */
   @Column('decimal', { precision: 14, scale: 2, name: 'purchase_price', default: 0 })
   purchasePrice: number;
+
+  /**
+   * Running weighted-average unit cost. Updated on every IN movement that
+   * carries a purchase price (Purchases, purchase-reversal undo). Other IN
+   * sources (sale returns, stock-found adjustments) preserve the average.
+   * The Sales journal posts COGS using a snapshot of this value taken at
+   * sale time and stored on the SaleItem row.
+   */
+  @Column('decimal', {
+    precision: 14,
+    scale: 2,
+    name: 'avg_cost',
+    default: 0,
+  })
+  avgCost: number;
+
+  /**
+   * Quantity that contributed to the current `avgCost`. Decremented by OUT
+   * movements (sale, damage, write-off) and incremented by IN movements.
+   * Together with `avgCost` it's the (qty, value) pair the rolling weighted
+   * average is computed over: total inventory value = qty × avgCost.
+   */
+  @Column({ type: 'integer', name: 'costed_qty', default: 0 })
+  costedQty: number;
+
+  /**
+   * Quantity reserved against pending deliveries / sales orders. The Stock
+   * summary surfaces `available = costedQty - reservedQty` so the cashier
+   * can't accidentally sell stock that's been promised to a different
+   * customer. Adjusted by the Delivery service; not user-editable.
+   */
+  @Column({ type: 'integer', name: 'reserved_qty', default: 0 })
+  reservedQty: number;
 
   @Column('decimal', { precision: 14, scale: 2, name: 'sale_price', default: 0 })
   salePrice: number;

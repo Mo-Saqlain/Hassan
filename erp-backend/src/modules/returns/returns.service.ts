@@ -60,7 +60,8 @@ export class ReturnsService {
         }),
       );
 
-      // Sale return → stock IN (goods come back)
+      // Sale return → stock IN (goods come back). Restore the costed
+      // quantity so the weighted-average accounting stays balanced.
       for (const ln of saved.lines) {
         await this.stockService.recordMovement(
           {
@@ -73,6 +74,11 @@ export class ReturnsService {
           },
           manager,
         );
+        const it = await itemRepo.findOne({ where: { id: ln.itemId } });
+        if (it) {
+          it.costedQty = Number(it.costedQty) + Number(ln.quantity);
+          await itemRepo.save(it);
+        }
       }
 
       // Flip each returned serial back to RETURNED. We honour what the user
@@ -134,7 +140,9 @@ export class ReturnsService {
         }),
       );
 
-      // Purchase return → stock OUT (goods leave warehouse)
+      // Purchase return → stock OUT (goods leave warehouse). Drop the costed
+      // qty so the next purchase doesn't dilute the weighted average against
+      // units that no longer exist.
       for (const ln of saved.lines) {
         await this.stockService.recordMovement(
           {
@@ -147,6 +155,11 @@ export class ReturnsService {
           },
           manager,
         );
+        const it = await itemRepo.findOne({ where: { id: ln.itemId } });
+        if (it) {
+          it.costedQty = Math.max(0, Number(it.costedQty) - Number(ln.quantity));
+          await itemRepo.save(it);
+        }
       }
       return saved;
     });

@@ -262,20 +262,48 @@ export default function Stock() {
               <th>Item</th>
               <th>SKU</th>
               <th className="right">On Hand</th>
+              <th className="right" title="Promised to pending deliveries / sales orders.">Reserved</th>
+              <th className="right" title="onHand − reserved. This is what's actually sellable right now.">Available</th>
               <th className="right">Min Level</th>
+              <th className="right" title="Weighted-average unit cost (running). Updated by purchases.">Avg cost</th>
+              <th className="right" title="onHand × avg cost — money currently locked in inventory.">Value</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((row) => {
+              const available = row.available ?? row.onHand;
               const low =
-                row.minStockLevel > 0 && row.onHand < row.minStockLevel;
+                row.minStockLevel > 0 && available < row.minStockLevel;
               return (
                 <tr key={row.itemId}>
                   <td>{row.itemName}</td>
                   <td>{row.sku}</td>
                   <td className="right">{row.onHand}</td>
+                  <td
+                    className="right"
+                    style={{
+                      color:
+                        Number(row.reservedQty) > 0
+                          ? 'var(--warning)'
+                          : 'var(--text-muted)',
+                    }}
+                  >
+                    {row.reservedQty ?? 0}
+                  </td>
+                  <td
+                    className="right"
+                    style={{ fontWeight: 600 }}
+                  >
+                    {available}
+                  </td>
                   <td className="right">{row.minStockLevel}</td>
+                  <td className="right" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {Number(row.avgCost ?? 0).toFixed(2)}
+                  </td>
+                  <td className="right" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {Number(row.valueAtCost ?? 0).toFixed(0)}
+                  </td>
                   <td>
                     <span className={`badge ${low ? 'badge-red' : 'badge-green'}`}>
                       {low ? 'Low' : 'OK'}

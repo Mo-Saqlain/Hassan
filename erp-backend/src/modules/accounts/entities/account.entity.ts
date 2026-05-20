@@ -17,7 +17,8 @@ export type AccountType =
   | 'INVENTORY'
   | 'A_R'
   | 'A_P'
-  | 'CASH_ON_HAND';
+  | 'CASH_ON_HAND'
+  | 'DEFERRED_RECEIVABLE';
 
 /**
  * Financial-statement bucket. Income Statement reads INCOME + EXPENSE;

@@ -48,6 +48,8 @@ import AccountLedger from './pages/AccountLedger';
 import Financials from './pages/Financials';
 import InvoicePrint from './pages/InvoicePrint';
 import WarrantyLookup from './pages/WarrantyLookup';
+import ServiceTickets from './pages/ServiceTickets';
+import Deliveries from './pages/Deliveries';
 
 export default function App() {
   return (
@@ -77,6 +79,8 @@ export default function App() {
               <Route path="receipts" element={<Receipts />} />
               <Route path="customer-ledger" element={<CustomerLedger />} />
               <Route path="warranty-lookup" element={<WarrantyLookup />} />
+              <Route path="service-tickets" element={<ServiceTickets />} />
+              <Route path="deliveries" element={<Deliveries />} />
               <Route path="customer-ledger/:id" element={<CustomerLedger />} />
             </Route>
 

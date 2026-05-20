@@ -29,6 +29,10 @@ const SYSTEM_ACCOUNTS: ReadonlyArray<{
   // Unallocated cash receipts (e.g. a POS test without an account picker) land
   // here. The user can rename it but not delete it; the journal still balances.
   { type: 'CASH_ON_HAND', name: 'Cash on Hand',        code: '1110', category: 'ASSET',     subType: 'CURRENT_ASSET',    parentCode: '1100' },
+  // Deferred Cash Receivables — separate from open A/R so the dashboard
+  // widget and Balance Sheet can distinguish "scheduled to land on a
+  // specific date" from "open-ended credit". A sub-bucket of receivables.
+  { type: 'DEFERRED_RECEIVABLE', name: 'Deferred Cash Receivables', code: '1145', category: 'ASSET', subType: 'RECEIVABLE', parentCode: '1100' },
 ];
 
 /**
@@ -61,6 +65,7 @@ function categoryForType(type: AccountType): AccountCategory {
     case 'INVENTORY':
     case 'A_R':
     case 'CASH_ON_HAND':
+    case 'DEFERRED_RECEIVABLE':
       return 'ASSET';
     case 'CREDIT':
     case 'A_P':

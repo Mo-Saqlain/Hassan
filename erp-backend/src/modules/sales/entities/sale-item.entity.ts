@@ -29,4 +29,18 @@ export class SaleItem extends BaseEntity {
 
   @Column('decimal', { precision: 14, scale: 2, name: 'line_total' })
   lineTotal: number;
+
+  /**
+   * Weighted-average unit cost at the moment the sale was rung up. Snapshotted
+   * onto the line so historical COGS / margin reports don't shift retroactively
+   * when later purchases move the running average. The journal posts COGS using
+   * this value, not `item.purchasePrice` (which only reflects "latest" cost).
+   */
+  @Column('decimal', {
+    precision: 14,
+    scale: 2,
+    name: 'cost_at_sale_time',
+    default: 0,
+  })
+  costAtSaleTime: number;
 }

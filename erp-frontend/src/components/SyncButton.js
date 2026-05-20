@@ -16,11 +16,12 @@ import Icon from './Icon';
  */
 export default function SyncButton() {
   const [pending, setPending] = useState(0);
+  const [failed, setFailed] = useState(0);
   const [cloudConfigured, setCloudConfigured] = useState(false);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState(null); // { tone, text } | null
 
-  // Initial + periodic status poll. /sync/status is cheap (just a count).
+  // Initial + periodic status poll. /sync/status is cheap (just two counts).
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
@@ -28,6 +29,7 @@ export default function SyncButton() {
         const r = await api.get('/sync/status');
         if (cancelled) return;
         setPending(r.data?.pending ?? 0);
+        setFailed(r.data?.failed ?? 0);
         setCloudConfigured(!!r.data?.cloudConfigured);
       } catch {
         if (cancelled) return;
@@ -61,10 +63,12 @@ export default function SyncButton() {
       } else {
         flashFor('err', s.message || 'Sync failed.');
       }
-      // Refresh pending count after a run.
+      // Refresh pending + failed counts after a run so the poison-pill
+      // banner reflects whatever the server just decided.
       try {
         const st = await api.get('/sync/status');
         setPending(st.data?.pending ?? 0);
+        setFailed(st.data?.failed ?? 0);
       } catch {
         /* ignore */
       }
@@ -79,9 +83,11 @@ export default function SyncButton() {
 
   const title = busy
     ? 'Syncing…'
-    : pending > 0
-      ? `Sync now — ${pending} event${pending === 1 ? '' : 's'} pending`
-      : 'Sync now — outbox is empty';
+    : failed > 0
+      ? `Sync now — ${pending} pending, ${failed} skipped due to errors`
+      : pending > 0
+        ? `Sync now — ${pending} event${pending === 1 ? '' : 's'} pending`
+        : 'Sync now — outbox is empty';
 
   return (
     <div style={{ position: 'relative', display: 'inline-flex' }}>

@@ -132,6 +132,8 @@ export class StockService {
       .addSelect('item.name', 'itemName')
       .addSelect('item.sku', 'sku')
       .addSelect('item.min_stock_level', 'minStockLevel')
+      .addSelect('item.reserved_qty', 'reservedQty')
+      .addSelect('item.avg_cost', 'avgCost')
       .addSelect(
         "SUM(CASE WHEN m.type = 'IN' THEN m.quantity ELSE -m.quantity END)",
         'onHand',
@@ -140,15 +142,28 @@ export class StockService {
       .addGroupBy('item.name')
       .addGroupBy('item.sku')
       .addGroupBy('item.min_stock_level')
+      .addGroupBy('item.reserved_qty')
+      .addGroupBy('item.avg_cost')
       .orderBy('item.name', 'ASC')
       .getRawMany();
 
-    return rows.map((r) => ({
-      itemId: r.itemId,
-      itemName: r.itemName,
-      sku: r.sku,
-      minStockLevel: Number(r.minStockLevel ?? 0),
-      onHand: Number(r.onHand ?? 0),
-    }));
+    return rows.map((r) => {
+      const onHand = Number(r.onHand ?? 0);
+      const reservedQty = Number(r.reservedQty ?? 0);
+      return {
+        itemId: r.itemId,
+        itemName: r.itemName,
+        sku: r.sku,
+        minStockLevel: Number(r.minStockLevel ?? 0),
+        onHand,
+        reservedQty,
+        // `available` is the user-meaningful figure on the POS path —
+        // physically on hand minus units already promised to a pending
+        // delivery / sales order.
+        available: Math.max(0, onHand - reservedQty),
+        avgCost: Number(r.avgCost ?? 0),
+        valueAtCost: Number((onHand * Number(r.avgCost ?? 0)).toFixed(2)),
+      };
+    });
   }
 }

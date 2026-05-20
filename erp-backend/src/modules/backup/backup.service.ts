@@ -8,6 +8,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Between, MoreThanOrEqual, Repository } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { Backup, BackupTrigger } from './entities/backup.entity';
 import { Setting } from '../../common/entities/setting.entity';
 
@@ -110,6 +111,11 @@ export class BackupService {
     const filePath = path.join(this.backupDir, fileName);
     await fs.promises.writeFile(filePath, json, 'utf8');
     const sizeBytes = Buffer.byteLength(json, 'utf8');
+    // SHA-256 over the JSON bytes. Stored on the row so the restore flow
+    // can detect file corruption / tampering before it wipes the live DB,
+    // and so the History page can surface a green/red verification dot
+    // per file.
+    const sha256 = crypto.createHash('sha256').update(json, 'utf8').digest('hex');
     const row = this.repo.create({
       fileName,
       filePath,
@@ -117,6 +123,8 @@ export class BackupService {
       format: 'JSON',
       trigger,
       notes,
+      sha256,
+      verifiedAt: new Date(),
     });
     const saved = await this.repo.save(row);
     this.logger.log(
@@ -160,6 +168,30 @@ export class BackupService {
       );
     }
     return { row, stream: fs.createReadStream(row.filePath) };
+  }
+
+  /**
+   * Re-hash a stored backup file and compare to the saved checksum. Updates
+   * `verifiedAt` on success. Returns `{ ok, sha256, expected }`. The
+   * restore flow calls this first so a corrupted file never overwrites the
+   * live DB; the History page exposes it as a per-row "Verify" button.
+   */
+  async verify(
+    id: string,
+  ): Promise<{ ok: boolean; sha256: string; expected: string | null; missing: boolean }> {
+    const row = await this.findOne(id);
+    if (!fs.existsSync(row.filePath)) {
+      return { ok: false, sha256: '', expected: row.sha256 ?? null, missing: true };
+    }
+    const data = await fs.promises.readFile(row.filePath, 'utf8');
+    const sha256 = crypto.createHash('sha256').update(data, 'utf8').digest('hex');
+    const ok = row.sha256 == null ? true : row.sha256 === sha256;
+    if (ok) {
+      row.verifiedAt = new Date();
+      if (row.sha256 == null) row.sha256 = sha256; // backfill legacy rows
+      await this.repo.save(row);
+    }
+    return { ok, sha256, expected: row.sha256 ?? null, missing: false };
   }
 
   async remove(id: string) {

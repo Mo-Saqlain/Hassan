@@ -27,4 +27,18 @@ export class Backup extends BaseEntity {
 
   @Column({ nullable: true })
   notes?: string;
+
+  /**
+   * SHA-256 of the file's bytes at snapshot time. The restore flow verifies
+   * the file on disk hasn't been edited or corrupted before replaying it,
+   * and the Backup history page surfaces a green / red dot per row so the
+   * operator can spot a stale file at a glance. Null on rows written
+   * before this column existed.
+   */
+  @Column({ nullable: true })
+  sha256?: string;
+
+  /** Last time we verified the file's hash on disk against this row. */
+  @Column({ name: 'verified_at', type: Date, nullable: true })
+  verifiedAt?: Date;
 }

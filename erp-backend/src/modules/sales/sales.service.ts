@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
-import { Sale } from './entities/sale.entity';
+import { Sale, SalePaymentCommitment } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { StockService } from '../stock/stock.service';
@@ -78,15 +78,31 @@ export class SalesService {
           line.unitPrice != null ? line.unitPrice : Number(item.salePrice);
         const lineTotal = Number((unitPrice * line.quantity).toFixed(2));
         totalAmount += lineTotal;
-        totalCogs += Number(item.purchasePrice) * line.quantity;
+
+        // COGS basis = current weighted-average cost, snapshotted onto the
+        // line so historical reports are immutable. Falls back to the legacy
+        // purchase-price when avgCost is still 0 (an item that was created
+        // before this migration and hasn't seen a purchase yet).
+        const unitCost =
+          Number(item.avgCost) > 0
+            ? Number(item.avgCost)
+            : Number(item.purchasePrice);
+        totalCogs += unitCost * line.quantity;
 
         const sl = manager.create(SaleItem, {
           itemId: item.id,
           quantity: line.quantity,
           unitPrice,
           lineTotal,
+          costAtSaleTime: unitCost,
         });
         lines.push(sl);
+
+        // Decrement costedQty so the next purchase's weighted-average roll-up
+        // uses the right denominator. avgCost stays the same — we're just
+        // removing units at the current cost.
+        item.costedQty = Math.max(0, Number(item.costedQty) - line.quantity);
+        await itemRepo.save(item);
       }
 
       const discount = dto.discount ?? 0;
@@ -129,13 +145,14 @@ export class SalesService {
         }
       }
 
-      // Promise-to-pay only meaningful when there's actually a receivable;
-      // silently drop the date on fully-paid sales so the aging report
-      // doesn't have to filter it out later.
-      const expectedPaymentDate =
-        dueAmount > 0 && dto.expectedPaymentDate
-          ? new Date(dto.expectedPaymentDate)
-          : undefined;
+      // Materialise deferred-cash commitments. The caller can supply either
+      // `paymentCommitments` (rich) or the legacy convenience field
+      // `expectedPaymentDate` (one promise, residual). Commitments only make
+      // sense when there's actually a residual; we silently drop them on a
+      // fully-paid sale.
+      const paymentCommitments = dueAmount > 0
+        ? buildCommitments(dueAmount, dto)
+        : undefined;
 
       const sale = saleRepo.create({
         invoiceNo,
@@ -149,7 +166,8 @@ export class SalesService {
         paymentMethod,
         accountId,
         notes: dto.notes,
-        expectedPaymentDate,
+        paymentCommitments,
+        amountPaidSettled: paidAmount,
         lines,
       });
       const persisted = await saleRepo.save(sale);
@@ -182,6 +200,7 @@ export class SalesService {
       const sysCOGS = await this.accounts.findSystem('COGS');
       const sysInventory = await this.accounts.findSystem('INVENTORY');
       const sysAR = await this.accounts.findSystem('A_R');
+      const sysDeferred = await this.accounts.findSystem('DEFERRED_RECEIVABLE');
       const sysCashFallback = await this.accounts.findSystem('CASH_ON_HAND');
 
       const cogs = Number(totalCogs.toFixed(2));
@@ -200,10 +219,20 @@ export class SalesService {
         });
       }
       if (dueAmount > 0) {
+        // Residual lands on Deferred Cash Receivables when the customer
+        // committed to specific dates ("pay half on the 20th"); otherwise
+        // it's plain open-ended A/R. The dashboard widget reads commitments
+        // and shows what's coming due.
+        const residualAccountId =
+          paymentCommitments && paymentCommitments.length > 0
+            ? sysDeferred.id
+            : sysAR.id;
         journalLines.push({
-          accountId: sysAR.id,
+          accountId: residualAccountId,
           debit: dueAmount,
-          narration: `Sale ${invoiceNo} on credit`,
+          narration: paymentCommitments
+            ? `Sale ${invoiceNo} — deferred cash`
+            : `Sale ${invoiceNo} on credit`,
         });
       }
       journalLines.push({
@@ -304,7 +333,11 @@ export class SalesService {
         );
       }
 
-      // Reverse the stock OUTs with corresponding INs.
+      // Reverse the stock OUTs with corresponding INs and restore the costed
+      // quantity so the next weighted-average roll-up has the right
+      // denominator. avgCost is intentionally NOT shifted — the returned
+      // units are assumed to come back at the same cost they left at.
+      const itemRepo = manager.getRepository(Item);
       for (const ln of sale.lines) {
         await this.stockService.recordMovement(
           {
@@ -318,6 +351,11 @@ export class SalesService {
           },
           manager,
         );
+        const it = await itemRepo.findOne({ where: { id: ln.itemId } });
+        if (it) {
+          it.costedQty = Number(it.costedQty) + Number(ln.quantity);
+          await itemRepo.save(it);
+        }
       }
 
       // Flip every serial bound to this invoice back to RETURNED so the
@@ -331,4 +369,234 @@ export class SalesService {
       return saleRepo.save(sale);
     });
   }
+
+  /**
+   * Dashboard / collections feed: every PENDING commitment whose dueDate
+   * falls within the next 7 days (or is already past). Joined with the
+   * customer name + phone so the widget doesn't need a second roundtrip.
+   */
+  async upcomingDeferred(): Promise<
+    Array<{
+      saleId: string;
+      invoiceNo: string;
+      customerId?: string;
+      customerName: string;
+      customerPhone?: string;
+      commitmentIndex: number;
+      dueDate: string;
+      expectedAmount: number;
+      remainingAmount: number;
+      overdue: boolean;
+    }>
+  > {
+    const horizon = new Date();
+    horizon.setDate(horizon.getDate() + 7);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // Pull every sale with a non-empty commitments column. The total row
+    // count for a single-shop ERP is small enough that a Node-side filter is
+    // fine and avoids reaching for dialect-specific JSON operators (SQLite +
+    // Postgres can't share the same `paymentCommitments @> [...]` syntax).
+    const sales = await this.sales
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.customer', 'c')
+      .where('s.paymentCommitments IS NOT NULL')
+      .andWhere('s.reversedAt IS NULL')
+      .getMany();
+    const out: Array<{
+      saleId: string;
+      invoiceNo: string;
+      customerId?: string;
+      customerName: string;
+      customerPhone?: string;
+      commitmentIndex: number;
+      dueDate: string;
+      expectedAmount: number;
+      remainingAmount: number;
+      overdue: boolean;
+    }> = [];
+    for (const s of sales) {
+      const cs = s.paymentCommitments ?? [];
+      for (let i = 0; i < cs.length; i += 1) {
+        const c = cs[i];
+        if (c.status !== 'PENDING') continue;
+        const due = new Date(c.dueDate);
+        if (due > horizon) continue;
+        const remaining = Number(
+          (c.expectedAmount - Number(c.actualAmount ?? 0)).toFixed(2),
+        );
+        if (remaining <= 0) continue;
+        out.push({
+          saleId: s.id,
+          invoiceNo: s.invoiceNo,
+          customerId: s.customerId,
+          customerName: s.customer?.name ?? 'Walk-in',
+          customerPhone: s.customer?.phone,
+          commitmentIndex: i,
+          dueDate: c.dueDate,
+          expectedAmount: c.expectedAmount,
+          remainingAmount: remaining,
+          overdue: due < today,
+        });
+      }
+    }
+    out.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    return out;
+  }
+
+  /**
+   * Settle one of a sale's deferred-cash commitments. Creates the matching
+   * Receipt voucher (so the customer ledger sees a normal payment row),
+   * bumps `amountPaidSettled`, and flips the commitment entry to PAID once
+   * the cumulative settled amount on that entry reaches `expectedAmount`.
+   * Partial settlements are supported — they update `actualAmount` but
+   * leave the status as PENDING until fully cleared.
+   *
+   * Idempotency: re-calling on an already-PAID commitment is a no-op.
+   */
+  async settleCommitment(
+    saleId: string,
+    args: {
+      commitmentIndex: number;
+      accountId: string;
+      amount: number;
+      paidOn?: string;
+      notes?: string;
+    },
+  ): Promise<Sale> {
+    if (args.amount <= 0) {
+      throw new BadRequestException('Settlement amount must be positive.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const saleRepo = manager.getRepository(Sale);
+      const sale = await saleRepo.findOne({ where: { id: saleId } });
+      if (!sale) throw new NotFoundException(`Sale ${saleId} not found`);
+      if (!sale.paymentCommitments || sale.paymentCommitments.length === 0) {
+        throw new BadRequestException('Sale has no deferred commitments.');
+      }
+      const idx = args.commitmentIndex;
+      const c = sale.paymentCommitments[idx];
+      if (!c) {
+        throw new BadRequestException(`Commitment #${idx} does not exist.`);
+      }
+      if (c.status === 'PAID') return sale;
+
+      // Cap the settlement at the remaining residual on this commitment so
+      // an over-payment doesn't write a negative balance. The cashier can
+      // still receive the surplus via a normal RCT voucher against the
+      // customer (customer credit), which is the right primitive.
+      const alreadyOnThis = Number(c.actualAmount ?? 0);
+      const remainingOnThis = Number(c.expectedAmount) - alreadyOnThis;
+      const applied = Math.min(args.amount, remainingOnThis);
+      const overflow = args.amount - applied;
+
+      // Post a Receipt voucher so the customer ledger updates naturally.
+      const seq = await this.sequences.next('RCT', () =>
+        manager.getRepository(Payment).count(),
+      );
+      const voucher = manager.create(Payment, {
+        voucherNo: seq,
+        direction: 'IN' as const,
+        accountId: args.accountId,
+        customerId: sale.customerId,
+        amount: applied,
+        referenceType: 'SALE_COMMITMENT',
+        referenceId: sale.id,
+        notes: args.notes ?? `Settles commitment #${idx} of ${sale.invoiceNo}`,
+      });
+      await manager.getRepository(Payment).save(voucher);
+
+      // Journal: Dr Cash/Bank → Cr Deferred Cash Receivables. The original
+      // sale parked the residual on the Deferred Cash account; this entry
+      // moves it to real money.
+      const sysDeferred = await this.accounts.findSystem('DEFERRED_RECEIVABLE');
+      await this.journals.post(
+        {
+          entryDate: new Date(),
+          sourceModule: 'PAYMENT',
+          sourceRef: seq,
+          description: `Settlement of ${sale.invoiceNo} commitment #${idx}`,
+          lines: [
+            {
+              accountId: args.accountId,
+              debit: applied,
+              narration: `Receipt against ${sale.invoiceNo}`,
+            },
+            {
+              accountId: sysDeferred.id,
+              credit: applied,
+              narration: `Clears deferred portion of ${sale.invoiceNo}`,
+            },
+          ],
+        },
+        manager,
+      );
+
+      // Update the commitment entry. Mark PAID only if fully covered now.
+      const nextActual = alreadyOnThis + applied;
+      c.actualAmount = Number(nextActual.toFixed(2));
+      c.actualPaymentDate = args.paidOn ?? new Date().toISOString().slice(0, 10);
+      c.receiptVoucherNo = seq;
+      if (nextActual >= Number(c.expectedAmount) - 0.005) {
+        c.status = 'PAID';
+      }
+      sale.paymentCommitments = [...sale.paymentCommitments];
+      sale.paymentCommitments[idx] = c;
+      sale.amountPaidSettled = Number(
+        (Number(sale.amountPaidSettled) + applied).toFixed(2),
+      );
+      // The sale's outstanding `dueAmount` also drops by what we just took
+      // — keeps the customer-balance view and the A/R reports in sync.
+      sale.dueAmount = Math.max(
+        0,
+        Number((Number(sale.dueAmount) - applied).toFixed(2)),
+      );
+      const saved = await saleRepo.save(sale);
+
+      // Surface the overflow back to the caller so the UI can route it to
+      // an open-credit voucher instead of silently dropping it.
+      (saved as Sale & { overflow?: number }).overflow = overflow > 0 ? overflow : undefined;
+      return saved;
+    });
+  }
+}
+
+/**
+ * Build the commitments JSON for a fresh sale. Precedence:
+ *   1. Explicit `paymentCommitments[]` from the caller (must sum to the
+ *      residual within rounding; the service balances any leftover into a
+ *      final synthetic entry rather than silently rejecting the sale — the
+ *      cashier always wins on the till).
+ *   2. Legacy `expectedPaymentDate` → one commitment for the full residual.
+ *   3. Neither → no commitments (residual lands as plain A/R, no promise).
+ */
+function buildCommitments(
+  residual: number,
+  dto: CreateSaleDto,
+): SalePaymentCommitment[] | undefined {
+  if (dto.paymentCommitments && dto.paymentCommitments.length > 0) {
+    const list: SalePaymentCommitment[] = dto.paymentCommitments.map((c) => ({
+      dueDate: c.dueDate,
+      expectedAmount: Number(c.expectedAmount.toFixed(2)),
+      status: 'PENDING',
+      notes: c.notes,
+    }));
+    const sum = list.reduce((s, c) => s + c.expectedAmount, 0);
+    const diff = Number((residual - sum).toFixed(2));
+    if (Math.abs(diff) > 0.005) {
+      const last = list[list.length - 1];
+      last.expectedAmount = Number((last.expectedAmount + diff).toFixed(2));
+    }
+    return list;
+  }
+  if (dto.expectedPaymentDate) {
+    return [
+      {
+        dueDate: dto.expectedPaymentDate,
+        expectedAmount: residual,
+        status: 'PENDING',
+      },
+    ];
+  }
+  return undefined;
 }
