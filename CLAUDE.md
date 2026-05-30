@@ -91,23 +91,29 @@ BACKUP_DIR=      # daily backups land here; Electron forces <userData>/backups
 
 ## Domain model essentials
 
-- **Items** — unique `sku` (auto-derived from Model No on collision), optional unique `barcode`, optional `brand_id`, many-to-many with `categories`. POS lookup matches barcode first, then SKU, then model no.
-- **Categories** — self-referencing via `parent_id`. Service prevents self-parenting and cycles.
-- **Sales / Purchases** — header + lines. Service wraps a TypeORM transaction that creates the voucher, lines, and matching `StockMovement` rows atomically. Rollback on stock-insufficient.
+- **Items** — unique `sku` (auto-derived from Model No on collision), optional unique `barcode`, optional `brand_id`, M2M with `categories`. POS lookup matches barcode first, then SKU, then model no. Per-item flags: `tracksSerials`, `serialRequiredOnSale`, `hasWarranty`, `warrantyType`, `warrantyDays`, `isInternalGenerated`. Costing fields: `avgCost` (running weighted-average) + `costedQty` (denominator); `purchasePrice` kept only as a UI-default reference. `reservedQty` is the per-item overlay maintained by the Delivery + (eventually) Quotation modules.
+- **Categories** — self-referencing via `parent_id`. Service prevents self-parenting and cycles. Optional `code` (≤ 8 uppercase chars, e.g. `COOLER`) used as the segment of auto-generated local serials (`LOCAL-<code>-<year>-<seq>`). App-layer uniqueness via `CategoriesService.ensureCodeUnique`.
+- **ItemSerial** — one row per physical unit. Two orthogonal status fields: `status` (IN_STOCK / SOLD / RETURNED / DAMAGED / WRITE_OFF — physical lifecycle) and `allocationStatus` (AVAILABLE / BOOKED / DELIVERED — booking lifecycle). `isInternalGenerated` flags shop-minted local serials. Transitions live on `ItemSerialsService.bindToSale / reserveForBooking / releaseBooking / markDelivered / unbindFromInvoice / markReturned`. Warranty fields (`warrantyType`, `warrantyDays`, `warrantyEndAt`) freeze at sale time so editing the Item template later doesn't rewrite past sales.
+- **Sales / Purchases** — header + lines. Service wraps a TypeORM transaction that creates the voucher, lines, and matching `StockMovement` rows atomically. Rollback on stock-insufficient. Sale carries `paymentCommitments` JSON (deferred-cash schedule), `amountPaidSettled`, and `costAtSaleTime` per line. Reversal posts a balancing journal entry, books inverse stock movements, and walks back allocationStatus (BOOKED→AVAILABLE for un-handed-over goods, DELIVERED→AVAILABLE + status=RETURNED for handed-over goods).
 - **Stock** — append-only `stock_movements` ledger. On-hand = `SUM(IN +q vs OUT -q)`. OUT movements throw `BadRequestException` when on-hand would go negative.
 - **Returns** — sale-return → stock IN (goods come back); purchase-return → stock OUT (goods leave).
-- **Payments** — single table, `direction: 'IN' | 'OUT'`. IN = Receipt (RCT-…), OUT = Payment (PMT-…). Filter via `?direction=`.
-- **POS Session** — a cashier session with running `salesTotal`/`salesCount`. `pos_cart_items` is session-scoped working state, cleared on checkout. Re-scanning the same item stacks the existing cart line. Checkout calls `SalesService.create(..., { skipOutbox: true })` then enqueues its own `POS_SALE_CREATED` outbox event.
-- **Cash register sessions** — one per shop-day, opens with `actual_opening` + (optional) Capital→Cash FundTransfer to cover shortfall. New cash-book entries are blocked client-side once a session is CLOSED.
+- **Payments** — single table, `direction: 'IN' | 'OUT'`. IN = Receipt (RCT-…), OUT = Payment (PMT-…). Filter via `?direction=`. Settling a sale commitment via `POST /sales/:id/settle-commitment` posts a `direction='IN'` payment row + a journal half (Dr Cash / Cr Deferred Cash Receivables) and may flip BOOKED serials → DELIVERED when the balance hits zero.
+- **POS Session** — a cashier session with running `salesTotal`/`salesCount`. `pos_cart_items` is session-scoped working state, cleared on checkout. Re-scanning the same item stacks the existing cart line. Checkout calls `SalesService.create(..., { skipOutbox: true })` then enqueues its own `POS_SALE_CREATED` outbox event. Branches on `dueAmount > 0`: full pay → `bindToSale` (DELIVERED), partial pay → `reserveForBooking` (BOOKED).
+- **Deliveries** — operational tracking. Six statuses. `applyReservation` writes the `Item.reservedQty` overlay. `update()` enforces the **Strict Delivery Handover Authorisation** guard: rejects DELIVERED transition when the linked sale has `dueAmount > 0`.
+- **Service tickets** — seven-status repair workflow. Optional `itemSerialId` link auto-pulls in-warranty status via the warranty endpoint.
+- **Cash register sessions** — one per shop-day. Open + close use the denomination-counter modal (Rs 5000 / 1000 / 500 / 100 / 50 / 20 / 10). Closing JSON persisted as `closingDenominations`.
 - **Fund transfers** — Capital ↔ Cash ↔ Bank ↔ Wallet ↔ Credit. Pure movement of own funds.
-- **Accounts** — five flavours: CASH, BANK, WALLET, CAPITAL, CREDIT.
-- **Reports** — `ReportsService` computes customer/supplier/employee/account ledgers (running balance), stock ledger (filterable by category/brand/supplier), and four financial statements (income / balance sheet / cash flow / changes in equity). The balance sheet's `asOf` filter passes through to `customerLedger`/`supplierLedger`.
+- **Accounts** — five user flavours (CASH, BANK, WALLET, CAPITAL, CREDIT) + 7 seeded system accounts (REVENUE 4100, COGS 5100, INVENTORY 1150, A_R 1140, **DEFERRED_RECEIVABLE 1145**, A_P 2100, CASH_ON_HAND 1110).
+- **Incentive targets** — sell N units to unlock a per-unit incentive. `triggerThresholdPct` (default 80): once net-sold qty crosses this %, the per-unit credit (`incentiveAmount / targetQuantity`) is surfaced on POS as an effective-cost discount via `GET /incentives/cost-adjustments`. Brand-basis targets propagate to all items in the brand; biggest credit wins on stacking.
+- **Reports** — `ReportsService` computes customer/supplier/employee/account ledgers (running balance), stock ledger (filterable by category/brand/supplier), four financial statements (income / balance sheet / cash flow / changes in equity), A/R + A/P aging with `maxDaysElapsed` + `oldestUnpaidDate` + (AR-only) `daysSinceFirstPastPromise`, per-invoice aging detail via `/reports/ar-aging/:customerId` and `/reports/ap-aging/:supplierId`, item margins (using snapshotted `costAtSaleTime`), slow-moving stock buckets, and margin analytics (by brand + low-margin + high-discount slices).
 
 ## Sync event types
 
 - `SALE_CREATED`, `PURCHASE_CREATED` — Phase 1 transactions
 - `POS_SALE_CREATED` — Phase 2 POS sale (treated as `SALE_CREATED` on the cloud receiver; session metadata stripped)
 - `POS_SESSION_STARTED`, `POS_SESSION_CLOSED` — audit-only on cloud (no DB writes)
+
+Booking-state transitions (BOOKED / DELIVERED flips) are NOT separately synced — the cloud derives allocation state from the same sale + serial rows that already flow through `SALE_CREATED`. Keep it that way unless multi-location reporting becomes a real requirement.
 
 ## Sync trigger model
 
@@ -180,3 +186,10 @@ Untested (intentional): `accounts`, `brands`, `customers`, `suppliers`, `stores`
 - Don't render the HE logo with a black chip / coloured backdrop anywhere. Transparent only.
 - Don't bump Electron past `^40` unless better-sqlite3 publishes a prebuilt for the new ABI, or the build host has MSVC Build Tools installed.
 - Don't introduce DB triggers or stored procedures. Use TypeORM `EntitySubscriber` for cross-cutting concerns (already done for audit logs).
+- Don't use `Item.purchasePrice` as COGS basis anywhere. It's a UI-default-only reference now — `SaleItem.costAtSaleTime` (a snapshot of `Item.avgCost` at sale time) is the source of truth for COGS, gross profit, and margin reports. Touching `purchasePrice` for any accounting derivation reintroduces the historical-margin-shift bug we explicitly fixed.
+- Don't collapse `status` and `allocationStatus` on `ItemSerial` into a single column. The synthesizer evaluated it — they're orthogonal axes (physical condition vs allocation lifecycle). A unit can be DAMAGED + BOOKED simultaneously.
+- Don't auto-refund a customer's advance when releasing a stuck booking via `/sales/:id/release-booking`. The advance stays as customer credit; the owner refunds manually via a Receipt-reversal when they choose. Auto-refund would silently destroy money the owner may want to keep against future purchases.
+- Don't gate the DELIVERED transition on anything other than `Sale.dueAmount > 0` in `DeliveriesService.update()`. That single check is the entire Strict Delivery Handover Authorisation. Adding more conditions (e.g. "must have receipt voucher", "must be after X days") creates failure modes that block legitimate handovers.
+- Don't add a separate sidebar entry for Overdue Bookings or Service Tickets. They go as tabs inside Sales / Customer respectively — that's the existing hub convention.
+- Don't seed the `Deferred Cash Receivables (1145)` account from a migration. It seeds on every boot via `AccountsService.onModuleInit` alongside the other system accounts, idempotently. Adding a one-off migration just creates schema drift between local SQLite and Supabase.
+- Don't compute incentive credits at sale time and freeze them onto the SaleItem. `GET /incentives/cost-adjustments` recomputes from current target state — the credit is a UI hint, not an accounting figure. Snapshotting would require an "incentive credit reversal" path on sale reversal which is more complexity than the feature is worth.

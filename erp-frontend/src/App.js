@@ -48,6 +48,8 @@ import AccountLedger from './pages/AccountLedger';
 import Financials from './pages/Financials';
 import InvoicePrint from './pages/InvoicePrint';
 import SerialLabelPrint from './pages/SerialLabelPrint';
+import BookingReceiptPrint from './pages/BookingReceiptPrint';
+import BoxTagPrint from './pages/BoxTagPrint';
 import WarrantyLookup from './pages/WarrantyLookup';
 import ServiceTickets from './pages/ServiceTickets';
 import Deliveries from './pages/Deliveries';
@@ -274,6 +276,8 @@ export default function App() {
           <Route path="print/sale/:id" element={<InvoicePrint type="sale" />} />
           <Route path="print/purchase/:id" element={<InvoicePrint type="purchase" />} />
           <Route path="print/serial-label/:serial" element={<SerialLabelPrint />} />
+          <Route path="print/booking-receipt/:id" element={<BookingReceiptPrint />} />
+          <Route path="print/box-tag/:id" element={<BoxTagPrint />} />
         </Routes>
         </AuthProvider>
       </HashRouter>

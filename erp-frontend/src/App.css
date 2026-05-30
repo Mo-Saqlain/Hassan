@@ -707,6 +707,131 @@ tr:last-child td { border-bottom: none; }
   border-top: 1px dashed #999;
 }
 
+/* Booking-receipt header banner. Loud red bar that any cashier sees
+   from across the shop, plus signature lines + payment-schedule table. */
+.booking-banner {
+  border: 3px solid #c50f1f;
+  background: #fff2f3;
+  color: #8b0a16;
+  text-align: center;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  padding: 10px 12px;
+  margin: 0 0 16px 0;
+  line-height: 1.4;
+}
+.booking-commitments {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px dashed #999;
+}
+.booking-signatures {
+  margin-top: 28px;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+.booking-sig-block { flex: 1; text-align: center; }
+.booking-sig-line {
+  margin-bottom: 4px;
+  font-family: monospace;
+  letter-spacing: 0.1em;
+}
+
+/* Box hold tag — 4"x6" landscape sheet taped to the physical box on the
+   warehouse floor. Watermark + bold customer name visible from a metre. */
+.box-tag-page {
+  padding: 0;
+  margin: 0;
+}
+@media print {
+  @page {
+    size: 6in 4in landscape;
+    margin: 0;
+  }
+}
+.box-tag {
+  position: relative;
+  width: 6in;
+  height: 4in;
+  padding: 16px;
+  border: 4px solid #c50f1f;
+  box-sizing: border-box;
+  font-family: "Segoe UI", sans-serif;
+  color: #000;
+  background: #fff;
+  overflow: hidden;
+}
+.box-tag-watermark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-18deg);
+  font-size: 96px;
+  font-weight: 900;
+  color: rgba(197, 15, 31, 0.08);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.box-tag-header {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: #c50f1f;
+  letter-spacing: 0.06em;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #c50f1f;
+  margin-bottom: 12px;
+  position: relative;
+}
+.box-tag-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 4px 16px;
+  font-size: 14px;
+}
+.box-tag-label {
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  align-self: center;
+}
+.box-tag-value { font-family: monospace; }
+.box-tag-customer {
+  font-size: 22px;
+  font-weight: 800;
+  font-family: "Segoe UI", sans-serif;
+}
+.box-tag-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: #c50f1f;
+}
+.box-tag-serials {
+  position: relative;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #999;
+}
+.box-tag-footer {
+  position: absolute;
+  bottom: 8px;
+  left: 16px;
+  right: 16px;
+  text-align: center;
+  font-size: 10px;
+  color: #555;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-top: 1px dashed #999;
+  padding-top: 6px;
+}
+
 /* 2in × 1in thermal-sticker label for local-generated serials. The
    browser scales the .serial-label box to fit @page when sent to a
    2x1 thermal printer; on A4 it just sits top-left as a single label. */

@@ -494,6 +494,12 @@ export default function POS() {
         <div className="alert alert-success" style={{ marginBottom: 12 }}>
           Sale {lastSale.invoiceNo} saved — net {Number(lastSale.netAmount).toFixed(2)}, paid{' '}
           {Number(lastSale.paidAmount).toFixed(2)}
+          {Number(lastSale.dueAmount) > 0 && (
+            <>
+              {' '}· <strong>BOOKING HOLD</strong> — balance pending Rs{' '}
+              {Number(lastSale.dueAmount).toFixed(2)}
+            </>
+          )}
           {Number(lastSale.dueAmount) < 0 && (
             <> · Change due: {(-Number(lastSale.dueAmount)).toFixed(2)}</>
           )}
@@ -505,6 +511,26 @@ export default function POS() {
           >
             Print receipt
           </a>
+          {Number(lastSale.dueAmount) > 0 && (
+            <>
+              {' · '}
+              <a
+                href={`#/print/booking-receipt/${lastSale.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Print booking hold slip
+              </a>
+              {' · '}
+              <a
+                href={`#/print/box-tag/${lastSale.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Print box tag
+              </a>
+            </>
+          )}
         </div>
       )}
 

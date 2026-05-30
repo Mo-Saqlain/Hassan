@@ -110,10 +110,25 @@ export default function InvoicePrint({ type }) {
   const number = isSale ? data.invoiceNo : data.billNo;
   const party = isSale ? data.customer : data.supplier;
   const partyLabel = isSale ? 'Bill To' : 'Supplier';
-  const docTitle = isSale ? 'SALES INVOICE' : 'PURCHASE BILL';
+  // Heads-up at the very top of the receipt when the sale isn't fully
+  // paid yet. Distinct from the dedicated /print/booking-receipt route:
+  // that one is the heavy customer-signed hold document, this is just a
+  // banner on the normal sales invoice so a reprint mid-balance still
+  // makes the status obvious.
+  const isBookingHold = isSale && Number(data.dueAmount ?? 0) > 0.005;
+  const docTitle = isSale
+    ? isBookingHold
+      ? 'SALES INVOICE · BOOKING HOLD'
+      : 'SALES INVOICE'
+    : 'PURCHASE BILL';
 
   return (
     <div className="print-page">
+      {isBookingHold && (
+        <div className="booking-banner">
+          ⚠ BALANCE PENDING — DO NOT RELEASE GOODS UNTIL FINAL PAYMENT ⚠
+        </div>
+      )}
       <div className="print-header">
         <div>
           <h1>{docTitle}</h1>

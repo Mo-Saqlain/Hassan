@@ -169,15 +169,42 @@ export default function OverdueBookings() {
                 <td className="right">{fmtRs(r.paidSoFar)}</td>
                 <td className="right">{fmtRs(r.remainingDue)}</td>
                 <td className="right">
-                  <button
-                    className="btn btn-sm btn-warn"
-                    onClick={() => {
-                      setPendingReleaseRow(r);
-                      setReason('');
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      gap: 4,
+                      flexWrap: 'wrap',
+                      justifyContent: 'flex-end',
                     }}
                   >
-                    Release to Floor
-                  </button>
+                    <a
+                      className="btn btn-sm"
+                      href={`#/print/box-tag/${r.saleId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Reprint the hold tag for the box on the warehouse floor"
+                    >
+                      Box Tag
+                    </a>
+                    <a
+                      className="btn btn-sm"
+                      href={`#/print/booking-receipt/${r.saleId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Reprint the customer's booking receipt"
+                    >
+                      Receipt
+                    </a>
+                    <button
+                      className="btn btn-sm btn-warn"
+                      onClick={() => {
+                        setPendingReleaseRow(r);
+                        setReason('');
+                      }}
+                    >
+                      Release
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

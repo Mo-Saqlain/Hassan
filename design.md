@@ -502,7 +502,7 @@ File [pages/CustomerLedger.js](erp-frontend/src/pages/CustomerLedger.js).
 
 ### 5.5 Sales hub — `/sales`
 
-Hub title `"Sales"` · subtitle `"Posted invoices and sale returns."`. Tabs: **History · Returns**.
+Hub title `"Sales"` · subtitle `"Posted invoices, sale returns, delivery tracking, and overdue bookings."`. Tabs: **History · Returns · Deliveries · Overdue Bookings**.
 
 #### Tab — History (`/sales`)
 
@@ -511,8 +511,9 @@ File [pages/Sales.js](erp-frontend/src/pages/Sales.js).
 - Heading `"Sales History"`.
 - Search placeholder `"Search invoice, customer, method..."`.
 - Info banner: `"Sales are created at the POS terminal. This page is a read-only history. For collections, use the Customer → Receipts tab — the Customer Ledger tab shows the net A/R balance per customer."`
-- Columns: `"Invoice #"`, `"Date"`, `"Customer"`, `"Total"`, `"Net"`, `"Paid at sale"`, `"Method"`, `"Actions"`.
-- Row action: `"Print"`.
+- Columns: `"Invoice #"`, `"Date"`, `"Customer"`, `"Total"`, `"Net"`, `"Paid at sale"`, `"Method"`, `"Promise"`, `"Actions"`.
+- Promise chip: `"Overdue Nd"` (danger) / `"Due in Nd"` (info) / `"Due today"` from the row's first PENDING commitment.
+- Row actions: `"Print"`, plus `"Hold Slip"` + `"Box Tag"` when `dueAmount > 0` (opens `/print/booking-receipt/:id` and `/print/box-tag/:id` in new tabs). `<ReverseAction>` button.
 - States: `"Loading…"`, `"No sales yet."`, `"No sales match your search."`.
 
 #### Tab — Returns (`/sale-returns`)
@@ -525,6 +526,23 @@ File [pages/SaleReturns.js](erp-frontend/src/pages/SaleReturns.js).
 - Buttons `"Save Return"`, `"Cancel"`.
 - Validation: `"At least one line is required"`.
 - List columns: `"Return #"`, `"Date"`, `"Customer"`, `"Total"`, `"Reason"`. Empty: `"No sale returns yet."`.
+
+#### Tab — Deliveries (`/deliveries`)
+
+File [pages/Deliveries.js](erp-frontend/src/pages/Deliveries.js).
+
+Operational tracking of truck-out / installation handover. Statuses: `PENDING`, `OUT_FOR_DELIVERY`, `DELIVERED`, `INSTALLATION_PENDING`, `INSTALLED`, `CANCELLED`. Reserves `Item.reservedQty` for sale lines while the delivery is in the first three statuses. **Strict-handover guard**: transitions to `DELIVERED` are rejected with a 400 + clear message when the linked sale still has `dueAmount > 0`.
+
+#### Tab — Overdue Bookings (`/overdue-bookings`)
+
+File [pages/OverdueBookings.js](erp-frontend/src/pages/OverdueBookings.js).
+
+- Heading `"Overdue Bookings"`.
+- Toolbar: `"Show bookings older than"` + numeric input (default 7) + `"days"` + `"Refresh"` button.
+- Info banner (`alert-info`): `"These customers paid an advance and never came back. The unit is still sitting in your hold zone. Releasing one cancels the booking and puts the unit back on the floor — the advance stays on the customer's ledger as credit."`
+- Columns: `"Customer"`, `"Invoice"`, `"Booked On"`, `"Days Held"` (right, mono, red ≥ 7), `"Units"` (one row per serial: `model · serial`), `"Advance Paid"`, `"Remaining Due"`, `"Actions"`.
+- Per-row actions: `"Box Tag"` + `"Receipt"` (reprint hold prints) + `"Release"` (red `btn-warn`).
+- Release confirmation modal: title `"Release booking?"`, lists the serials about to revert, warns when the advance is non-zero (`"Customer paid Rs N as advance. This release does NOT auto-refund — the amount stays as customer credit. Refund manually via Customer → Receipts → Reverse if needed."`), optional `"Reason"` input, buttons `"Cancel"` and `"Release to Floor"`.
 
 ---
 
@@ -1128,6 +1146,55 @@ Already documented in §3.2. Result kinds: `"Customer"`, `"Supplier"`, `"Employe
 
 ---
 
+## 6.5 Print pages (HTML, no thermal driver)
+
+Distinct one-off routes outside the Layout, each auto-triggers `window.print()` once data resolves so opening the URL in a new tab is a single-click print.
+
+### 6.5.1 Invoice print — `/print/sale/:id`, `/print/purchase/:id`
+
+File [pages/InvoicePrint.js](erp-frontend/src/pages/InvoicePrint.js).
+
+- Banner block at top **only** when `data.dueAmount > 0` on a sale:
+  ```
+  ⚠ BALANCE PENDING — DO NOT RELEASE GOODS UNTIL FINAL PAYMENT ⚠
+  ```
+- Title: `"SALES INVOICE"` or `"SALES INVOICE · BOOKING HOLD"` (the latter when residual exists) or `"PURCHASE BILL"`.
+- Per-line rows + a per-line warranty-notice block (four variants — see §5.8 Item-hub).
+- Bottom: `"Warranty Terms & Conditions"` block when any line carries real cover.
+
+### 6.5.2 Booking receipt — `/print/booking-receipt/:id`
+
+File [pages/BookingReceiptPrint.js](erp-frontend/src/pages/BookingReceiptPrint.js).
+
+- Heavy red banner at top: `"⚠ BOOKING HOLD — BALANCE PENDING ⚠ \n DO NOT ALLOW OUT OF THE SHOP UNTIL FINAL PAYMENT"`.
+- Title `"BOOKING RECEIPT"`. Right-side header carries `"Booked"` (createdAt) + `"Balance due by"` (first PENDING commitment dueDate).
+- Per-line table: `"#"`, `"Item"`, `"Serial(s)"` (mono), `"Qty"`, `"Unit Price"`, `"Line Total"`.
+- Totals block with the BALANCE PENDING row coloured `#c50f1f`.
+- Payment-schedule table when paymentCommitments exists: `"Due Date"`, `"Expected"`, `"Paid"`, `"Status"`.
+- Two signature lines at the bottom (`"Customer signature"`, `"Cashier signature"`).
+- Footer: `"Please bring this receipt and pay the balance by the scheduled date to take delivery of your unit. Goods cannot be released until the balance is cleared."`.
+
+### 6.5.3 Box hold tag — `/print/box-tag/:id`
+
+File [pages/BoxTagPrint.js](erp-frontend/src/pages/BoxTagPrint.js).
+
+- 4"×6" landscape sheet (`@page { size: 6in 4in landscape; margin: 0 }`).
+- 4 px red border + giant rotated `"DO NOT SELL"` watermark at 8% opacity behind everything.
+- Header `"⚠ RESERVED ITEM — DO NOT SELL ⚠"` in red 18 pt.
+- 2-column grid: Customer (large bold), Phone, Invoice #, Booked, Hold until, Balance due (red 18 pt).
+- Serials block: per-serial `model · LOCAL-…` rows in mono.
+- Footer: `"TAPE THIS SLIP DIRECTLY TO THE BOX · CHECK WITH OFFICE BEFORE SELLING ANY UNIT WITH A TAG"`.
+
+### 6.5.4 Serial label — `/print/serial-label/:serial`
+
+File [pages/SerialLabelPrint.js](erp-frontend/src/pages/SerialLabelPrint.js).
+
+- 2"×1" thermal-sticker template (`@page { size: 2in 1in; margin: 0 }`).
+- Stack (top → bottom): shop branding, barcode-style bars synthesized from the serial chars, monospace serial text, item model.
+- Works on any printer. For real thermal-sticker rolls, the @page size lets the browser drive the printer correctly without an ESC-POS driver.
+
+---
+
 ## 7. Electron shell
 
 The renderer runs inside an Electron 40 wrapper. Notable native chrome:
@@ -1168,6 +1235,15 @@ The Electron entry [erp-desktop/src/main.js](erp-desktop/src/main.js) is the sou
 | Master Data (Customer / Supplier / Brands / Stores / Accounts / Employees panels) | [pages/MasterData.js](erp-frontend/src/pages/MasterData.js) |
 | Sales History | [pages/Sales.js](erp-frontend/src/pages/Sales.js) |
 | Sale Returns | [pages/SaleReturns.js](erp-frontend/src/pages/SaleReturns.js) |
+| Deliveries | [pages/Deliveries.js](erp-frontend/src/pages/Deliveries.js) |
+| Overdue Bookings | [pages/OverdueBookings.js](erp-frontend/src/pages/OverdueBookings.js) |
+| Service Tickets | [pages/ServiceTickets.js](erp-frontend/src/pages/ServiceTickets.js) |
+| Warranty Lookup | [pages/WarrantyLookup.js](erp-frontend/src/pages/WarrantyLookup.js) |
+| Booking Receipt print | [pages/BookingReceiptPrint.js](erp-frontend/src/pages/BookingReceiptPrint.js) |
+| Box Tag print | [pages/BoxTagPrint.js](erp-frontend/src/pages/BoxTagPrint.js) |
+| Serial Label print | [pages/SerialLabelPrint.js](erp-frontend/src/pages/SerialLabelPrint.js) |
+| Aging panel (shared) | [components/AgingPanel.js](erp-frontend/src/components/AgingPanel.js) |
+| Reverse action (shared) | [components/ReverseAction.js](erp-frontend/src/components/ReverseAction.js) |
 | Purchase Orders | [pages/PurchaseOrders.js](erp-frontend/src/pages/PurchaseOrders.js) |
 | Purchases | [pages/Purchases.js](erp-frontend/src/pages/Purchases.js) |
 | Purchase Returns | [pages/PurchaseReturns.js](erp-frontend/src/pages/PurchaseReturns.js) |

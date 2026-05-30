@@ -16,6 +16,15 @@ import { SettleCommitmentDto } from './dto/settle-commitment.dto';
 export class SalesController {
   constructor(private readonly service: SalesService) {}
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Static (non-param) GETs come FIRST in this file. Nest matches in
+  // declaration order; if `@Get(':id')` is declared above `@Get('deferred/
+  // upcoming')` or `@Get('overdue-bookings')`, the ParseUUIDPipe on the
+  // dynamic route runs against the literal segment and throws 400
+  // "Validation failed (uuid is expected)". Order matters — keep specific
+  // routes above generic ones.
+  // ─────────────────────────────────────────────────────────────────────
+
   @Post()
   create(@Body() dto: CreateSaleDto) {
     return this.service.create(dto);
@@ -24,27 +33,6 @@ export class SalesController {
   @Get()
   findAll() {
     return this.service.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.findOne(id);
-  }
-
-  @Post(':id/reverse')
-  reverse(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ReverseSaleDto,
-  ) {
-    return this.service.reverse(id, dto);
-  }
-
-  @Post(':id/settle-commitment')
-  settleCommitment(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: SettleCommitmentDto,
-  ) {
-    return this.service.settleCommitment(id, dto);
   }
 
   /**
@@ -66,6 +54,27 @@ export class SalesController {
   overdueBookings(@Query('minDays') minDays?: string) {
     const n = minDays != null ? parseInt(minDays, 10) : 7;
     return this.service.overdueBookings(Number.isFinite(n) ? n : 7);
+  }
+
+  @Get(':id')
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.findOne(id);
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseSaleDto,
+  ) {
+    return this.service.reverse(id, dto);
+  }
+
+  @Post(':id/settle-commitment')
+  settleCommitment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SettleCommitmentDto,
+  ) {
+    return this.service.settleCommitment(id, dto);
   }
 
   /**

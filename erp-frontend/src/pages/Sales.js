@@ -105,6 +105,7 @@ export default function Sales() {
                       gap: 6,
                       alignItems: 'center',
                       justifyContent: 'flex-end',
+                      flexWrap: 'wrap',
                     }}
                   >
                     <a
@@ -115,6 +116,28 @@ export default function Sales() {
                     >
                       Print
                     </a>
+                    {Number(s.dueAmount) > 0 && (
+                      <>
+                        <a
+                          className="btn btn-sm"
+                          href={`#/print/booking-receipt/${s.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Booking hold receipt (red header, customer signature)"
+                        >
+                          Hold Slip
+                        </a>
+                        <a
+                          className="btn btn-sm"
+                          href={`#/print/box-tag/${s.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="4×6 box tag — tape to the physical unit"
+                        >
+                          Box Tag
+                        </a>
+                      </>
+                    )}
                     <ReverseAction
                       endpoint="/sales"
                       row={s}

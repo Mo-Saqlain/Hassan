@@ -46,7 +46,10 @@ The UI follows a deliberate **flat Windows 10** direction — Segoe UI system fo
 - **Inline quantity** +/− buttons, line remove, clear cart.
 - **Payment methods**: Cash, Card, Bank, Credit.
 - **Receiving account picker** — on every CASH / CARD / BANK sale the cashier picks which cash drawer / bank / wallet account is being credited. Picker is filtered to `CASH` accounts for cash sales and to `BANK + WALLET` for card / bank transfers. The sale's paid amount flows through `/reports/account-ledger/:id`, the Balance Sheet, and the Cash Flow statement against the chosen account — so a Rs 50,000 card-tap sale credits the correct HBL account, not a generic "cash" bucket. CREDIT sales don't ask for an account (nothing is collected yet).
-- **Partial payment** — paid amount can be less than net; the remainder becomes a customer receivable. Selecting a customer is required for partial pay and for CREDIT sales (frontend + backend enforce this).
+- **Partial payment + Booking Hold** — paid amount can be less than net; the remainder becomes a customer receivable. Selecting a customer is required for partial pay and for CREDIT sales (frontend + backend enforce this). When the sale carries serialised items, partial-pay flips the unit's `allocationStatus` to **BOOKED** instead of DELIVERED — the goods are reserved on the floor until balance is cleared. The success banner offers immediate **"Print booking hold slip"** + **"Print box tag"** links so the cashier can tape a 4×6 RESERVED tag to the unit before the customer leaves. See §4 Inventory for the full state machine.
+- **POS keyboard shortcuts** — `F2` focus scan input · `F4` focus customer · `F8` charge · `F9` clear cart. Reduces mouse trips during a busy till.
+- **Incentive-aware cost warnings** — when an active manufacturer incentive target is past its trigger threshold, the cart row shows a `+ Rs N/unit incentive` chip and the "below cost" warning is softened to `Below raw cost · incentive covers` when the effective cost (`avgCost − perUnitCredit`) is still met. A solid red `Below cost` warning fires only when even the incentive can't recover the loss.
+- **Local serial auto-generation** — items flagged `isInternalGenerated` (unbranded local goods) get a `+ Generate & Print Local IDs` button on the cart row. Click mints N serials in `LOCAL-<CategoryCode>-<Year>-<4-digit-seq>` format and opens the print-label tab(s) automatically.
 - **Customer credit limit** — every Customer carries `creditEnabled` (master switch, default off) and `creditLimit` (rupee ceiling). Any sale that would leave `dueAmount > 0` for a customer is rejected by `SalesService.create()` if (a) the customer has `creditEnabled === false`, or (b) the projected outstanding (current A/R + this sale's due) would exceed `creditLimit`. Walk-in / no-customer sales are exempt. Current outstanding is computed the same way the customer ledger computes balance: `openingBalance + sum(sale.dueAmount) − sum(receipts)`.
 - **Change due** — when paid > net, the row reads `Change · …`.
 - **In-flow customer create** — `+` next to the customer dropdown opens a modal that saves and auto-selects on close.
@@ -58,8 +61,8 @@ Master data lives inside the operational hubs in the sidebar, not in a separate 
 
 | Hub | Tabs |
 |---|---|
-| Customer | Info · Receipts · Ledger |
-| Sales | History · Returns |
+| Customer | Info · Receipts · Ledger · Warranty · Service |
+| Sales | History · Returns · Deliveries · Overdue Bookings |
 | Supplier | Info · Brands · Payments · Incentives · Ledger |
 | Purchase | Orders · Bills · Returns |
 | Item | Catalogue · Categories |
@@ -71,7 +74,9 @@ Master data lives inside the operational hubs in the sidebar, not in a separate 
 
 **Item identifier:** Model No is the primary identifier (used as the item's display name). SKU auto-derives from Model No on save (suffixed `-2`, `-3` … on collision). Barcode is optional. **Quick search** at the top of every list filters as you type (`searchKeys={[...]}` per page).
 
-**Accounts:** five user-facing flavours — **Cash**, **Bank**, **Wallet** (Easypaisa / JazzCash), **Capital** (owner's equity), **Credit** (credit card or credit line — shows as a liability on the balance sheet when negative). Plus six **system accounts** seeded on first boot for the double-entry journal (`Sales Revenue`, `Cost of Goods Sold`, `Inventory`, `Accounts Receivable`, `Accounts Payable`, `Cash on Hand` — the last is a fallback for cash receipts without an explicit account picker). System accounts can be renamed but not deleted.
+**Accounts:** five user-facing flavours — **Cash**, **Bank**, **Wallet** (Easypaisa / JazzCash), **Capital** (owner's equity), **Credit** (credit card or credit line — shows as a liability on the balance sheet when negative). Plus seven **system accounts** seeded on first boot for the double-entry journal (`Sales Revenue` 4100, `Cost of Goods Sold` 5100, `Inventory` 1150, `Accounts Receivable` 1140, `Deferred Cash Receivables` 1145, `Accounts Payable` 2100, `Cash on Hand` 1110). System accounts can be renamed but not deleted.
+
+**Categories** carry an optional uppercase `code` (≤ 8 chars, e.g. `COOLER`, `FAN`, `STAND`) used as the segment of auto-generated local serials: `LOCAL-<code>-<year>-<seq>`. Uniqueness enforced in the service layer.
 
 ### 3. Transactions
 - **POS sales** generate invoices (`INV-…`) with stock OUT
@@ -89,6 +94,14 @@ All voucher numbers are auto-generated `<PREFIX>-NNNNNN` based on row count + 1.
 - **Stock Summary** — per item: `onHand`, `reserved` (promised to a pending delivery), `available = onHand − reserved`, `avgCost` (weighted-average), `valueAtCost`, Low/OK status. Reserved is the figure the POS path should respect; on-hand is the physical count.
 - **Weighted-average inventory costing.** Every purchase rolls the running `avgCost` and `costedQty` on the Item via `newAvg = (oldQty × oldAvg + inQty × unitCost) / (oldQty + inQty)`. Sales snapshot `avgCost` onto the `SaleItem.costAtSaleTime` column and post COGS using that frozen value — historical margins never shift retroactively. Returns and reversals adjust `costedQty` symmetrically (avgCost preserved). The Item's `purchasePrice` is kept as a UI-only "latest-cost reference"; **it's never consulted for COGS again**. Selling below `avgCost` is allowed (relationship pricing is normal) — the POS just flags the line with a non-blocking warning.
 - **Reserved inventory.** The Delivery module increments `Item.reservedQty` when a delivery's status is PENDING / OUT_FOR_DELIVERY / INSTALLATION_PENDING, and releases it on DELIVERED / INSTALLED / CANCELLED. The Stock Summary's `available` column reflects this so the cashier never sells a unit that's already loaded on the truck.
+- **Per-unit booking-hold state machine.** `ItemSerial.allocationStatus` has three values that run orthogonal to the physical `status`:
+  - `AVAILABLE` — free for sale to any cash customer.
+  - `BOOKED` — held by a partial-payment sale. Physically on the floor but reserved by `saleInvoiceNo` + `bookedAt`.
+  - `DELIVERED` — fully paid and handed over (or sold cash-and-walk).
+
+  Transitions are atomic via `ItemSerialsService.reserveForBooking()` / `releaseBooking()` / `markDelivered()`. `PosService.checkout()` branches on `dueAmount > 0`: partial-pay sales call `reserveForBooking` (BOOKED); full-pay sales call `bindToSale` (DELIVERED). When the last commitment settles via `POST /sales/:id/settle-commitment`, the serials flip BOOKED → DELIVERED automatically. **Strict Delivery Handover Authorisation**: `DeliveriesService.update()` throws if the linked sale still has `dueAmount > 0` when status transitions to DELIVERED — the catastrophic "took the AC home then disputed the bill" failure mode is structurally closed. The warranty-lookup page surfaces a top-priority amber "On hold · payment pending" chip so the floor cashier instantly sees DO NOT SELL.
+- **Overdue Bookings dashboard** (Sales-hub tab `/overdue-bookings`) — every sale with at least one BOOKED serial older than N days (default 7). **Release to Floor** action cancels the booking and reverts BOOKED → AVAILABLE. Reuses the existing reversal pipeline (idempotent). Advance amount stays as customer credit — never auto-refunded.
+- **Local serial auto-generation** — items flagged `isInternalGenerated` mint serials in `LOCAL-<CategoryCode>-<Year>-<4-digit-seq>` via `POST /item-serials/generate-local`. Sequence keyed per (category-code, year) in the existing `sequences` table; Jan 1 resets. Print route `/print/serial-label/:serial` produces a 2"×1" thermal-sticker layout — barcode-style bars + serial + item name. POS shows a `+ Generate & Print Local IDs` button on the cart row for these items.
 - **Stock Ledger** — every IN / OUT movement, filterable by item / category / brand / supplier / date range, with running balance per row.
 - **Reason-driven manual adjustment** — `POST /api/stock/adjust`. The frontend never asks the user to pick "IN" or "OUT" directly; they pick a **reason** (`Loss / stolen`, `Damaged`, `Found`, `Stock count — was over / under`, `Correction +/−`) and the direction follows. Form shows current on-hand and the projected new on-hand, blocks submission if the adjustment would drive stock negative.
 - **Damaged goods** register — DAMAGED / IN_REPAIR / WRITE_OFF / REPAIRED workflow. DAMAGED books an immediate stock OUT; REPAIRED books a reversing IN so items rejoin sellable inventory.
@@ -112,6 +125,11 @@ A real cashier's day book.
 
 ### 7. Incentives & Adjusted Profit
 - **Supplier / brand incentive targets** — sell N units of an item or brand between dates to unlock a bonus. The shop sometimes sells at a per-unit loss because clearing the target unlocks an incentive that exceeds the loss — so true profit must include incentives.
+- **Effective-cost adjustment from triggered targets** — every target carries a `triggerThresholdPct` (default 80). Once net-sold qty crosses that percentage of `targetQuantity`, the per-unit incentive credit (`incentiveAmount / targetQuantity`) is treated as a likely earnback. `GET /incentives/cost-adjustments` returns the per-item credit map. POS uses it to:
+  - Show a blue `+ Rs N/unit incentive` chip on the cart row when an active credit applies.
+  - Soften the "below cost" warning: amber `Below raw cost · incentive covers` when unit price < `avgCost` but >= `avgCost − perUnitCredit`; solid red `Below cost` only when even the incentive can't recover.
+  
+  Brand-basis targets propagate the credit to every item in the brand. If multiple active+triggered targets touch the same item, the bigger credit wins (the cashier sees the best available recovery).
 - **Awards** — booked when the target is achieved and the supplier pays out. The Income Statement adds the sum of awards in the period to net income to produce **Adjusted Net Income**.
 - **Employee incentive rules** — a percentage of base amount per matching sale (basis ITEM or BRAND, optional date range). Earned incentives flow into the employee ledger.
 
@@ -121,7 +139,11 @@ A real cashier's day book.
 - **Cash Flow Statement** — operating + investing-style cash movement, including fund transfer deltas per account.
 - **Statement of Changes in Equity** — Opening + Adjusted Net Income − Drawings = Closing.
 - **Stock Ledger** with category / brand / supplier filters.
-- **A/R aging** (`GET /reports/ar-aging?asOf=…`) — for every customer with an outstanding balance, residual amounts bucketed 0-30 / 31-60 / 61-90 / 90+ days. Receipts are consumed FIFO against the oldest unpaid sale; opening balance is treated as oldest and consumed first. Each row also carries a `pastPromise` overlay flagging residuals where a commitment in `paymentCommitments` is past its `dueDate` — surfaces missed "pay half on the 20th" promises that would otherwise hide inside the 0-30 bucket.
+- **A/R aging** (`GET /reports/ar-aging?asOf=…`) — for every customer with an outstanding balance, residual amounts bucketed 0-30 / 31-60 / 61-90 / 90+ days. Receipts are consumed FIFO against the oldest unpaid sale; opening balance is treated as oldest and consumed first. Each row also carries:
+  - `pastPromise` overlay flagging residuals where a commitment in `paymentCommitments` is past its `dueDate` — surfaces missed "pay half on the 20th" promises that would otherwise hide inside the 0-30 bucket.
+  - `maxDaysElapsed` + `oldestUnpaidDate` — the age of the customer's oldest unpaid invoice.
+  - `daysSinceFirstPastPromise` — for AR rows only, how long ago the earliest broken PENDING commitment was promised (different from `maxDaysElapsed` — a fresh invoice can carry an ancient broken promise).
+- **Per-invoice aging detail** — `GET /reports/ar-aging/:customerId` and `/ap-aging/:supplierId` return per-document rows with `daysElapsed`, `residualAmount`, `hasPendingCommitment`. Surfaced as an `AgingPanel` above the per-party ledger and feeds the "Oldest unpaid: 47d (Ali Khan)" line on the Dashboard's Receivables/Payables card.
 - **Deferred-cash commitments on sales** — POS captures structured `paymentCommitments: [{ dueDate, expectedAmount, status }]` for credit / partial-pay invoices. Residual lands on a dedicated **Deferred Cash Receivables** system account (`#1145`) rather than open A/R. `POST /sales/:id/settle-commitment` posts a Receipt voucher and books the second journal half (Dr Cash / Cr Deferred Receivables). `GET /sales/deferred/upcoming` powers the dashboard widget — every PENDING commitment due within 7 days, overdue-flagged.
 - **A/P aging** (`GET /reports/ap-aging?asOf=…`) — symmetric for suppliers: unpaid purchases minus payments-out, bucketed by age.
 - **Item profitability** (`GET /reports/item-margins?from=…&to=…`) — qty sold, revenue, COGS (using the **weighted-average cost snapshotted on each sale line at sale time** — historical margins never shift retroactively), gross profit, margin %.
@@ -548,8 +570,13 @@ A directional roadmap, agreed for a single-shop install operated by the owner an
   - `warrantyType=NONE` → "No Warranty"
   - `warrantyType=COMPANY|SHOP` → cover length + per-unit serial + expiry date
   Warranty fields freeze on the `item_serials` row at sale time, so a later edit to the Item template doesn't rewrite what was promised. Public `GET /api/item-serials/warranty/:serial` returns only non-PII data (model, status, sold date, expiry, active flag) — safe to expose to walk-in customers via a counter terminal. A Customer-hub tab `/warranty-lookup` wraps the endpoint with a counter-friendly UI.
-- **Delivery / dispatch tracking** — `deliveries (saleId, address, phone, assignedDriverId, vehicle, status, scheduledFor, deliveredAt, customerSignatureUrl)`. POS checkout offers a "deliver" toggle. Dashboard tile: pending deliveries today.
-- **Service / repair tickets** — `service_tickets (customerId, itemSerialId, complaint, status, estimatedCost, actualCost, inWarranty)`. Parts consumed → `Dr Service COGS / Cr Inventory`; revenue → `Dr Cash / Cr Service Income`.
+- ✅ **Booking-Hold state machine** — `ItemSerial.allocationStatus ∈ { AVAILABLE, BOOKED, DELIVERED }` orthogonal to the physical `status`. Partial-pay sales hold units BOOKED until the balance clears. Strict-handover guard on `DeliveriesService` prevents DELIVERED transitions while `dueAmount > 0`. See §4 Inventory.
+- ✅ **Overdue Bookings dashboard** (Sales hub) — Release-to-Floor cancels stuck bookings and reverts serials to AVAILABLE. Advance stays as customer credit (no auto-refund).
+- ✅ **Booking Hold customer receipt** (`/print/booking-receipt/:id`) — red "BALANCE PENDING" header banner, line-item table with serials, payment schedule, customer + cashier signature lines. Printed at POS checkout alongside the normal sale receipt for any partial-pay invoice.
+- ✅ **Box Hold Tag** (`/print/box-tag/:id`) — 4"×6" landscape layout with the customer name in bold + an oversized "DO NOT SELL" watermark + serials + balance due. Taped to the physical box on the warehouse floor.
+- ✅ **Local serial auto-generation** — `LOCAL-<CategoryCode>-<Year>-<seq>` for unbranded items. `POST /item-serials/generate-local`. Print route `/print/serial-label/:serial` for the 2"×1" sticker.
+- ✅ **Delivery / dispatch tracking** — `deliveries (saleId, address, phone, assignedTo, vehicle, status, scheduledFor, deliveredAt)`. Six-status workflow PENDING → OUT_FOR_DELIVERY → DELIVERED with installation branch. Sales-hub tab.
+- ✅ **Service / repair tickets** — seven-status workflow RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED → UNREPAIRABLE. Optional serial link auto-pulls in-warranty flag. Customer-hub tab.
 
 ### Sales & inventory features
 
