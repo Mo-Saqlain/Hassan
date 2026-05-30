@@ -82,7 +82,13 @@ function WarrantyCard({ r }) {
   // warranty" branches (NONE / CHECKING_ONLY) need their own treatment
   // so the salesman doesn't accidentally tell a customer they're covered.
   let statusChip;
-  if (r.status === 'RETURNED') {
+  if (r.allocationStatus === 'BOOKED') {
+    // Highest-priority chip — the cashier on the floor needs to know NOT
+    // to sell this unit even though it's still physically in stock.
+    statusChip = { cls: 'chip-warn', label: 'On hold · payment pending' };
+  } else if (r.allocationStatus === 'AVAILABLE' && r.status === 'IN_STOCK') {
+    statusChip = { cls: 'chip-info', label: 'Available for sale' };
+  } else if (r.status === 'RETURNED') {
     statusChip = { cls: 'chip-warn', label: 'Returned to shop' };
   } else if (r.warrantyType === 'NONE') {
     statusChip = { cls: 'chip-danger', label: 'No warranty' };

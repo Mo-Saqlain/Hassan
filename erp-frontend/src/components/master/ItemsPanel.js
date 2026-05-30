@@ -21,6 +21,7 @@ const empty = {
   hasWarranty: true,
   warrantyType: 'COMPANY',
   warrantyDays: '365',
+  isInternalGenerated: false,
 };
 
 export default function ItemsPanel() {
@@ -74,6 +75,7 @@ export default function ItemsPanel() {
           warrantyType: row.warrantyType ?? 'COMPANY',
           warrantyDays:
             row.warrantyDays == null ? '' : String(row.warrantyDays),
+          isInternalGenerated: row.isInternalGenerated ?? false,
         }
       : empty;
     setForm(next);
@@ -127,6 +129,12 @@ export default function ItemsPanel() {
         form.hasWarranty && form.warrantyDays !== ''
           ? Number(form.warrantyDays)
           : undefined,
+      // Local auto-serial only makes sense for tracksSerials items with no
+      // brand attached — the spec ties this to unbranded local goods.
+      isInternalGenerated:
+        form.tracksSerials && !form.brandId
+          ? form.isInternalGenerated
+          : false,
     };
     try {
       if (editing) {
@@ -332,6 +340,23 @@ export default function ItemsPanel() {
                       setForm({
                         ...form,
                         serialRequiredOnSale: e.target.checked,
+                      })
+                    }
+                  />
+                </div>
+              )}
+              {form.tracksSerials && !form.brandId && (
+                <div>
+                  <label title="Generate LOCAL-{category-code}-{year}-{seq} serials at POS for unbranded items. Requires the item's category to have a Code set.">
+                    Auto-generate local serials
+                  </label>
+                  <input
+                    type="checkbox"
+                    checked={form.isInternalGenerated}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        isInternalGenerated: e.target.checked,
                       })
                     }
                   />

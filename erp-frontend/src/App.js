@@ -47,9 +47,11 @@ import SupplierLedger from './pages/SupplierLedger';
 import AccountLedger from './pages/AccountLedger';
 import Financials from './pages/Financials';
 import InvoicePrint from './pages/InvoicePrint';
+import SerialLabelPrint from './pages/SerialLabelPrint';
 import WarrantyLookup from './pages/WarrantyLookup';
 import ServiceTickets from './pages/ServiceTickets';
 import Deliveries from './pages/Deliveries';
+import OverdueBookings from './pages/OverdueBookings';
 
 export default function App() {
   return (
@@ -96,6 +98,7 @@ export default function App() {
             >
               <Route path="sales" element={<Sales />} />
               <Route path="sale-returns" element={<SaleReturns />} />
+              <Route path="overdue-bookings" element={<OverdueBookings />} />
             </Route>
 
             {/* Supplier hub */}
@@ -270,6 +273,7 @@ export default function App() {
           </Route>
           <Route path="print/sale/:id" element={<InvoicePrint type="sale" />} />
           <Route path="print/purchase/:id" element={<InvoicePrint type="purchase" />} />
+          <Route path="print/serial-label/:serial" element={<SerialLabelPrint />} />
         </Routes>
         </AuthProvider>
       </HashRouter>

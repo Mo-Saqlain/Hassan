@@ -1310,6 +1310,9 @@ export class ReportsService {
       d90: number;
       pastPromise: number;
       total: number;
+      maxDaysElapsed: number;
+      oldestUnpaidDate: string | null;
+      daysSinceFirstPastPromise: number | null;
     }>;
   }> {
     const asOf = asOfStr ? new Date(asOfStr) : new Date();
@@ -1323,6 +1326,9 @@ export class ReportsService {
       d90: number;
       pastPromise: number;
       total: number;
+      maxDaysElapsed: number;
+      oldestUnpaidDate: string | null;
+      daysSinceFirstPastPromise: number | null;
     }> = [];
 
     for (const c of customers) {
@@ -1348,6 +1354,19 @@ export class ReportsService {
       // not a separate aging slice — the dN totals + pastPromise overlap.
       const buckets = { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0, pastPromise: 0 };
 
+      // Days-elapsed tracking (overlays — surfaced alongside buckets):
+      //   maxDaysElapsed:        oldest unpaid invoice age across this customer
+      //   oldestUnpaidDate:      that invoice's createdAt (ISO) for UI labelling
+      //   daysSinceFirstPastPromise:
+      //                          how long ago the EARLIEST overdue PENDING
+      //                          commitment was promised. Distinct from
+      //                          maxDaysElapsed — a customer can have a fresh
+      //                          invoice (5 days old) with a 30-day-old broken
+      //                          promise inside it.
+      let maxDaysElapsed = 0;
+      let oldestUnpaidDate: Date | null = null;
+      let earliestPastPromise: Date | null = null;
+
       // Opening balance is oldest by definition — consume receipts here first.
       const opening = Number(c.openingBalance) || 0;
       if (opening > 0) {
@@ -1368,6 +1387,10 @@ export class ReportsService {
             (asOf.getTime() - new Date(s.createdAt).getTime()) /
               (1000 * 60 * 60 * 24),
           );
+          if (ageDays > maxDaysElapsed) {
+            maxDaysElapsed = ageDays;
+            oldestUnpaidDate = new Date(s.createdAt);
+          }
           if (ageDays <= 30) buckets.d0_30 += residual;
           else if (ageDays <= 60) buckets.d31_60 += residual;
           else if (ageDays <= 90) buckets.d61_90 += residual;
@@ -1378,10 +1401,14 @@ export class ReportsService {
           // PENDING status. Read from the structured commitments array;
           // the legacy single-date field has been folded into commitments.
           const firstPastPending = (s.paymentCommitments ?? []).find(
-            (c) => c.status === 'PENDING' && new Date(c.dueDate) < asOf,
+            (cm) => cm.status === 'PENDING' && new Date(cm.dueDate) < asOf,
           );
           if (firstPastPending) {
             buckets.pastPromise += residual;
+            const d = new Date(firstPastPending.dueDate);
+            if (!earliestPastPromise || d < earliestPastPromise) {
+              earliestPastPromise = d;
+            }
           }
         }
       }
@@ -1390,6 +1417,12 @@ export class ReportsService {
         buckets.d0_30 + buckets.d31_60 + buckets.d61_90 + buckets.d90,
       );
       if (total > 0) {
+        const daysSinceFirstPastPromise = earliestPastPromise
+          ? Math.floor(
+              (asOf.getTime() - earliestPastPromise.getTime()) /
+                (1000 * 60 * 60 * 24),
+            )
+          : null;
         rows.push({
           customerId: c.id,
           name: c.name,
@@ -1399,6 +1432,11 @@ export class ReportsService {
           d90: round2(buckets.d90),
           pastPromise: round2(buckets.pastPromise),
           total,
+          maxDaysElapsed,
+          oldestUnpaidDate: oldestUnpaidDate
+            ? oldestUnpaidDate.toISOString()
+            : null,
+          daysSinceFirstPastPromise,
         });
       }
     }
@@ -1419,6 +1457,8 @@ export class ReportsService {
       d61_90: number;
       d90: number;
       total: number;
+      maxDaysElapsed: number;
+      oldestUnpaidDate: string | null;
     }>;
   }> {
     const asOf = asOfStr ? new Date(asOfStr) : new Date();
@@ -1431,6 +1471,8 @@ export class ReportsService {
       d61_90: number;
       d90: number;
       total: number;
+      maxDaysElapsed: number;
+      oldestUnpaidDate: string | null;
     }> = [];
 
     for (const sp of suppliers) {
@@ -1451,6 +1493,8 @@ export class ReportsService {
       const paymentsTotal = payments.reduce((s, p) => s + Number(p.amount), 0);
       let remaining = paymentsTotal;
       const buckets = { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 };
+      let maxDaysElapsed = 0;
+      let oldestUnpaidDate: Date | null = null;
 
       const opening = Number(sp.openingBalance) || 0;
       if (opening > 0) {
@@ -1471,6 +1515,10 @@ export class ReportsService {
             (asOf.getTime() - new Date(p.createdAt).getTime()) /
               (1000 * 60 * 60 * 24),
           );
+          if (ageDays > maxDaysElapsed) {
+            maxDaysElapsed = ageDays;
+            oldestUnpaidDate = new Date(p.createdAt);
+          }
           if (ageDays <= 30) buckets.d0_30 += residual;
           else if (ageDays <= 60) buckets.d31_60 += residual;
           else if (ageDays <= 90) buckets.d61_90 += residual;
@@ -1490,10 +1538,188 @@ export class ReportsService {
           d61_90: round2(buckets.d61_90),
           d90: round2(buckets.d90),
           total,
+          maxDaysElapsed,
+          oldestUnpaidDate: oldestUnpaidDate
+            ? oldestUnpaidDate.toISOString()
+            : null,
         });
       }
     }
     return { asOf: asOf.toISOString(), rows };
+  }
+
+  /**
+   * Per-invoice aging detail for one customer. Same FIFO consumption as
+   * arAging() but flattens to a per-sale row so the Customer Ledger page
+   * can show "Days Elapsed" per outstanding invoice. Cheap because we
+   * already iterated this set inside the bucketing loop.
+   */
+  async arAgingDetail(
+    customerId: string,
+    asOfStr?: string,
+  ): Promise<{
+    asOf: string;
+    customer: { id: string; name: string } | null;
+    lines: Array<{
+      invoiceNo: string;
+      saleId: string;
+      createdAt: string;
+      netAmount: number;
+      residualAmount: number;
+      daysElapsed: number;
+      daysSinceFirstPastPromise: number | null;
+      hasPendingCommitment: boolean;
+    }>;
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+    const c = await this.customers.findOne({ where: { id: customerId } });
+    if (!c) return { asOf: asOf.toISOString(), customer: null, lines: [] };
+
+    const sales = await this.sales.find({
+      where: { customerId, createdAt: LessThanOrEqual(asOf) },
+      order: { createdAt: 'ASC' },
+    });
+    const receipts = await this.payments.find({
+      where: {
+        customerId,
+        direction: 'IN' as any,
+        createdAt: LessThanOrEqual(asOf),
+      },
+    });
+    let remaining = receipts.reduce((s, p) => s + Number(p.amount), 0);
+
+    // Opening balance is consumed first as the oldest receivable.
+    const opening = Number(c.openingBalance) || 0;
+    if (opening > 0) remaining = Math.max(0, remaining - opening);
+
+    const lines: Array<{
+      invoiceNo: string;
+      saleId: string;
+      createdAt: string;
+      netAmount: number;
+      residualAmount: number;
+      daysElapsed: number;
+      daysSinceFirstPastPromise: number | null;
+      hasPendingCommitment: boolean;
+    }> = [];
+
+    for (const s of sales) {
+      let residual = Number(s.dueAmount);
+      if (residual <= 0) continue;
+      const consume = Math.min(residual, remaining);
+      residual -= consume;
+      remaining -= consume;
+      if (residual <= 0) continue;
+
+      const daysElapsed = Math.floor(
+        (asOf.getTime() - new Date(s.createdAt).getTime()) /
+          (1000 * 60 * 60 * 24),
+      );
+      const pending = (s.paymentCommitments ?? []).filter(
+        (cm) => cm.status === 'PENDING',
+      );
+      const pastPending = pending.filter(
+        (cm) => new Date(cm.dueDate) < asOf,
+      );
+      const daysSinceFirstPastPromise =
+        pastPending.length > 0
+          ? Math.floor(
+              (asOf.getTime() -
+                new Date(pastPending[0].dueDate).getTime()) /
+                (1000 * 60 * 60 * 24),
+            )
+          : null;
+
+      lines.push({
+        invoiceNo: s.invoiceNo,
+        saleId: s.id,
+        createdAt: new Date(s.createdAt).toISOString(),
+        netAmount: round2(Number(s.netAmount)),
+        residualAmount: round2(residual),
+        daysElapsed,
+        daysSinceFirstPastPromise,
+        hasPendingCommitment: pending.length > 0,
+      });
+    }
+
+    return {
+      asOf: asOf.toISOString(),
+      customer: { id: c.id, name: c.name },
+      lines,
+    };
+  }
+
+  /** Per-bill aging detail for one supplier. Symmetric to arAgingDetail. */
+  async apAgingDetail(
+    supplierId: string,
+    asOfStr?: string,
+  ): Promise<{
+    asOf: string;
+    supplier: { id: string; name: string } | null;
+    lines: Array<{
+      billNo: string;
+      purchaseId: string;
+      createdAt: string;
+      netAmount: number;
+      residualAmount: number;
+      daysElapsed: number;
+    }>;
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+    const sp = await this.suppliers.findOne({ where: { id: supplierId } });
+    if (!sp) return { asOf: asOf.toISOString(), supplier: null, lines: [] };
+
+    const purchases = await this.purchases.find({
+      where: { supplierId, createdAt: LessThanOrEqual(asOf) },
+      order: { createdAt: 'ASC' },
+    });
+    const payments = await this.payments.find({
+      where: {
+        supplierId,
+        direction: 'OUT' as any,
+        createdAt: LessThanOrEqual(asOf),
+      },
+    });
+    let remaining = payments.reduce((s, p) => s + Number(p.amount), 0);
+    const opening = Number(sp.openingBalance) || 0;
+    if (opening > 0) remaining = Math.max(0, remaining - opening);
+
+    const lines: Array<{
+      billNo: string;
+      purchaseId: string;
+      createdAt: string;
+      netAmount: number;
+      residualAmount: number;
+      daysElapsed: number;
+    }> = [];
+
+    for (const p of purchases) {
+      let residual = Number(p.dueAmount);
+      if (residual <= 0) continue;
+      const consume = Math.min(residual, remaining);
+      residual -= consume;
+      remaining -= consume;
+      if (residual <= 0) continue;
+
+      const daysElapsed = Math.floor(
+        (asOf.getTime() - new Date(p.createdAt).getTime()) /
+          (1000 * 60 * 60 * 24),
+      );
+      lines.push({
+        billNo: p.billNo,
+        purchaseId: p.id,
+        createdAt: new Date(p.createdAt).toISOString(),
+        netAmount: round2(Number(p.netAmount)),
+        residualAmount: round2(residual),
+        daysElapsed,
+      });
+    }
+
+    return {
+      asOf: asOf.toISOString(),
+      supplier: { id: sp.id, name: sp.name },
+      lines,
+    };
   }
 
   // ──────────────────────────────────────────────────────────

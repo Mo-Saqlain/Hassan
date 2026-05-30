@@ -2,12 +2,17 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ItemSerial, ItemSerialStatus } from './entities/item-serial.entity';
 import { Item } from '../items/entities/item.entity';
+import { Category } from '../categories/entities/category.entity';
+import { Sequence } from '../sequences/entities/sequence.entity';
+import { DataSource } from 'typeorm';
 import { RegisterSerialsDto } from './dto/register-serials.dto';
 
 /**
@@ -16,11 +21,44 @@ import { RegisterSerialsDto } from './dto/register-serials.dto';
  * this module owns the row mutations + invariants.
  */
 @Injectable()
-export class ItemSerialsService {
+export class ItemSerialsService implements OnModuleInit {
+  private readonly logger = new Logger(ItemSerialsService.name);
+
   constructor(
     @InjectRepository(ItemSerial)
     private readonly repo: Repository<ItemSerial>,
+    private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Backfill `allocationStatus` for rows persisted before the column existed.
+   * Maps the physical-lifecycle `status` to the most likely allocation state:
+   *   IN_STOCK              → AVAILABLE
+   *   SOLD                  → DELIVERED  (they were handed over previously)
+   *   RETURNED / DAMAGED /
+   *   WRITE_OFF             → AVAILABLE  (already-physical states; the unit
+   *                          isn't booked or out the door)
+   * Idempotent — the WHERE skips rows that already have a value. The new
+   * BOOKED state never appears here because it didn't exist before this
+   * migration, and we'd rather mis-classify a historical SOLD as DELIVERED
+   * than leave it null and break the new state-machine guards.
+   */
+  async onModuleInit() {
+    // SQLite + Postgres both treat the column default as applying on INSERT
+    // only, so existing rows are NULL until we backfill. Find them.
+    const stale = await this.repo.find({
+      where: { allocationStatus: IsNull() as any },
+    });
+    if (stale.length === 0) return;
+    for (const r of stale) {
+      r.allocationStatus =
+        r.status === 'SOLD' ? 'DELIVERED' : 'AVAILABLE';
+    }
+    await this.repo.save(stale);
+    this.logger.log(
+      `Backfilled allocation_status on ${stale.length} item_serials row(s).`,
+    );
+  }
 
   /**
    * Idempotently records IN_STOCK rows for a batch of serials on one item.
@@ -130,6 +168,12 @@ export class ItemSerialsService {
     }
 
     row.status = 'SOLD';
+    // Full-payment binding implies the unit walks out with the customer —
+    // allocation transitions all the way to DELIVERED. Partial-payment
+    // sales go through reserveForBooking() instead, which leaves the unit
+    // in IN_STOCK + BOOKED until the balance clears.
+    row.allocationStatus = 'DELIVERED';
+    row.bookedAt = undefined;
     row.saleInvoiceNo = args.saleInvoiceNo;
     row.soldAt = args.soldAt;
     row.soldToCustomerId = args.soldToCustomerId;
@@ -144,6 +188,108 @@ export class ItemSerialsService {
       row.warrantyEndAt = undefined;
     }
     return repo.save(row);
+  }
+
+  /**
+   * Reserve serials for a partial-payment ("BOOKED") sale. Atomic — every
+   * supplied serial must currently be AVAILABLE; one BOOKED or DELIVERED
+   * mid-list throws and the transaction rolls back. Each row's `status`
+   * stays IN_STOCK (the unit is physically still on the floor) but
+   * `allocationStatus` becomes BOOKED with `bookedAt = now`.
+   *
+   * This is the call the spec's "Booking Hold Block" mandates — without it
+   * two customers could pay advances against the same fridge.
+   */
+  async reserveForBooking(
+    args: {
+      serials: string[];
+      itemId: string;
+      saleInvoiceNo: string;
+      soldToCustomerId?: string;
+      bookedAt?: Date;
+    },
+    manager?: EntityManager,
+  ): Promise<ItemSerial[]> {
+    const repo = manager ? manager.getRepository(ItemSerial) : this.repo;
+    const cleaned = args.serials.map((s) => s.trim()).filter(Boolean);
+    if (cleaned.length === 0) return [];
+    const now = args.bookedAt ?? new Date();
+    const out: ItemSerial[] = [];
+    for (const serial of cleaned) {
+      let row = await repo.findOne({ where: { serial } });
+      if (row && row.itemId !== args.itemId) {
+        throw new ConflictException(
+          `Serial "${serial}" is registered to a different item.`,
+        );
+      }
+      if (row && row.allocationStatus === 'BOOKED') {
+        throw new ConflictException(
+          `Serial "${serial}" is already BOOKED on invoice ${row.saleInvoiceNo ?? 'unknown'}.`,
+        );
+      }
+      if (row && row.allocationStatus === 'DELIVERED') {
+        throw new ConflictException(
+          `Serial "${serial}" was already delivered on invoice ${row.saleInvoiceNo ?? 'unknown'}.`,
+        );
+      }
+      if (!row) {
+        row = repo.create({
+          serial,
+          itemId: args.itemId,
+          status: 'IN_STOCK',
+        });
+      }
+      row.allocationStatus = 'BOOKED';
+      row.bookedAt = now;
+      row.saleInvoiceNo = args.saleInvoiceNo;
+      row.soldToCustomerId = args.soldToCustomerId;
+      out.push(await repo.save(row));
+    }
+    return out;
+  }
+
+  /**
+   * Release a BOOKED serial back to AVAILABLE. Called by the
+   * Release-Booking endpoint when the customer never came back, or by
+   * SalesService.reverse() when a booked sale is cancelled. Clears the
+   * sale link + bookedAt so the unit is fully back in the pool.
+   */
+  async releaseBooking(
+    saleInvoiceNo: string,
+    manager?: EntityManager,
+  ): Promise<number> {
+    const repo = manager ? manager.getRepository(ItemSerial) : this.repo;
+    const rows = await repo.find({
+      where: { saleInvoiceNo, allocationStatus: 'BOOKED' },
+    });
+    for (const r of rows) {
+      r.allocationStatus = 'AVAILABLE';
+      r.bookedAt = undefined;
+      r.saleInvoiceNo = undefined;
+      r.soldToCustomerId = undefined;
+    }
+    if (rows.length > 0) await repo.save(rows);
+    return rows.length;
+  }
+
+  /**
+   * Final-handover transition: flips serials BOOKED → DELIVERED once the
+   * sale is paid in full. Called by the Delivery workflow + by the
+   * full-payment path of SalesService.create / PosService.checkout.
+   */
+  async markDelivered(
+    saleInvoiceNo: string,
+    manager?: EntityManager,
+  ): Promise<number> {
+    const repo = manager ? manager.getRepository(ItemSerial) : this.repo;
+    const rows = await repo.find({
+      where: { saleInvoiceNo, allocationStatus: 'BOOKED' as any },
+    });
+    for (const r of rows) {
+      r.allocationStatus = 'DELIVERED';
+    }
+    if (rows.length > 0) await repo.save(rows);
+    return rows.length;
   }
 
   /**
@@ -164,14 +310,28 @@ export class ItemSerialsService {
     return repo.save(row);
   }
 
-  /** Sale reversal: same as a return on every serial linked to the invoice. */
+  /**
+   * Sale reversal: cleanly walks back whatever allocation state the
+   * serials are in:
+   *   BOOKED   → AVAILABLE   (unit was never handed over — back to floor)
+   *   DELIVERED → status=RETURNED, allocation=AVAILABLE
+   * Returns how many rows were touched.
+   */
   async unbindFromInvoice(invoiceNo: string, manager?: EntityManager) {
     const repo = manager ? manager.getRepository(ItemSerial) : this.repo;
-    const rows = await repo.find({
-      where: { saleInvoiceNo: invoiceNo, status: 'SOLD' },
-    });
+    const rows = await repo.find({ where: { saleInvoiceNo: invoiceNo } });
     for (const r of rows) {
-      r.status = 'RETURNED';
+      if (r.allocationStatus === 'BOOKED') {
+        // Never left the shop — back on the floor, no return record.
+        r.allocationStatus = 'AVAILABLE';
+        r.bookedAt = undefined;
+        r.saleInvoiceNo = undefined;
+        r.soldToCustomerId = undefined;
+      } else if (r.allocationStatus === 'DELIVERED' || r.status === 'SOLD') {
+        // Customer had taken delivery — physical return event.
+        r.status = 'RETURNED';
+        r.allocationStatus = 'AVAILABLE';
+      }
     }
     if (rows.length > 0) await repo.save(rows);
     return rows.length;
@@ -188,6 +348,8 @@ export class ItemSerialsService {
       serial: row.serial,
       modelNo: row.item?.modelNo ?? row.item?.name ?? null,
       status: row.status,
+      allocationStatus: row.allocationStatus,
+      bookedAt: row.bookedAt ?? null,
       soldAt: row.soldAt ?? null,
       warrantyStartAt: row.warrantyStartAt ?? null,
       warrantyEndAt: row.warrantyEndAt ?? null,
@@ -200,6 +362,86 @@ export class ItemSerialsService {
         row.warrantyType !== 'NONE' &&
         row.warrantyType !== 'CHECKING_ONLY',
     };
+  }
+
+  /**
+   * Mint N internal-generated serials for a local/unbranded item.
+   *
+   * Serial format: LOCAL-<CategoryCode>-<Year>-<4-digit-sequence>
+   *   e.g.  LOCAL-COOLER-2026-0007
+   *
+   * The sequence segment runs per (category-code, year) so two categories
+   * get independent counters and Jan 1 resets them. Stored in the same
+   * `sequences` table as INV-/PMT-/BILL- counters, keyed on the full
+   * "LOCAL-<code>-<year>" prefix.
+   *
+   * Returns the freshly-saved ItemSerial rows in IN_STOCK + AVAILABLE
+   * state with is_internal_generated = true. POS injects them into the
+   * cart line's serial textarea after the click.
+   */
+  async generateLocalSerials(args: {
+    itemId: string;
+    count: number;
+  }): Promise<ItemSerial[]> {
+    if (!args.count || args.count < 1) {
+      throw new BadRequestException('Count must be at least 1.');
+    }
+    if (args.count > 100) {
+      throw new BadRequestException(
+        'Cannot mint more than 100 serials at once.',
+      );
+    }
+    return this.dataSource.transaction(async (tx) => {
+      const itemRepo = tx.getRepository(Item);
+      const item = await itemRepo.findOne({
+        where: { id: args.itemId },
+        relations: ['categories'],
+      });
+      if (!item) {
+        throw new NotFoundException(`Item ${args.itemId} not found.`);
+      }
+      // First category with a code wins — the owner can have an item in
+      // multiple categories (M2M) but only one drives the serial prefix.
+      const cat = (item.categories ?? []).find(
+        (c) => c.code && c.code.trim().length > 0,
+      );
+      if (!cat || !cat.code) {
+        throw new BadRequestException(
+          `Item "${item.name}" has no category with a Code set. ` +
+            'Add a short uppercase code (e.g. COOLER) on one of the ' +
+            "item's categories first.",
+        );
+      }
+      const year = new Date().getFullYear();
+      const prefix = `LOCAL-${cat.code}-${year}`;
+      const seqRepo = tx.getRepository(Sequence);
+      const serialRepo = tx.getRepository(ItemSerial);
+      const out: ItemSerial[] = [];
+
+      // Pull (or create) the sequence row once, then increment N times in
+      // a single save at the end. Eliminates N round-trips per mint.
+      let row = await seqRepo.findOne({ where: { prefix } });
+      if (!row) {
+        row = seqRepo.create({ prefix, nextValue: 1 });
+      }
+
+      for (let i = 0; i < args.count; i += 1) {
+        const value = row.nextValue;
+        row.nextValue = value + 1;
+        const serial = `${prefix}-${String(value).padStart(4, '0')}`;
+        out.push(
+          serialRepo.create({
+            serial,
+            itemId: args.itemId,
+            status: 'IN_STOCK',
+            allocationStatus: 'AVAILABLE',
+            isInternalGenerated: true,
+          }),
+        );
+      }
+      await seqRepo.save(row);
+      return serialRepo.save(out);
+    });
   }
 
   /** Lists IN_STOCK serials for an item. POS picker uses this. */

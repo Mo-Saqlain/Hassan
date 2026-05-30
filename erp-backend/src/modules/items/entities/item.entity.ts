@@ -162,4 +162,14 @@ export class Item extends BaseEntity {
    */
   @Column({ type: 'integer', name: 'warranty_days', nullable: true })
   warrantyDays?: number;
+
+  /**
+   * Flags an item as unbranded / local where the shop generates its own
+   * serial labels via the LOCAL-<code>-<year>-<seq> scheme. Surfaces a
+   * "Generate & Print Local ID" button on the POS cart row so the salesman
+   * can mint a serial in-flight instead of pre-registering one. Only
+   * meaningful when `tracksSerials` is also true.
+   */
+  @Column({ default: false, name: 'is_internal_generated' })
+  isInternalGenerated: boolean;
 }

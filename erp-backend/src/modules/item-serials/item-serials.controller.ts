@@ -39,6 +39,20 @@ export class ItemSerialsController {
   }
 
   /**
+   * Mint N internal-generated serials for an unbranded local item. POS
+   * calls this when the salesman clicks "+ Generate & Print Local ID" on
+   * a cart line. Returns the freshly-saved serials in IN_STOCK + AVAILABLE
+   * state; the front-end injects them into the line's serial textarea.
+   */
+  @Post('generate-local')
+  generateLocal(@Body() body: { itemId: string; count: number }) {
+    return this.service.generateLocalSerials({
+      itemId: body.itemId,
+      count: Number(body.count) || 1,
+    });
+  }
+
+  /**
    * Public warranty lookup — the route a customer hits via QR / website /
    * walk-in counter. Returns only non-PII data: model, status, sold date,
    * warranty window, active flag. No customer name. Anonymous.

@@ -34,9 +34,10 @@ describe('SalesService', () => {
   let stock: StockService;
   let ds: DataSource;
   let itemId: string;
+  let testModule: any;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    testModule = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot(
           inMemoryTypeOrm([
@@ -59,11 +60,11 @@ describe('SalesService', () => {
     // seeds the system accounts (REVENUE / COGS / INVENTORY / A_R / A_P /
     // CASH_ON_HAND) that the journal posting relies on — without this call
     // the seeder never runs in tests.
-    await module.init();
+    await testModule.init();
 
-    service = module.get(SalesService);
-    stock = module.get(StockService);
-    ds = module.get(DataSource);
+    service = testModule.get(SalesService);
+    stock = testModule.get(StockService);
+    ds = testModule.get(DataSource);
 
     const item = await ds.getRepository(Item).save(
       ds.getRepository(Item).create({
@@ -345,6 +346,81 @@ describe('SalesService', () => {
       await service.reverse(sale.id, { reason: 'second' });
       // Stock should NOT increase a second time
       expect(await stock.getOnHand(itemId)).toBe(onHand);
+    });
+  });
+
+  describe('booking-hold allocation state', () => {
+    let customerId: string;
+    let trackedItemId: string;
+    let serialsSvc: ItemSerialsService;
+
+    beforeEach(async () => {
+      serialsSvc = testModule.get(ItemSerialsService);
+      const c = await ds.getRepository(Customer).save(
+        ds.getRepository(Customer).create({
+          name: 'Booking-Customer', creditEnabled: true, creditLimit: 100000,
+        }),
+      );
+      customerId = c.id;
+      const tracked = await ds.getRepository(Item).save(
+        ds.getRepository(Item).create({
+          name: 'AC Inverter', sku: 'AC-1',
+          purchasePrice: 80000, salePrice: 100000,
+          tracksSerials: true, serialRequiredOnSale: true,
+          hasWarranty: true, warrantyType: 'COMPANY', warrantyDays: 365,
+        }),
+      );
+      trackedItemId = tracked.id;
+      await stock.recordMovement({
+        itemId: trackedItemId, type: 'IN', quantity: 2,
+        referenceType: 'PURCHASE', referenceId: 'seed-tracked',
+      });
+    });
+
+    it('full-payment sale path flips serial to DELIVERED via bindToSale', async () => {
+      const sale = await service.create({
+        customerId,
+        lines: [{ itemId: trackedItemId, quantity: 1, unitPrice: 100000 }],
+        paidAmount: 100000,
+      });
+      expect(Number(sale.dueAmount)).toBe(0);
+
+      await serialsSvc.bindToSale({
+        serial: 'SN-FULL-1',
+        itemId: trackedItemId,
+        saleInvoiceNo: sale.invoiceNo,
+        soldAt: sale.createdAt,
+      });
+      const row = await ds
+        .getRepository(ItemSerial)
+        .findOne({ where: { serial: 'SN-FULL-1' } });
+      expect(row?.allocationStatus).toBe('DELIVERED');
+      expect(row?.status).toBe('SOLD');
+    });
+
+    it('partial-payment sale path flips serial to BOOKED via reserveForBooking', async () => {
+      const sale = await service.create({
+        customerId,
+        lines: [{ itemId: trackedItemId, quantity: 1, unitPrice: 100000 }],
+        paidAmount: 40000,
+        expectedPaymentDate: '2030-01-01',
+      });
+      expect(Number(sale.dueAmount)).toBe(60000);
+
+      await serialsSvc.reserveForBooking({
+        serials: ['SN-BOOK-1'],
+        itemId: trackedItemId,
+        saleInvoiceNo: sale.invoiceNo,
+        soldToCustomerId: customerId,
+        bookedAt: sale.createdAt,
+      });
+      const row = await ds
+        .getRepository(ItemSerial)
+        .findOne({ where: { serial: 'SN-BOOK-1' } });
+      expect(row?.allocationStatus).toBe('BOOKED');
+      expect(row?.status).toBe('IN_STOCK');
+      expect(row?.bookedAt).toBeTruthy();
+      expect(row?.saleInvoiceNo).toBe(sale.invoiceNo);
     });
   });
 });

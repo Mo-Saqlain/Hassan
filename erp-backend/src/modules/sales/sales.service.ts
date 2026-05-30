@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Sale, SalePaymentCommitment } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { ItemSerial } from '../item-serials/entities/item-serial.entity';
 import { StockService } from '../stock/stock.service';
 import { Item } from '../items/entities/item.entity';
 import { OutboxService } from '../outbox/outbox.service';
@@ -387,6 +388,7 @@ export class SalesService {
       expectedAmount: number;
       remainingAmount: number;
       overdue: boolean;
+      daysUntilDue: number;
     }>
   > {
     const horizon = new Date();
@@ -414,6 +416,7 @@ export class SalesService {
       expectedAmount: number;
       remainingAmount: number;
       overdue: boolean;
+      daysUntilDue: number;
     }> = [];
     for (const s of sales) {
       const cs = s.paymentCommitments ?? [];
@@ -426,6 +429,12 @@ export class SalesService {
           (c.expectedAmount - Number(c.actualAmount ?? 0)).toFixed(2),
         );
         if (remaining <= 0) continue;
+        // Signed delta in whole days. Negative = overdue, 0 = due today,
+        // positive = N days remaining. The UI uses this to render
+        // "Overdue 4d" / "Due today" / "Due in 2d" chips instead of dates.
+        const daysUntilDue = Math.floor(
+          (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+        );
         out.push({
           saleId: s.id,
           invoiceNo: s.invoiceNo,
@@ -437,6 +446,7 @@ export class SalesService {
           expectedAmount: c.expectedAmount,
           remainingAmount: remaining,
           overdue: due < today,
+          daysUntilDue,
         });
       }
     }
@@ -450,10 +460,123 @@ export class SalesService {
    * bumps `amountPaidSettled`, and flips the commitment entry to PAID once
    * the cumulative settled amount on that entry reaches `expectedAmount`.
    * Partial settlements are supported — they update `actualAmount` but
-   * leave the status as PENDING until fully cleared.
-   *
-   * Idempotency: re-calling on an already-PAID commitment is a no-op.
+   * Lists every sale that's holding a BOOKED unit (partial-payment, not
+   * yet delivered) where the booking is at least `minDays` old. The owner's
+   * dashboard for recovering capital tied up in dead reservations — the
+   * customer paid an advance, took the receipt, never came back. Each row
+   * carries the linked serials so the Release-to-Floor confirmation can
+   * surface exactly which units are about to revert to AVAILABLE.
    */
+  async overdueBookings(
+    minDays = 7,
+  ): Promise<
+    Array<{
+      saleId: string;
+      invoiceNo: string;
+      customerId?: string;
+      customerName: string;
+      customerPhone?: string;
+      bookedOn: string;
+      daysElapsed: number;
+      remainingDue: number;
+      paidSoFar: number;
+      serials: Array<{ serial: string; itemName: string }>;
+    }>
+  > {
+    const now = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // Pull every BOOKED serial row in one query, then group by invoice.
+    // BOOKED implies allocationStatus, which is also keyed for fast scan.
+    const bookedRows = await this.dataSource
+      .getRepository(ItemSerial)
+      .find({ where: { allocationStatus: 'BOOKED' as any } });
+    if (bookedRows.length === 0) return [];
+
+    const byInvoice = new Map<
+      string,
+      Array<{ serial: string; itemName: string }>
+    >();
+    for (const r of bookedRows as any[]) {
+      const list = byInvoice.get(r.saleInvoiceNo) ?? [];
+      list.push({
+        serial: r.serial,
+        itemName: r.item?.modelNo ?? r.item?.name ?? r.serial,
+      });
+      byInvoice.set(r.saleInvoiceNo, list);
+    }
+
+    const sales = await this.sales.find({
+      where: { invoiceNo: In(Array.from(byInvoice.keys())) },
+      relations: ['customer'],
+    });
+
+    const out: Array<{
+      saleId: string;
+      invoiceNo: string;
+      customerId?: string;
+      customerName: string;
+      customerPhone?: string;
+      bookedOn: string;
+      daysElapsed: number;
+      remainingDue: number;
+      paidSoFar: number;
+      serials: Array<{ serial: string; itemName: string }>;
+    }> = [];
+
+    for (const s of sales) {
+      if (s.reversedAt) continue;
+      const bookedOn = new Date(s.createdAt);
+      const daysElapsed = Math.floor(
+        (now.getTime() - bookedOn.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (daysElapsed < minDays) continue;
+      out.push({
+        saleId: s.id,
+        invoiceNo: s.invoiceNo,
+        customerId: s.customerId,
+        customerName: s.customer?.name ?? 'Walk-in',
+        customerPhone: s.customer?.phone,
+        bookedOn: bookedOn.toISOString(),
+        daysElapsed,
+        remainingDue: Number(Number(s.dueAmount ?? 0).toFixed(2)),
+        paidSoFar: Number(Number(s.amountPaidSettled ?? s.paidAmount ?? 0).toFixed(2)),
+        serials: byInvoice.get(s.invoiceNo) ?? [],
+      });
+    }
+    out.sort((a, b) => b.daysElapsed - a.daysElapsed);
+    return out;
+  }
+
+  /**
+   * Release-to-Floor: cancels a stuck booking and reverts the held serials
+   * back to AVAILABLE so they can be sold to a fresh customer. The advance
+   * already paid is NOT auto-refunded — it stays as a customer-credit on
+   * their ledger (the owner can refund it manually via a Receipt-reversal
+   * + a separate cash-book OUT entry).
+   *
+   * Mechanics:
+   *   1. Re-uses the existing sale-reversal pipeline for the accounting
+   *      half (Cr A/R + Cr Deferred Receivables + Dr Revenue, etc.). The
+   *      reversal call is idempotent; safe to re-press the button.
+   *   2. The `unbindFromInvoice` call inside reverse() flips BOOKED ↦
+   *      AVAILABLE automatically — that's the rule we already wired in
+   *      Phase 2D.
+   *   3. Adds a marker reason "RELEASE-TO-FLOOR" so the audit log distinguishes
+   *      this from a "wrong invoice" reversal.
+   */
+  async releaseBooking(
+    saleId: string,
+    opts: { userId?: string; reason?: string },
+  ): Promise<Sale> {
+    const reason = (opts.reason ?? '').trim() ||
+      'Release-to-floor: booking expired without final payment';
+    return this.reverse(saleId, {
+      userId: opts.userId,
+      reason: `RELEASE-TO-FLOOR · ${reason}`,
+    });
+  }
+
   async settleCommitment(
     saleId: string,
     args: {
@@ -552,6 +675,13 @@ export class SalesService {
         Number((Number(sale.dueAmount) - applied).toFixed(2)),
       );
       const saved = await saleRepo.save(sale);
+
+      // If the sale is now fully paid AND any of its serials are still
+      // BOOKED, the unit becomes deliverable — flip them to DELIVERED so
+      // the Strict-Handover guard in DeliveriesService allows the truck out.
+      if (sale.dueAmount <= 0.005) {
+        await this.itemSerials.markDelivered(sale.invoiceNo, manager);
+      }
 
       // Surface the overflow back to the caller so the UI can route it to
       // an open-credit voucher instead of silently dropping it.

@@ -102,4 +102,8 @@ export class CreateItemDto {
   @Min(0)
   @IsOptional()
   warrantyDays?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isInternalGenerated?: boolean;
 }

@@ -240,25 +240,44 @@ export class PosService {
     const sale = await this.sales.create(saleDto as any, { skipOutbox: true });
 
     // Bind every tracksSerials cart line's serials to the sale. Done after
-    // the sale is persisted because we need the invoice number; runs outside
-    // the SalesService transaction but is idempotent — a re-run won't double-
-    // bind the same serial (the service rejects already-SOLD serials). When
-    // the item's warranty master switch is off, we still create the serial
-    // row (for ownership history) but with no warranty fields populated.
+    // the sale persists because we need the invoice number.
+    //
+    // Two paths depending on payment status:
+    //   - Sale fully paid (dueAmount = 0): bindToSale flips serial to
+    //     allocationStatus=DELIVERED and stamps warranty.
+    //   - Sale partially paid (dueAmount > 0): the unit is BOOKED on hold;
+    //     reserveForBooking flips to allocationStatus=BOOKED, leaves
+    //     status=IN_STOCK. Warranty is stamped only when the balance
+    //     clears via settleCommitment (handled by SalesService).
+    const dueAmount = Number(sale.dueAmount ?? 0);
+    const isBooking = dueAmount > 0.005;
     for (const ln of cartLines) {
       const it = itemMap.get(ln.itemId);
       if (!it || !it.tracksSerials) continue;
       const provided = serialMap.get(ln.itemId) ?? [];
-      for (const serial of provided) {
-        await this.itemSerials.bindToSale({
-          serial,
+      if (provided.length === 0) continue;
+      if (isBooking) {
+        await this.itemSerials.reserveForBooking({
+          serials: provided,
           itemId: ln.itemId,
           saleInvoiceNo: sale.invoiceNo,
-          soldAt: sale.createdAt,
           soldToCustomerId: dto.customerId,
-          warrantyDays: it.hasWarranty ? it.warrantyDays ?? undefined : undefined,
-          warrantyType: it.hasWarranty ? it.warrantyType : undefined,
+          bookedAt: sale.createdAt,
         });
+      } else {
+        for (const serial of provided) {
+          await this.itemSerials.bindToSale({
+            serial,
+            itemId: ln.itemId,
+            saleInvoiceNo: sale.invoiceNo,
+            soldAt: sale.createdAt,
+            soldToCustomerId: dto.customerId,
+            warrantyDays: it.hasWarranty
+              ? it.warrantyDays ?? undefined
+              : undefined,
+            warrantyType: it.hasWarranty ? it.warrantyType : undefined,
+          });
+        }
       }
     }
 

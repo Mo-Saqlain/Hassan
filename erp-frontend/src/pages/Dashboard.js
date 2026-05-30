@@ -37,6 +37,8 @@ export default function Dashboard() {
     incentivesMTD: 0,
     customerOwesUs: 0,
     weOweSuppliers: 0,
+    oldestAR: null,
+    oldestAP: null,
     topSelling: [],
     activity: [],
     incentive: null,
@@ -65,6 +67,8 @@ export default function Dashboard() {
           incomeMTD,
           custBalances,
           suppBalances,
+          arAging,
+          apAging,
           sales,
           purchases,
           payments,
@@ -77,6 +81,8 @@ export default function Dashboard() {
           api.get(`/reports/income-statement?from=${monthStart}&to=${todayStr}`),
           api.get('/reports/customer-balances'),
           api.get('/reports/supplier-balances'),
+          api.get('/reports/ar-aging').catch(() => ({ data: { rows: [] } })),
+          api.get('/reports/ap-aging').catch(() => ({ data: { rows: [] } })),
           api.get('/sales'),
           api.get('/purchases'),
           api.get('/payments'),
@@ -111,6 +117,21 @@ export default function Dashboard() {
           .map((s) => Number(s.balance ?? 0))
           .filter((b) => b > 0)
           .reduce((a, b) => a + b, 0);
+        // Oldest unpaid for each side — the row with the highest
+        // maxDaysElapsed across customers / suppliers. Drives the
+        // "Oldest unpaid: 47d (Ali Khan)" line under the totals.
+        const arRows = arAging?.data?.rows ?? [];
+        const apRows = apAging?.data?.rows ?? [];
+        const oldestAR = arRows.length
+          ? arRows.reduce((m, r) =>
+              r.maxDaysElapsed > (m?.maxDaysElapsed ?? -1) ? r : m,
+            null)
+          : null;
+        const oldestAP = apRows.length
+          ? apRows.reduce((m, r) =>
+              r.maxDaysElapsed > (m?.maxDaysElapsed ?? -1) ? r : m,
+            null)
+          : null;
 
         // ─ Top selling — by total qty across all sales in last 14d
         const last14Sales = (sales.data ?? []).filter(
@@ -194,6 +215,8 @@ export default function Dashboard() {
           incentivesMTD: Number(incomeMTD.data?.incentives ?? 0),
           customerOwesUs,
           weOweSuppliers,
+          oldestAR,
+          oldestAP,
           topSelling,
           activity,
           incentive,
@@ -393,6 +416,22 @@ export default function Dashboard() {
                 >
                   {Rs(data.customerOwesUs)}
                 </div>
+                {data.oldestAR && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color:
+                        data.oldestAR.maxDaysElapsed >= 30
+                          ? 'var(--danger)'
+                          : data.oldestAR.maxDaysElapsed >= 15
+                            ? 'var(--warning)'
+                            : 'var(--text-muted)',
+                      marginTop: 2,
+                    }}
+                  >
+                    Oldest unpaid: {data.oldestAR.maxDaysElapsed}d ({data.oldestAR.name})
+                  </div>
+                )}
               </div>
               <Link to="/customer-ledger" className="btn btn-sm btn-ghost">
                 <Icon name="arrow-up" size={16} />
@@ -414,6 +453,22 @@ export default function Dashboard() {
                 >
                   {Rs(data.weOweSuppliers)}
                 </div>
+                {data.oldestAP && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color:
+                        data.oldestAP.maxDaysElapsed >= 30
+                          ? 'var(--danger)'
+                          : data.oldestAP.maxDaysElapsed >= 15
+                            ? 'var(--warning)'
+                            : 'var(--text-muted)',
+                      marginTop: 2,
+                    }}
+                  >
+                    Oldest payable: {data.oldestAP.maxDaysElapsed}d ({data.oldestAP.name})
+                  </div>
+                )}
               </div>
               <Link to="/supplier-ledger" className="btn btn-sm btn-ghost">
                 <Icon name="arrow-down" size={16} />
@@ -466,9 +521,13 @@ export default function Dashboard() {
                     <span
                       className={`chip ${c.overdue ? 'chip-danger' : 'chip-info'}`}
                       style={{ fontSize: 10.5 }}
+                      title={`Promised by ${new Date(c.dueDate).toLocaleDateString()}`}
                     >
-                      {c.overdue ? 'Overdue · ' : 'Due '}
-                      {new Date(c.dueDate).toLocaleDateString()}
+                      {c.daysUntilDue < 0
+                        ? `Overdue ${-c.daysUntilDue}d`
+                        : c.daysUntilDue === 0
+                          ? 'Due today'
+                          : `Due in ${c.daysUntilDue}d`}
                     </span>
                   </div>
                 </div>

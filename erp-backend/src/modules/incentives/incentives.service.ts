@@ -116,6 +116,83 @@ export class IncentivesService {
     return Promise.all(list.map((t) => this.targetProgress(t.id)));
   }
 
+  /**
+   * Per-item "effective cost discount" driven by manufacturer incentives.
+   * For every ACTIVE target whose net-sold progress has crossed its
+   * `triggerThresholdPct`, the per-unit credit (incentiveAmount /
+   * targetQuantity) is treated as a likely earnback that reduces the
+   * effective cost of remaining units in that target's pool.
+   *
+   * Output: map of itemId -> { perUnitCredit, targetId, targetName,
+   * progressPct }. For BRAND-basis targets, the credit is propagated to
+   * every Item with that brand. If multiple active+triggered targets
+   * touch the same item, the larger credit wins (we want the cashier to
+   * be aware of the best available recovery).
+   *
+   * Used by:
+   *   - POS frontend to show a small "Manufacturer incentive: Rs X/unit"
+   *     hint on the cart row and to soften the "selling below cost" warning
+   *   - Margin analytics to surface an incentive-adjusted margin alongside
+   *     raw margin
+   */
+  async effectiveCostAdjustments(): Promise<{
+    asOf: string;
+    items: Record<
+      string,
+      {
+        perUnitCredit: number;
+        targetId: string;
+        targetName: string;
+        progressPct: number;
+        threshold: number;
+      }
+    >;
+  }> {
+    const now = new Date().toISOString();
+    const all = await this.allTargetProgress();
+    const out: Record<string, {
+      perUnitCredit: number;
+      targetId: string;
+      targetName: string;
+      progressPct: number;
+      threshold: number;
+    }> = [] as any;
+
+    for (const p of all) {
+      const t = p.target;
+      if (!t.isActive) continue;
+      const threshold = Number(t.triggerThresholdPct ?? 80);
+      if (p.progressPct < threshold) continue;
+      if (!t.targetQuantity || t.targetQuantity <= 0) continue;
+      const perUnitCredit = Number(
+        (Number(t.incentiveAmount) / Number(t.targetQuantity)).toFixed(2),
+      );
+      const entry = {
+        perUnitCredit,
+        targetId: t.id,
+        targetName: t.name,
+        progressPct: p.progressPct,
+        threshold,
+      };
+
+      const itemIds: string[] = [];
+      if (t.basis === 'ITEM' && t.itemId) {
+        itemIds.push(t.itemId);
+      } else if (t.basis === 'BRAND' && t.brandId) {
+        const items = await this.items.find({ where: { brandId: t.brandId } });
+        itemIds.push(...items.map((i) => i.id));
+      }
+      for (const itemId of itemIds) {
+        const existing = (out as any)[itemId];
+        // Bigger credit wins — surface the best available recovery.
+        if (!existing || existing.perUnitCredit < perUnitCredit) {
+          (out as any)[itemId] = entry;
+        }
+      }
+    }
+    return { asOf: now, items: out as any };
+  }
+
   private buildProgress(t: IncentiveTarget, sold: number, returned: number) {
     const net = Math.max(0, sold - returned);
     const target = Number(t.targetQuantity);

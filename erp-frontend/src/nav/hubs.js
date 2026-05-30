@@ -43,15 +43,21 @@ export const HUBS = {
   sales: {
     label: 'Sales',
     title: 'Sales',
-    subtitle: 'Posted invoices, sale returns, and delivery tracking.',
+    subtitle:
+      'Posted invoices, sale returns, delivery tracking, and overdue bookings.',
     icon: 'receipt',
     colorVar: '--nav-sales',
     defaultTo: '/sales',
-    paths: ['/sales', '/sale-returns', '/deliveries'],
+    paths: ['/sales', '/sale-returns', '/deliveries', '/overdue-bookings'],
     tabs: [
       { to: '/sales', label: 'History', icon: 'receipt' },
       { to: '/sale-returns', label: 'Returns', icon: 'transfer' },
       { to: '/deliveries', label: 'Deliveries', icon: 'truck' },
+      {
+        to: '/overdue-bookings',
+        label: 'Overdue Bookings',
+        icon: 'packageX',
+      },
     ],
   },
   supplier: {

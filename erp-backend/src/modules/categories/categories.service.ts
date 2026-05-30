@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { Category } from './entities/category.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -18,6 +19,7 @@ export class CategoriesService {
 
   async create(dto: CreateCategoryDto) {
     if (dto.parentId) await this.ensureExists(dto.parentId);
+    if (dto.code) await this.ensureCodeUnique(dto.code);
     return this.repo.save(this.repo.create(dto));
   }
 
@@ -56,8 +58,24 @@ export class CategoriesService {
       await this.ensureExists(dto.parentId);
       await this.ensureNoCycle(id, dto.parentId);
     }
+    if (dto.code && dto.code !== c.code) {
+      await this.ensureCodeUnique(dto.code, id);
+    }
     Object.assign(c, dto);
     return this.repo.save(c);
+  }
+
+  /** App-layer uniqueness on Category.code — partial unique indexes have
+   *  dialect-specific syntax that we don't want to deal with. */
+  private async ensureCodeUnique(code: string, exceptId?: string) {
+    const existing = await this.repo.findOne({
+      where: exceptId ? { code, id: Not(exceptId) } : { code },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `Code "${code}" is already used by category "${existing.name}". Pick a different code.`,
+      );
+    }
   }
 
   async remove(id: string) {

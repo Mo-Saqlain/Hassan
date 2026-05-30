@@ -63,6 +63,10 @@ export default function POS() {
   // separated string entered by the salesman. Only applies to tracksSerials
   // items — split + validated against line.quantity at checkout time.
   const [lineSerials, setLineSerials] = useState({});
+  // Per-item incentive credit map: itemId -> { perUnitCredit, targetName, … }.
+  // When net-sold qty crosses the target's threshold, the per-unit credit
+  // softens the "selling below cost" warning and shows on the cart row.
+  const [costAdjustments, setCostAdjustments] = useState({});
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastSale, setLastSale] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -97,15 +101,19 @@ export default function POS() {
   useEffect(() => {
     (async () => {
       try {
-        const [active, cust, str, acct] = await Promise.all([
+        const [active, cust, str, acct, costAdj] = await Promise.all([
           api.get('/pos/sessions/active'),
           api.get('/customers'),
           api.get('/stores'),
           api.get('/accounts'),
+          api.get('/incentives/cost-adjustments').catch(() => ({
+            data: { items: {} },
+          })),
         ]);
         setCustomers(cust.data);
         setStores(str.data);
         setAccounts(acct.data);
+        setCostAdjustments(costAdj.data?.items ?? {});
         if (active.data) {
           setSession(active.data);
           await loadCart(active.data.id);
@@ -234,6 +242,39 @@ export default function POS() {
     }
   };
 
+  /**
+   * "+ Generate & Print Local ID" — mints N serials for an unbranded
+   * tracksSerials item, injects them into the line's serial textarea, then
+   * opens one print-label tab per serial. The backend rejects if the
+   * item's category has no Code set.
+   */
+  const generateLocalSerials = async (line) => {
+    try {
+      const r = await api.post('/item-serials/generate-local', {
+        itemId: line.itemId,
+        count: line.quantity,
+      });
+      const newSerials = (r.data ?? []).map((s) => s.serial);
+      if (newSerials.length === 0) return;
+      // Append to whatever the cashier had already typed, newline-separated.
+      setLineSerials((prev) => {
+        const existing = (prev[line.id] ?? '').trim();
+        const merged = existing
+          ? existing + '\n' + newSerials.join('\n')
+          : newSerials.join('\n');
+        return { ...prev, [line.id]: merged };
+      });
+      // Spawn label print tabs — one per serial. Most browsers will batch
+      // these into a popup-block if there are too many; the cashier can
+      // re-trigger from the Items hub if needed.
+      for (const s of newSerials.slice(0, 5)) {
+        window.open(`#/print/serial-label/${encodeURIComponent(s)}`, '_blank');
+      }
+    } catch (err) {
+      alert(err.uiMessage ?? 'Local serial mint failed');
+    }
+  };
+
   // Keyboard shortcuts: F2 scan, F4 customer, F8 checkout, F9 clear cart.
   usePosShortcuts({
     scanInputRef,
@@ -344,6 +385,12 @@ export default function POS() {
       // refresh session totals
       const refreshed = await api.get(`/pos/sessions/${session.id}`);
       setSession(refreshed.data);
+      // refresh incentive credits — this sale may have just pushed a target
+      // over its threshold, unlocking a new effective-cost discount.
+      api
+        .get('/incentives/cost-adjustments')
+        .then((r) => setCostAdjustments(r.data?.items ?? {}))
+        .catch(() => {});
       // refocus scan input
       setTimeout(() => scanInputRef.current?.focus(), 0);
     } catch (err) {
@@ -538,6 +585,17 @@ export default function POS() {
                   const serialsOk = required
                     ? enteredCount === ln.quantity
                     : enteredCount === 0 || enteredCount === ln.quantity;
+                  // Effective cost = avgCost minus any incentive credit
+                  // unlocked by an active+triggered manufacturer target.
+                  const avgCost = Number(ln.item?.avgCost ?? 0);
+                  const credit = costAdjustments[ln.itemId];
+                  const perUnitCredit = credit?.perUnitCredit ?? 0;
+                  const effectiveCost = Math.max(0, avgCost - perUnitCredit);
+                  const unitPrice = Number(ln.price);
+                  const belowEffectiveCost =
+                    avgCost > 0 && unitPrice < effectiveCost;
+                  const belowRawCost =
+                    avgCost > 0 && unitPrice < avgCost && !belowEffectiveCost;
                   return (
                   <Fragment key={ln.id}>
                   <tr>
@@ -554,6 +612,46 @@ export default function POS() {
                           }}
                         >
                           {ln.item.brand.name}
+                        </div>
+                      )}
+                      {credit && (
+                        <div
+                          className="chip chip-info"
+                          style={{
+                            fontSize: 10.5,
+                            marginTop: 4,
+                            display: 'inline-block',
+                          }}
+                          title={`Target "${credit.targetName}" at ${credit.progressPct.toFixed(0)}% — effective cost Rs ${effectiveCost.toFixed(2)}`}
+                        >
+                          + Rs {perUnitCredit.toFixed(0)}/unit incentive
+                        </div>
+                      )}
+                      {belowEffectiveCost && (
+                        <div
+                          className="chip chip-danger"
+                          style={{
+                            fontSize: 10.5,
+                            marginTop: 4,
+                            marginLeft: credit ? 4 : 0,
+                            display: 'inline-block',
+                          }}
+                          title={`Below effective cost of Rs ${effectiveCost.toFixed(2)} — this sale will lose money even after the incentive`}
+                        >
+                          Below cost
+                        </div>
+                      )}
+                      {belowRawCost && (
+                        <div
+                          className="chip chip-warn"
+                          style={{
+                            fontSize: 10.5,
+                            marginTop: 4,
+                            display: 'inline-block',
+                          }}
+                          title={`Below avg cost Rs ${avgCost.toFixed(2)} — covered by incentive if target lands`}
+                        >
+                          Below raw cost · incentive covers
                         </div>
                       )}
                     </td>
@@ -634,6 +732,18 @@ export default function POS() {
                             fontSize: 12,
                           }}
                         />
+                        {ln.item?.isInternalGenerated && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{ marginTop: 4 }}
+                            onClick={() => generateLocalSerials(ln)}
+                            title="Mint LOCAL-{cat}-{year}-{seq} serials for this line and inject them above. Opens print labels in new tabs."
+                          >
+                            + Generate &amp; Print Local ID
+                            {ln.quantity > 1 ? `s (${ln.quantity})` : ''}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )}

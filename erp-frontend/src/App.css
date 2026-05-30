@@ -706,6 +706,57 @@ tr:last-child td { border-bottom: none; }
   padding-top: 12px;
   border-top: 1px dashed #999;
 }
+
+/* 2in × 1in thermal-sticker label for local-generated serials. The
+   browser scales the .serial-label box to fit @page when sent to a
+   2x1 thermal printer; on A4 it just sits top-left as a single label. */
+.serial-label-page {
+  padding: 12px;
+}
+@page {
+  size: 2in 1in;
+  margin: 0;
+}
+.serial-label {
+  width: 2in;
+  height: 1in;
+  padding: 4px 6px;
+  border: 1px solid #000;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  page-break-after: always;
+  font-family: 'Cascadia Code', monospace;
+  color: #000;
+  background: #fff;
+}
+.serial-label-brand {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.serial-label-bars {
+  text-align: center;
+  height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.serial-label-text {
+  font-size: 10px;
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.serial-label-item {
+  font-size: 7px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #444;
+}
 .print-warranty .warranty-title {
   font-weight: 700;
   text-transform: uppercase;

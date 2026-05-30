@@ -181,6 +181,7 @@ function TargetsPanel() {
       periodEnd: t.periodEnd,
       targetQuantity: t.targetQuantity,
       incentiveAmount: t.incentiveAmount,
+      triggerThresholdPct: t.triggerThresholdPct ?? 80,
       notes: t.notes ?? '',
       isActive: t.isActive,
     };
@@ -203,6 +204,10 @@ function TargetsPanel() {
       periodEnd: form.periodEnd,
       targetQuantity: Number(form.targetQuantity),
       incentiveAmount: Number(form.incentiveAmount),
+      triggerThresholdPct:
+        form.triggerThresholdPct === '' || form.triggerThresholdPct == null
+          ? undefined
+          : Number(form.triggerThresholdPct),
       notes: form.notes || undefined,
       isActive: form.isActive,
     };
@@ -362,6 +367,25 @@ function TargetsPanel() {
                   setForm({ ...form, incentiveAmount: e.target.value })
                 }
               />
+            </div>
+            <div>
+              <label title="Once net-sold qty crosses this % of target, the POS treats the per-unit incentive credit as already earned for pricing decisions.">
+                Trigger threshold (%)
+              </label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="100"
+                value={form.triggerThresholdPct}
+                onChange={(e) =>
+                  setForm({ ...form, triggerThresholdPct: e.target.value })
+                }
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                Default 80%. When progress crosses this, POS surfaces a per-unit
+                discount on the cart and softens the "selling below cost" warning.
+              </div>
             </div>
           </div>
           <div>
@@ -683,6 +707,7 @@ function blankTarget() {
     periodEnd: eom.toISOString().slice(0, 10),
     targetQuantity: '',
     incentiveAmount: '',
+    triggerThresholdPct: 80,
     notes: '',
     isActive: true,
   };

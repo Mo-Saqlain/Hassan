@@ -34,6 +34,17 @@ export class IncentivesController {
     return this.service.allTargetProgress();
   }
 
+  /**
+   * Per-item effective-cost adjustments derived from in-progress incentive
+   * targets that have crossed their trigger threshold. POS reads this on
+   * mount and refreshes after a sale to soften "selling below cost" warnings
+   * and surface the recoverable credit on the cart row.
+   */
+  @Get('cost-adjustments')
+  costAdjustments() {
+    return this.service.effectiveCostAdjustments();
+  }
+
   @Get('targets/:id')
   findTarget(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findTarget(id);

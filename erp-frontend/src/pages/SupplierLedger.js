@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import LedgerView from '../components/LedgerView';
+import AgingPanel from '../components/AgingPanel';
 
 export default function SupplierLedger() {
   const { id } = useParams();
   const [suppliers, setSuppliers] = useState([]);
   const [selectedId, setSelectedId] = useState(id ?? '');
   const [ledger, setLedger] = useState(null);
+  const [aging, setAging] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -22,10 +24,15 @@ export default function SupplierLedger() {
   useEffect(() => {
     if (!selectedId) return;
     setLedger(null);
+    setAging(null);
     api
       .get(`/reports/supplier-ledger/${selectedId}`)
       .then((r) => setLedger(r.data))
       .catch((e) => setError(e.uiMessage ?? 'Failed to load ledger'));
+    api
+      .get(`/reports/ap-aging/${selectedId}`)
+      .then((r) => setAging(r.data))
+      .catch(() => setAging({ lines: [] }));
   }, [selectedId]);
 
   const supplier = suppliers.find((s) => s.id === selectedId);
@@ -64,6 +71,13 @@ export default function SupplierLedger() {
                 </div>
               )}
             </div>
+          )}
+          {aging && aging.lines && aging.lines.length > 0 && (
+            <AgingPanel
+              title="Outstanding bills"
+              lines={aging.lines}
+              numKey="billNo"
+            />
           )}
           <LedgerView title={supplier?.name} party={supplier} ledger={ledger} />
         </>

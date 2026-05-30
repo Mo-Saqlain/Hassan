@@ -4,7 +4,13 @@ import { useResource } from '../../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../ExportButtons';
 
-const empty = { name: '', description: '', parentId: '', isActive: true };
+const empty = {
+  name: '',
+  code: '',
+  description: '',
+  parentId: '',
+  isActive: true,
+};
 
 export default function CategoriesPanel() {
   const { data: categories, loading, error, reload } = useResource('/categories');
@@ -38,6 +44,7 @@ export default function CategoriesPanel() {
     const next = row
       ? {
           name: row.name ?? '',
+          code: row.code ?? '',
           description: row.description ?? '',
           parentId: row.parentId ?? '',
           isActive: row.isActive ?? true,
@@ -53,6 +60,7 @@ export default function CategoriesPanel() {
     e.preventDefault();
     const payload = {
       name: form.name.trim(),
+      code: form.code ? form.code.trim().toUpperCase() : undefined,
       description: form.description || undefined,
       parentId: form.parentId || undefined,
       isActive: form.isActive,
@@ -134,6 +142,25 @@ export default function CategoriesPanel() {
                 required
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <label
+                title="Short uppercase code (up to 8 chars) used as the segment of auto-generated local serials: LOCAL-{code}-{year}-{seq}. Set this on categories whose items are local/unbranded."
+              >
+                Code
+              </label>
+              <input
+                maxLength={8}
+                value={form.code}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+                  })
+                }
+                placeholder="e.g. COOLER, FAN, STAND"
+                style={{ fontFamily: 'var(--font-mono)' }}
               />
             </div>
             <div>

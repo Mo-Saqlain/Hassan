@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import LedgerView from '../components/LedgerView';
+import AgingPanel from '../components/AgingPanel';
 
 export default function CustomerLedger() {
   const { id } = useParams();
   const [customers, setCustomers] = useState([]);
   const [selectedId, setSelectedId] = useState(id ?? '');
   const [ledger, setLedger] = useState(null);
+  const [aging, setAging] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -22,10 +24,15 @@ export default function CustomerLedger() {
   useEffect(() => {
     if (!selectedId) return;
     setLedger(null);
+    setAging(null);
     api
       .get(`/reports/customer-ledger/${selectedId}`)
       .then((r) => setLedger(r.data))
       .catch((e) => setError(e.uiMessage ?? 'Failed to load ledger'));
+    api
+      .get(`/reports/ar-aging/${selectedId}`)
+      .then((r) => setAging(r.data))
+      .catch(() => setAging({ lines: [] }));
   }, [selectedId]);
 
   const customer = customers.find((c) => c.id === selectedId);
@@ -64,6 +71,14 @@ export default function CustomerLedger() {
                 </div>
               )}
             </div>
+          )}
+          {aging && aging.lines && aging.lines.length > 0 && (
+            <AgingPanel
+              title="Outstanding invoices"
+              lines={aging.lines}
+              numKey="invoiceNo"
+              showPromiseColumn
+            />
           )}
           <LedgerView title={customer?.name} party={customer} ledger={ledger} />
         </>

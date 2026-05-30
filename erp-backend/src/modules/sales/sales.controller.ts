@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -54,5 +55,30 @@ export class SalesController {
   @Get('deferred/upcoming')
   upcomingDeferred() {
     return this.service.upcomingDeferred();
+  }
+
+  /**
+   * Sales with at least one BOOKED serial whose booking is >= minDays old.
+   * The Overdue Bookings dashboard reads this to surface stuck advances
+   * tying up inventory.
+   */
+  @Get('overdue-bookings')
+  overdueBookings(@Query('minDays') minDays?: string) {
+    const n = minDays != null ? parseInt(minDays, 10) : 7;
+    return this.service.overdueBookings(Number.isFinite(n) ? n : 7);
+  }
+
+  /**
+   * Release-to-Floor: cancels a stuck booking, reverts the BOOKED serials
+   * to AVAILABLE so they can be sold again. Idempotent — calling on an
+   * already-released booking is a no-op. Does NOT refund the advance;
+   * the owner has to do that manually via a Receipt-reversal.
+   */
+  @Post(':id/release-booking')
+  releaseBooking(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.service.releaseBooking(id, { reason: body?.reason });
   }
 }

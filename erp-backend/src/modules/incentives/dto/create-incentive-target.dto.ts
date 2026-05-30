@@ -52,4 +52,9 @@ export class CreateIncentiveTargetDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  triggerThresholdPct?: number;
 }

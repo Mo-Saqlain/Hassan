@@ -89,6 +89,23 @@ export class DeliveriesService {
       const nextStatus = dto.status ?? row.status;
       const willReserve = reserves(nextStatus);
 
+      // Strict Delivery Handover Authorization: never let a unit leave the
+      // shop while the customer still owes money. The spec's defining
+      // safeguard against the "took the AC home then disputed the bill"
+      // scenario.
+      const isHandoverTransition =
+        nextStatus === 'DELIVERED' && row.status !== 'DELIVERED';
+      if (isHandoverTransition && row.saleId) {
+        const sale = await manager
+          .getRepository(Sale)
+          .findOne({ where: { id: row.saleId } });
+        if (sale && Number(sale.dueAmount ?? 0) > 0.005) {
+          throw new BadRequestException(
+            `Cannot mark delivery ${row.deliveryNo} as DELIVERED — customer still owes Rs ${Number(sale.dueAmount).toFixed(2)} on invoice ${sale.invoiceNo}. Collect the balance via Customer → Receipts first.`,
+          );
+        }
+      }
+
       Object.assign(row, dto);
       if (dto.scheduledFor) row.scheduledFor = new Date(dto.scheduledFor);
       if (nextStatus === 'DELIVERED' && !row.deliveredAt) {

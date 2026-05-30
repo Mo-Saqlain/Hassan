@@ -43,6 +43,41 @@ export class ItemSerial extends BaseEntity {
   @Column({ type: 'varchar', default: 'IN_STOCK' })
   status: ItemSerialStatus;
 
+  /**
+   * Allocation lifecycle — orthogonal to `status` (which is the physical
+   * lifecycle: IN_STOCK / SOLD / RETURNED / DAMAGED / WRITE_OFF). A unit
+   * can be DAMAGED-in-status but still BOOKED-in-allocation if the customer
+   * paid an advance before the unit was dropped.
+   *
+   *   AVAILABLE   On the floor, free to sell to any cash customer.
+   *   BOOKED      Locked by a partial-payment sale. Physically sits in the
+   *               hold zone. The sale's dueAmount > 0.
+   *   DELIVERED   Fully paid for and handed over (or sold cash-and-walk).
+   *
+   * State transitions:
+   *   AVAILABLE → BOOKED       on partial-payment sale create
+   *   BOOKED    → DELIVERED    on final balance clearance + handover
+   *   BOOKED    → AVAILABLE    on booking release / sale cancel
+   *   DELIVERED → AVAILABLE    on full sale reversal / customer return
+   *
+   * Driven by ItemSerialsService.reserveForBooking() / releaseBooking() /
+   * markDelivered() / markAvailableAgain(). The Deliveries module's
+   * status→DELIVERED transition is blocked when the linked Sale still has
+   * dueAmount > 0 — that's the spec's "Strict Delivery Handover" rule.
+   */
+  @Column({
+    name: 'allocation_status',
+    type: 'varchar',
+    default: 'AVAILABLE',
+  })
+  @Index()
+  allocationStatus: 'AVAILABLE' | 'BOOKED' | 'DELIVERED';
+
+  /** Timestamp of AVAILABLE → BOOKED transition. Drives the Overdue Booking
+   *  dashboard's "days held" counter. */
+  @Column({ name: 'booked_at', type: Date, nullable: true })
+  bookedAt?: Date;
+
   /** Soft link back to the purchase voucher (no FK — purchase can be reversed). */
   @Column({ name: 'purchase_bill_no', nullable: true })
   purchaseBillNo?: string;
@@ -102,4 +137,13 @@ export class ItemSerial extends BaseEntity {
 
   @Column({ nullable: true })
   notes?: string;
+
+  /**
+   * True for serials minted by the local auto-generation engine
+   * (LOCAL-<code>-<year>-<seq>). Drives the "LOCAL" chip on the warranty
+   * lookup screen and lets reports distinguish shop-issued IDs from
+   * manufacturer barcodes for inventory reconciliation.
+   */
+  @Column({ default: false, name: 'is_internal_generated' })
+  isInternalGenerated: boolean;
 }

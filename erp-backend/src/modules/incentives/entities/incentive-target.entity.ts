@@ -64,4 +64,22 @@ export class IncentiveTarget extends BaseEntity {
 
   @Column({ default: true, name: 'is_active' })
   isActive: boolean;
+
+  /**
+   * Once net sold qty crosses this percentage of `targetQuantity`, the
+   * system treats the incentive as "likely to land" and starts surfacing
+   * an effective-cost discount per unit:
+   *   perUnitCredit = incentiveAmount / targetQuantity
+   * The POS shows that credit on the cart row and uses it to soften the
+   * "selling below cost" warning — selling at avgCost − perUnitCredit is
+   * still profitable because the incentive recovers the difference.
+   * Default 80% — owner can tighten or loosen per target.
+   */
+  @Column('decimal', {
+    precision: 5,
+    scale: 2,
+    name: 'trigger_threshold_pct',
+    default: 80,
+  })
+  triggerThresholdPct: number;
 }

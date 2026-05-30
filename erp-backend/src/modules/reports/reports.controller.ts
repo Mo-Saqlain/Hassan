@@ -105,9 +105,25 @@ export class ReportsController {
     return this.service.arAging(asOf);
   }
 
+  @Get('ar-aging/:customerId')
+  arAgingDetail(
+    @Param('customerId') customerId: string,
+    @Query('asOf') asOf?: string,
+  ) {
+    return this.service.arAgingDetail(customerId, asOf);
+  }
+
   @Get('ap-aging')
   apAging(@Query('asOf') asOf?: string) {
     return this.service.apAging(asOf);
+  }
+
+  @Get('ap-aging/:supplierId')
+  apAgingDetail(
+    @Param('supplierId') supplierId: string,
+    @Query('asOf') asOf?: string,
+  ) {
+    return this.service.apAgingDetail(supplierId, asOf);
   }
 
   @Get('item-margins')
