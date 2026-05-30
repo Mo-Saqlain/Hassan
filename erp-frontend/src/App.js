@@ -84,7 +84,6 @@ export default function App() {
               <Route path="customer-ledger" element={<CustomerLedger />} />
               <Route path="warranty-lookup" element={<WarrantyLookup />} />
               <Route path="service-tickets" element={<ServiceTickets />} />
-              <Route path="deliveries" element={<Deliveries />} />
               <Route path="customer-ledger/:id" element={<CustomerLedger />} />
             </Route>
 
@@ -100,6 +99,7 @@ export default function App() {
             >
               <Route path="sales" element={<Sales />} />
               <Route path="sale-returns" element={<SaleReturns />} />
+              <Route path="deliveries" element={<Deliveries />} />
               <Route path="overdue-bookings" element={<OverdueBookings />} />
             </Route>
 
