@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import { FunnelStages } from '../components/MiniCharts';
 
 /**
  * Operational delivery tracking. Stock is already deducted at sale time;
@@ -108,6 +109,14 @@ export default function Deliveries() {
     }
   };
 
+  // Tally already-loaded delivery rows by status — no extra fetch needed.
+  // Mirrors the Service Tickets funnel for visual symmetry.
+  const tally = useMemo(() => {
+    const out = {};
+    for (const d of deliveries ?? []) out[d.status] = (out[d.status] || 0) + 1;
+    return out;
+  }, [deliveries]);
+
   return (
     <>
       <div className="page-header">
@@ -118,6 +127,28 @@ export default function Deliveries() {
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      {(deliveries ?? []).length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div
+            className="eyebrow"
+            style={{ marginBottom: 8 }}
+            title="A bloated 'Pending' or 'Out for delivery' stage means transport is backed up. Inventory was already deducted at sale time; this only tracks the physical handover."
+          >
+            Delivery pipeline
+          </div>
+          <FunnelStages
+            stages={[
+              { label: 'Pending', value: tally.PENDING ?? 0, color: '#fbbf24' },
+              { label: 'Out for delivery', value: tally.OUT_FOR_DELIVERY ?? 0, color: '#fb923c' },
+              { label: 'Installation pending', value: tally.INSTALLATION_PENDING ?? 0, color: '#8764b8' },
+              { label: 'Installed', value: tally.INSTALLED ?? 0, color: '#34d399' },
+              { label: 'Delivered', value: tally.DELIVERED ?? 0, color: 'var(--text-muted)' },
+              { label: 'Cancelled', value: tally.CANCELLED ?? 0, color: '#ef4444' },
+            ]}
+          />
+        </div>
+      )}
 
       {showForm && (
         <form className="card" onSubmit={submit}>

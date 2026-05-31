@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import { Bullet } from '../components/MiniCharts';
 
 const tabs = [
   { key: 'progress', label: 'Targets & Progress' },
@@ -95,30 +96,26 @@ function ProgressPanel() {
               </td>
               <td className="right">{r.targetQuantity}</td>
               <td className="right">{r.netQuantity}</td>
-              <td className="right">
-                <div
-                  style={{
-                    display: 'inline-block',
-                    width: 100,
-                    height: 8,
-                    borderRadius: 0,
-                    background: 'var(--chip-bg)',
-                    overflow: 'hidden',
-                    verticalAlign: 'middle',
-                    border: '1px solid var(--border)',
-                  }}
-                >
-                  <div
+              <td className="right" style={{ minWidth: 180 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <Bullet
+                      current={r.netQuantity}
+                      target={r.targetQuantity}
+                      threshold={t.triggerThresholdPct ?? 80}
+                    />
+                  </div>
+                  <span
                     style={{
-                      width: `${r.progressPct}%`,
-                      height: '100%',
-                      background: r.achieved
-                        ? 'var(--tile-customers)'
-                        : 'var(--primary)',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 600,
+                      minWidth: 40,
+                      textAlign: 'right',
                     }}
-                  />
+                  >
+                    {r.progressPct}%
+                  </span>
                 </div>
-                <span style={{ marginLeft: 8 }}>{r.progressPct}%</span>
               </td>
               <td className="right">
                 {Number(r.potentialIncentive).toFixed(2)}

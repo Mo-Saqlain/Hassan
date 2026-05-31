@@ -49,6 +49,11 @@ export class CashRegisterController {
     return this.service.sessionStatus(date);
   }
 
+  @Get('variance-trend')
+  varianceTrend(@Query('days') days?: string) {
+    return this.service.varianceTrend(days ? parseInt(days, 10) : 30);
+  }
+
   @Post('sessions/open')
   openSession(@Body() dto: OpenSessionDto) {
     return this.service.openSession(dto);

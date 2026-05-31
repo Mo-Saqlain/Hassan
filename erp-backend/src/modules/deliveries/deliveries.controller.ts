@@ -18,9 +18,16 @@ import {
 export class DeliveriesController {
   constructor(private readonly service: DeliveriesService) {}
 
+  // Static GETs first — keep the param route below so ParseUUIDPipe doesn't
+  // swallow literal segments like 'tally'. Same trap that bit sales.controller.
   @Get()
   list() {
     return this.service.findAll();
+  }
+
+  @Get('tally')
+  tally() {
+    return this.service.tally();
   }
 
   @Post()

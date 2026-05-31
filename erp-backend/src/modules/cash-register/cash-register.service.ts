@@ -181,6 +181,33 @@ export class CashRegisterService {
     });
   }
 
+  /**
+   * Per-day cash variance (actualClosing - expectedClosing) for the last N
+   * closed sessions. Drives the Cash Book variance-trend chart — visualises
+   * "are we drifting over time, or were today's discrepancies normal?".
+   * OPEN sessions (no actualClosing yet) are excluded.
+   */
+  async varianceTrend(days = 30): Promise<
+    Array<{ sessionDate: string; variance: number; actual: number; expected: number }>
+  > {
+    const n = Math.max(1, Math.min(180, Number(days) || 30));
+    const rows = await this.sessions.find({
+      order: { sessionDate: 'DESC' },
+      take: n,
+    });
+    return rows
+      .filter((s) => s.actualClosing != null && s.expectedClosing != null)
+      .map((s) => ({
+        sessionDate: s.sessionDate,
+        actual: Number(s.actualClosing),
+        expected: Number(s.expectedClosing),
+        variance: round(
+          Number(s.actualClosing) - Number(s.expectedClosing),
+        ),
+      }))
+      .reverse(); // oldest → newest for left-to-right charting
+  }
+
   // ─── Daily book ──────────────────────────────────────────────────────
 
   /**

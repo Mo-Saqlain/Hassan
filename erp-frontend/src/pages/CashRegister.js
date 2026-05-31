@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import { MiniLine } from '../components/MiniCharts';
 
 const CATEGORIES = [
   { value: 'EXPENSE', label: 'Expense (rent, tea, transport…)' },
@@ -21,6 +22,7 @@ const fmt = (n) =>
 export default function CashRegister() {
   const [date, setDate] = useState(todayStr());
   const [book, setBook] = useState(null);
+  const [variance, setVariance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -42,6 +44,16 @@ export default function CashRegister() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Variance trend is independent of the selected date — it always shows the
+  // last 30 closed sessions. Reload only on a close/open event (i.e. when
+  // `book.session` changes) by piggybacking on the same load() trigger.
+  useEffect(() => {
+    api
+      .get('/cash-register/variance-trend?days=30')
+      .then((r) => setVariance(r.data ?? []))
+      .catch(() => setVariance([]));
+  }, [book?.session?.id, book?.session?.status]);
 
   const [showEntry, setShowEntry] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
@@ -121,6 +133,59 @@ export default function CashRegister() {
           </div>
         </div>
       </div>
+
+      {variance.length > 0 && (
+        <div className="card" style={{ marginTop: 14 }}>
+          <div
+            className="eyebrow"
+            style={{ marginBottom: 6 }}
+            title="Actual − expected closing per session. Above the dashed zero line = surplus, below = shortage. Persistent drift in one direction is the audit-time signal."
+          >
+            Closing variance · last {variance.length} session
+            {variance.length === 1 ? '' : 's'}
+          </div>
+          <MiniLine
+            points={variance.map((v) => ({
+              label: v.sessionDate,
+              value: v.variance,
+            }))}
+            height={80}
+            width={600}
+            formatY={(y) =>
+              `Rs ${y >= 0 ? '+' : ''}${Number(y).toFixed(2)}`
+            }
+          />
+          {(() => {
+            const surplus = variance.filter((v) => v.variance > 0).length;
+            const shortage = variance.filter((v) => v.variance < 0).length;
+            const net = variance.reduce((s, v) => s + v.variance, 0);
+            return (
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  display: 'flex',
+                  gap: 14,
+                }}
+              >
+                <span>
+                  Surplus days: <strong>{surplus}</strong>
+                </span>
+                <span>
+                  Short days: <strong>{shortage}</strong>
+                </span>
+                <span>
+                  Net:{' '}
+                  <strong style={{ color: net >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    Rs {net.toFixed(2)}
+                  </strong>
+                </span>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {error && <div className="alert alert-error">{error}</div>}
 

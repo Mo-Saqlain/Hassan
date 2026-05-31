@@ -74,6 +74,23 @@ export class DeliveriesService {
     return this.repo.find({ order: { createdAt: 'DESC' }, take: 500 });
   }
 
+  /**
+   * Counts grouped by status — drives the funnel chart on the Deliveries
+   * page. Cheap single GROUP BY; matches the shape of
+   * ServiceTicketsService.tally for symmetry.
+   */
+  async tally(): Promise<Record<string, number>> {
+    const rows = await this.repo
+      .createQueryBuilder('d')
+      .select('d.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('d.status')
+      .getRawMany<{ status: string; count: string }>();
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.status] = Number(r.count);
+    return out;
+  }
+
   async findOne(id: string) {
     const row = await this.repo.findOne({ where: { id } });
     if (!row) throw new NotFoundException(`Delivery ${id} not found`);

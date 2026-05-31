@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import Icon from '../components/Icon';
+import { StackedBar, Donut } from '../components/MiniCharts';
 
 const Rs = (n, dec = 0) =>
   `Rs ${Number(n ?? 0).toLocaleString('en-PK', {
@@ -39,6 +40,9 @@ export default function Dashboard() {
     weOweSuppliers: 0,
     oldestAR: null,
     oldestAP: null,
+    arBuckets: { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 },
+    apBuckets: { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 },
+    slowMoving: null,
     topSelling: [],
     activity: [],
     incentive: null,
@@ -69,6 +73,7 @@ export default function Dashboard() {
           suppBalances,
           arAging,
           apAging,
+          slowMoving,
           sales,
           purchases,
           payments,
@@ -83,6 +88,9 @@ export default function Dashboard() {
           api.get('/reports/supplier-balances'),
           api.get('/reports/ar-aging').catch(() => ({ data: { rows: [] } })),
           api.get('/reports/ap-aging').catch(() => ({ data: { rows: [] } })),
+          api
+            .get('/reports/slow-moving-stock')
+            .catch(() => ({ data: { buckets: null } })),
           api.get('/sales'),
           api.get('/purchases'),
           api.get('/payments'),
@@ -132,6 +140,26 @@ export default function Dashboard() {
               r.maxDaysElapsed > (m?.maxDaysElapsed ?? -1) ? r : m,
             null)
           : null;
+        // Aging totals for the stacked bar — sum each bucket across all
+        // customers. Hits zero == nothing outstanding and the bar hides.
+        const arBuckets = arRows.reduce(
+          (b, r) => ({
+            d0_30: b.d0_30 + Number(r.d0_30 || 0),
+            d31_60: b.d31_60 + Number(r.d31_60 || 0),
+            d61_90: b.d61_90 + Number(r.d61_90 || 0),
+            d90: b.d90 + Number(r.d90 || 0),
+          }),
+          { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 },
+        );
+        const apBuckets = apRows.reduce(
+          (b, r) => ({
+            d0_30: b.d0_30 + Number(r.d0_30 || 0),
+            d31_60: b.d31_60 + Number(r.d31_60 || 0),
+            d61_90: b.d61_90 + Number(r.d61_90 || 0),
+            d90: b.d90 + Number(r.d90 || 0),
+          }),
+          { d0_30: 0, d31_60: 0, d61_90: 0, d90: 0 },
+        );
 
         // ─ Top selling — by total qty across all sales in last 14d
         const last14Sales = (sales.data ?? []).filter(
@@ -217,6 +245,9 @@ export default function Dashboard() {
           weOweSuppliers,
           oldestAR,
           oldestAP,
+          arBuckets,
+          apBuckets,
+          slowMoving: slowMoving?.data ?? null,
           topSelling,
           activity,
           incentive,
@@ -432,6 +463,19 @@ export default function Dashboard() {
                     Oldest unpaid: {data.oldestAR.maxDaysElapsed}d ({data.oldestAR.name})
                   </div>
                 )}
+                {data.customerOwesUs > 0 && (
+                  <div style={{ marginTop: 6, width: '100%' }}>
+                    <StackedBar
+                      segments={[
+                        { label: '0-30d', value: data.arBuckets.d0_30, color: '#34d399' },
+                        { label: '31-60d', value: data.arBuckets.d31_60, color: '#fbbf24' },
+                        { label: '61-90d', value: data.arBuckets.d61_90, color: '#fb923c' },
+                        { label: '90+', value: data.arBuckets.d90, color: '#ef4444' },
+                      ]}
+                      height={10}
+                    />
+                  </div>
+                )}
               </div>
               <Link to="/customer-ledger" className="btn btn-sm btn-ghost">
                 <Icon name="arrow-up" size={16} />
@@ -469,6 +513,19 @@ export default function Dashboard() {
                     Oldest payable: {data.oldestAP.maxDaysElapsed}d ({data.oldestAP.name})
                   </div>
                 )}
+                {data.weOweSuppliers > 0 && (
+                  <div style={{ marginTop: 6, width: '100%' }}>
+                    <StackedBar
+                      segments={[
+                        { label: '0-30d', value: data.apBuckets.d0_30, color: '#34d399' },
+                        { label: '31-60d', value: data.apBuckets.d31_60, color: '#fbbf24' },
+                        { label: '61-90d', value: data.apBuckets.d61_90, color: '#fb923c' },
+                        { label: '90+', value: data.apBuckets.d90, color: '#ef4444' },
+                      ]}
+                      height={10}
+                    />
+                  </div>
+                )}
               </div>
               <Link to="/supplier-ledger" className="btn btn-sm btn-ghost">
                 <Icon name="arrow-down" size={16} />
@@ -476,6 +533,65 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {data.slowMoving && (data.slowMoving.rows ?? []).length > 0 && (
+          <div className="card" style={{ padding: 20 }}>
+            <div className="eyebrow">Cash Trap · Inventory aging</div>
+            <div
+              style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}
+            >
+              Value of on-hand stock by days since last sale.
+            </div>
+            {(() => {
+              // Backend exposes counts in summary + deadValue/coldValue. Fresh
+              // + slowing values aren't in the summary, so we tally from rows
+              // (already on the wire, O(items)).
+              const rows = data.slowMoving?.rows ?? [];
+              const byBucket = { fresh: 0, slowing: 0, cold: 0, dead: 0 };
+              for (const r of rows) {
+                byBucket[r.bucket] =
+                  (byBucket[r.bucket] || 0) + Number(r.valueAtCost || 0);
+              }
+              const total =
+                byBucket.fresh + byBucket.slowing + byBucket.cold + byBucket.dead;
+              const locked = byBucket.cold + byBucket.dead;
+              const lockedPct =
+                total > 0 ? Math.round((locked / total) * 100) : 0;
+              return (
+                <>
+                  <div style={{ marginTop: 12 }}>
+                    <Donut
+                      segments={[
+                        { label: 'Fresh (<30d)', value: byBucket.fresh, color: '#34d399' },
+                        { label: 'Slowing (30-60d)', value: byBucket.slowing, color: '#fbbf24' },
+                        { label: 'Cold (60-90d)', value: byBucket.cold, color: '#fb923c' },
+                        { label: 'Dead (90d+)', value: byBucket.dead, color: '#ef4444' },
+                      ]}
+                      size={120}
+                      centerValue={total > 0 ? `${lockedPct}%` : '—'}
+                      centerLabel="locked"
+                    />
+                  </div>
+                  {locked > 0 && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        fontSize: 12,
+                        color:
+                          lockedPct >= 30
+                            ? 'var(--danger)'
+                            : 'var(--text-muted)',
+                      }}
+                    >
+                      Rs {locked.toFixed(0)} of inventory has not moved in
+                      60+ days. Consider clearance pricing.
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
 
         {data.deferred.length > 0 && (
           <div className="card" style={{ padding: 20 }}>

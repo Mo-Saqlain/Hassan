@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import ExportButtons from '../components/ExportButtons';
+import { HorizontalBars } from '../components/MiniCharts';
 
 const tabs = [
   { key: 'income', label: 'Income Statement' },
   { key: 'balance', label: 'Balance Sheet' },
   { key: 'cash', label: 'Cash Flow' },
   { key: 'equity', label: 'Changes in Equity' },
+  { key: 'margins', label: 'Margin Insights' },
 ];
 
 export default function Financials() {
@@ -31,6 +33,7 @@ export default function Financials() {
       else if (tab === 'balance') url = `/reports/balance-sheet?asOf=${asOf}`;
       else if (tab === 'cash') url = `/reports/cash-flow?from=${from}&to=${to}`;
       else if (tab === 'equity') url = `/reports/equity-changes?from=${from}&to=${to}`;
+      else if (tab === 'margins') url = `/reports/margin-analytics?from=${from}&to=${to}`;
       const r = await api.get(url);
       setData(r.data);
     } catch (e) {
@@ -134,6 +137,7 @@ export default function Financials() {
           {tab === 'balance' && <BalanceSheet data={data} />}
           {tab === 'cash' && <CashFlow data={data} />}
           {tab === 'equity' && <EquityChanges data={data} />}
+          {tab === 'margins' && <MarginInsights data={data} />}
         </>
       )}
     </>
@@ -394,6 +398,77 @@ function EquityChanges({ data }) {
       <Sub label="Expected (Opening + Net Income)" value={data.balanceCheck.expected} prefix="" />
       <Sub label="Actual closing" value={data.balanceCheck.actual} prefix="" />
       <Sub label="Difference" value={data.balanceCheck.difference} prefix="" />
+    </div>
+  );
+}
+
+/**
+ * MarginInsights — three lenses on the same period:
+ *   • Brand profitability (by-brand bar chart of marginPct)
+ *   • Margin leakage (lowest-margin sale lines, ascending)
+ *   • Discount leakage (highest-discount sales)
+ *
+ * Purely a presentation wrapper around `/reports/margin-analytics`.
+ */
+function MarginInsights({ data }) {
+  if (!data) return null;
+  const byBrand = (data.byBrand ?? []).slice(0, 10);
+  const lowest = (data.lowestMarginSales ?? []).slice(0, 10);
+  const highDisc = (data.highDiscountSales ?? []).slice(0, 10);
+  const pct = (n) => `${Number(n ?? 0).toFixed(1)}%`;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Margin by brand</h3>
+        <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+          Gross-profit % across all units of each brand sold in the period.
+        </p>
+        <HorizontalBars
+          rows={byBrand.map((r) => ({
+            label: r.brandName,
+            value: r.marginPct,
+            grossProfit: r.grossProfit,
+          }))}
+          color="var(--success)"
+          formatValue={(v) => pct(v)}
+        />
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Margin leakage — lowest-margin sale lines</h3>
+        <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+          Specific lines where the unit price barely cleared (or fell below)
+          the snapshotted cost. If the same item keeps appearing, raise its
+          floor price or restrict salesman discount permissions.
+        </p>
+        <HorizontalBars
+          rows={lowest.map((r) => ({
+            label: `${r.itemName} · ${r.invoiceNo}`,
+            value: r.marginPct,
+          }))}
+          color="var(--danger)"
+          formatValue={(v) => pct(v)}
+        />
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>High-discount sales</h3>
+        <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+          Invoices with the largest absolute discount. Cross-reference with
+          who the customer was — relationship pricing should be a deliberate
+          owner call, not a habit.
+        </p>
+        <HorizontalBars
+          rows={highDisc.map((r) => ({
+            label: `${r.customerName ?? 'Walk-in'} · ${r.invoiceNo}`,
+            value: r.discountPct,
+            discount: r.discount,
+          }))}
+          color="var(--warning)"
+          formatValue={(v, r) => `${pct(v)} · Rs ${Number(r.discount ?? 0).toFixed(0)}`}
+        />
+      </div>
     </div>
   );
 }

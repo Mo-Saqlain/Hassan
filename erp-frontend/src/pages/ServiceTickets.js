@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import { FunnelStages } from '../components/MiniCharts';
 
 /**
  * Service / warranty repair workflow. Tickets walk through:
@@ -176,6 +177,27 @@ export default function ServiceTickets() {
             <div className="stat-value">{tally[s.value] ?? 0}</div>
           </div>
         ))}
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div
+          className="eyebrow"
+          style={{ marginBottom: 8 }}
+          title="A bloated 'Sent to Company' stage usually means a manufacturer is dragging their feet on warranty claims."
+        >
+          Service pipeline
+        </div>
+        <FunnelStages
+          stages={[
+            { label: 'Received', value: tally.RECEIVED ?? 0, color: '#0078d4' },
+            { label: 'Sent to company', value: tally.SENT_TO_COMPANY ?? 0, color: '#8764b8' },
+            { label: 'Waiting parts', value: tally.WAITING_PARTS ?? 0, color: '#fbbf24' },
+            { label: 'Under repair', value: tally.UNDER_REPAIR ?? 0, color: '#fb923c' },
+            { label: 'Ready for pickup', value: tally.READY_FOR_PICKUP ?? 0, color: '#34d399' },
+            { label: 'Delivered', value: tally.DELIVERED ?? 0, color: 'var(--text-muted)' },
+            { label: 'Unrepairable', value: tally.UNREPAIRABLE ?? 0, color: '#ef4444' },
+          ]}
+        />
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
