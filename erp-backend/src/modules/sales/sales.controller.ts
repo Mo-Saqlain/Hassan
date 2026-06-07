@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { CreateSaleVoucherDto } from './dto/create-sale-voucher.dto';
 import { ReverseSaleDto } from './dto/reverse-sale.dto';
 import { SettleCommitmentDto } from './dto/settle-commitment.dto';
 
@@ -28,6 +29,18 @@ export class SalesController {
   @Post()
   create(@Body() dto: CreateSaleDto) {
     return this.service.create(dto);
+  }
+
+  /**
+   * Bill-book Sales Voucher: one sale + N receipt splits, all in a single
+   * atomic transaction. The whole submission rolls back if any split fails,
+   * so an over-split or a stale account id cannot leave a partial sale
+   * stranded. See `SalesService.createFromVoucher` for the journal-line
+   * detail.
+   */
+  @Post('voucher')
+  createVoucher(@Body() dto: CreateSaleVoucherDto) {
+    return this.service.createFromVoucher(dto);
   }
 
   @Get()

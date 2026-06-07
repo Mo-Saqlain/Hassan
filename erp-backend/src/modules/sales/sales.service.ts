@@ -4,6 +4,7 @@ import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Sale, SalePaymentCommitment } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { CreateSaleVoucherDto } from './dto/create-sale-voucher.dto';
 import { ItemSerial } from '../item-serials/entities/item-serial.entity';
 import { StockService } from '../stock/stock.service';
 import { Item } from '../items/entities/item.entity';
@@ -62,7 +63,38 @@ export class SalesService {
   }
 
   async create(dto: CreateSaleDto, opts?: { skipOutbox?: boolean }): Promise<Sale> {
-    const saved = await this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) =>
+      this.createInTransaction(manager, dto),
+    );
+
+    // Local-first nodes (those configured with CLOUD_SYNC_URL) enqueue every
+    // locally-originated sale for the background worker to push. skipOutbox
+    // is true when this create() is called from the cloud receiver or from
+    // createFromVoucher() (which emits its own SALE_VOUCHER_CREATED event).
+    if (!opts?.skipOutbox && process.env.CLOUD_SYNC_URL) {
+      await this.outbox.enqueue('SALE_CREATED', { ...dto, invoiceNo: saved.invoiceNo });
+    }
+
+    return saved;
+  }
+
+  /**
+   * Inner sale-creation flow, scoped to a caller-supplied EntityManager so it
+   * can run as part of a larger atomic transaction (e.g. the voucher endpoint
+   * wrapping Sale + N Receipts together). Does NOT emit outbox events —
+   * the outer wrapper is responsible for that.
+   *
+   * Identical behaviour to the body that used to live inline in `create()`:
+   *   - builds SaleItem rows with COGS snapshots and rolls Item.costedQty
+   *   - enforces credit-limit on residual customers
+   *   - posts the balanced journal entry (Dr Cash/Bank, Dr A/R or Deferred,
+   *     Cr Revenue, Dr COGS, Cr Inventory)
+   *   - materialises paymentCommitments when there's a residual
+   */
+  private async createInTransaction(
+    manager: EntityManager,
+    dto: CreateSaleDto,
+  ): Promise<Sale> {
       const itemRepo = manager.getRepository(Item);
       const saleRepo = manager.getRepository(Sale);
 
@@ -265,16 +297,161 @@ export class SalesService {
       );
 
       return persisted;
-    });
+  }
 
-    // Local-first nodes (those configured with CLOUD_SYNC_URL) enqueue
-    // every locally-originated sale for the background worker to push.
-    // skipOutbox is true when this create() is called from the cloud receiver.
-    if (!opts?.skipOutbox && process.env.CLOUD_SYNC_URL) {
-      await this.outbox.enqueue('SALE_CREATED', { ...dto, invoiceNo: saved.invoiceNo });
+  /**
+   * Sales Voucher creation: a single atomic transaction that creates one Sale
+   * plus N Receipt vouchers (one per payment split), so a customer paying
+   * `Cash 20k + HBL 100k + on-account 10k` for a Rs 130k invoice lands as
+   * one Sale row + two Receipt rows + the corresponding journal lines.
+   *
+   * Design: the underlying Sale is created with `paidAmount=0` and
+   * `paymentMethod='CREDIT'`, so its journal posts the FULL net amount onto
+   * A/R (or Deferred Cash Receivables when commitments are supplied). Each
+   * split is then a normal Receipt voucher that posts a balancing
+   * `Dr <accountId>` / `Cr A/R` (or Deferred) pair, naturally reducing the
+   * customer's outstanding balance to `net − sum(splits)`. The customer
+   * ledger reads as: Sale +net, then one row per split, residual is the
+   * customer's open A/R.
+   *
+   * Failure modes:
+   *   - splits sum > net  → BadRequestException before any DB write
+   *   - any split fails (bad account id, etc.) → entire transaction rolls
+   *     back; the Sale is NOT committed. All-or-nothing.
+   */
+  async createFromVoucher(
+    dto: CreateSaleVoucherDto,
+  ): Promise<{ sale: Sale; receipts: Payment[] }> {
+    // Pre-flight: splits must be non-negative and not exceed net.
+    const splitTotal = (dto.splits ?? []).reduce(
+      (s, x) => s + Number(x.amount || 0),
+      0,
+    );
+    if (splitTotal < 0) {
+      throw new BadRequestException('Split amounts must be non-negative.');
+    }
+    const grossTotal = (dto.lines ?? []).reduce(
+      (s, l) => s + Number(l.unitPrice || 0) * Number(l.quantity || 0),
+      0,
+    );
+    const netTotal = Number((grossTotal - (dto.discount ?? 0)).toFixed(2));
+    if (splitTotal > netTotal + 0.005) {
+      throw new BadRequestException(
+        `Splits sum (${splitTotal.toFixed(2)}) exceeds net total (${netTotal.toFixed(2)}). Either drop a split or raise the line totals.`,
+      );
     }
 
-    return saved;
+    const result = await this.dataSource.transaction(async (manager) => {
+      // 1. Create the Sale itself with the whole net on the receivable side.
+      //    Each split below clears its slice via a normal Receipt voucher.
+      const baseDto: CreateSaleDto = {
+        invoiceNo: dto.invoiceNo,
+        customerId: dto.customerId,
+        storeId: dto.storeId,
+        discount: dto.discount,
+        notes: dto.notes,
+        expectedPaymentDate: dto.expectedPaymentDate,
+        paymentCommitments: dto.paymentCommitments,
+        lines: dto.lines,
+        paidAmount: 0,
+        paymentMethod: 'CREDIT',
+        accountId: undefined,
+      };
+      const sale = await this.createInTransaction(manager, baseDto);
+
+      // 2. Per-split: a normal Receipt voucher row + a balancing journal
+      //    Dr <accountId> / Cr A/R (or Deferred). Posting these inside the
+      //    same manager keeps the whole flow atomic.
+      const sysAR = await this.accounts.findSystem('A_R');
+      const sysDeferred = await this.accounts.findSystem('DEFERRED_RECEIVABLE');
+      const residualAccountId =
+        sale.paymentCommitments && sale.paymentCommitments.length > 0
+          ? sysDeferred.id
+          : sysAR.id;
+      const paymentRepo = manager.getRepository(Payment);
+
+      const receipts: Payment[] = [];
+      const splitList = dto.splits ?? [];
+      for (let i = 0; i < splitList.length; i += 1) {
+        const split = splitList[i];
+        const amount = Number(split.amount);
+        if (amount <= 0) continue;
+        const seq = await this.sequences.next('RCT', () => paymentRepo.count());
+        const voucher = paymentRepo.create({
+          voucherNo: seq,
+          direction: 'IN' as const,
+          accountId: split.accountId,
+          customerId: dto.customerId,
+          amount,
+          referenceType: 'SALE_SPLIT',
+          referenceId: sale.id,
+          notes:
+            split.reference ??
+            `Split ${i + 1}/${splitList.length} for ${sale.invoiceNo}`,
+        });
+        const saved = await paymentRepo.save(voucher);
+        receipts.push(saved);
+
+        await this.journals.post(
+          {
+            entryDate: sale.createdAt,
+            sourceModule: 'PAYMENT',
+            sourceRef: seq,
+            description: `${sale.invoiceNo} split #${i + 1}`,
+            lines: [
+              {
+                accountId: split.accountId,
+                debit: amount,
+                narration: `Voucher ${sale.invoiceNo} payment via account`,
+              },
+              {
+                accountId: residualAccountId,
+                credit: amount,
+                narration: `Voucher ${sale.invoiceNo} clears receivable`,
+              },
+            ],
+          },
+          manager,
+        );
+      }
+
+      // 3. Reflect the at-sale-time payments on the Sale header so the
+      //    customer-balances roll-up and the booking-hold gate see consistent
+      //    numbers. Sale.dueAmount drops by the total splits collected; the
+      //    booking state machine (BOOKED serials) was already set inside
+      //    createInTransaction based on the initial dueAmount = netTotal, so
+      //    if sum(splits) clears the residual to zero we also flip any
+      //    booked serials to DELIVERED — same hook settleCommitment uses.
+      if (splitTotal > 0) {
+        const saleRepo = manager.getRepository(Sale);
+        sale.paidAmount = Number(
+          (Number(sale.paidAmount ?? 0) + splitTotal).toFixed(2),
+        );
+        sale.amountPaidSettled = Number(
+          (Number(sale.amountPaidSettled ?? 0) + splitTotal).toFixed(2),
+        );
+        sale.dueAmount = Math.max(
+          0,
+          Number((Number(sale.dueAmount ?? 0) - splitTotal).toFixed(2)),
+        );
+        await saleRepo.save(sale);
+
+        if (sale.dueAmount <= 0.005) {
+          await this.itemSerials.markDelivered(sale.invoiceNo, manager);
+        }
+      }
+
+      return { sale, receipts };
+    });
+
+    if (process.env.CLOUD_SYNC_URL) {
+      await this.outbox.enqueue('SALE_VOUCHER_CREATED', {
+        ...dto,
+        invoiceNo: result.sale.invoiceNo,
+      });
+    }
+
+    return result;
   }
 
   private async nextInvoiceNo(repo: Repository<Sale>): Promise<string> {

@@ -80,6 +80,7 @@ Master data lives inside the operational hubs in the sidebar, not in a separate 
 
 ### 3. Transactions
 - **POS sales** generate invoices (`INV-…`) with stock OUT
+- **Sales Voucher** — bill-book style multi-tender entry at `POST /sales/voucher`. One sale + N receipt splits (Cash + Bank + Wallet + on-account, any combination) all in one atomic transaction; an oversplit or a stale account id rolls the whole thing back so a partial sale can't strand. Each split lands as a normal `RCT-…` Receipt row plus a balancing `Dr account / Cr A/R (or Deferred Cash Receivables)` journal pair — the customer ledger reads exactly as if each split had been entered manually.
 - **Sale returns** (`SR-…`) — goods back from customers, stock IN
 - **Purchases** (`BILL-…`) — stock IN from suppliers; in-flow `+ New` button to create items mid-purchase
 - **Purchase returns** (`PR-…`) — goods returned to suppliers, stock OUT

@@ -423,4 +423,99 @@ describe('SalesService', () => {
       expect(row?.saleInvoiceNo).toBe(sale.invoiceNo);
     });
   });
+
+  describe('createFromVoucher (Sales Voucher)', () => {
+    let cashAccountId: string;
+    let bankAccountId: string;
+
+    beforeEach(async () => {
+      const cashAcct = await ds.getRepository(Account).save(
+        ds.getRepository(Account).create({
+          name: 'Till — Counter 1',
+          type: 'CASH',
+          code: '1111',
+          isActive: true,
+        }),
+      );
+      const bankAcct = await ds.getRepository(Account).save(
+        ds.getRepository(Account).create({
+          name: 'HBL Current',
+          type: 'BANK',
+          code: '1121',
+          isActive: true,
+        }),
+      );
+      cashAccountId = cashAcct.id;
+      bankAccountId = bankAcct.id;
+    });
+
+    it('2-split clean (Cash + Bank exactly clears net): zero residual, one Sale, two Receipts', async () => {
+      const { sale, receipts } = await service.createFromVoucher({
+        lines: [{ itemId, quantity: 2, unitPrice: 500 }],
+        splits: [
+          { accountId: cashAccountId, amount: 600 },
+          { accountId: bankAccountId, amount: 400 },
+        ],
+      });
+      expect(Number(sale.netAmount)).toBe(1000);
+      expect(Number(sale.paidAmount)).toBe(1000);
+      expect(Number(sale.dueAmount)).toBe(0);
+      expect(receipts).toHaveLength(2);
+      expect(receipts.every((r) => r.direction === 'IN')).toBe(true);
+      const splitSum =
+        Number(receipts[0].amount) + Number(receipts[1].amount);
+      expect(splitSum).toBe(1000);
+      // Both Payment rows are persisted and tagged as splits of this sale.
+      const persistedPayments = await ds
+        .getRepository(Payment)
+        .find({ where: { referenceType: 'SALE_SPLIT', referenceId: sale.id } });
+      expect(persistedPayments).toHaveLength(2);
+      // Voucher numbers follow the RCT sequence.
+      expect(persistedPayments.every((p) => p.voucherNo.startsWith('RCT-')))
+        .toBe(true);
+    });
+
+    it('3-split with residual: dueAmount equals the gap, customer A/R picks up the rest', async () => {
+      const customer = await ds.getRepository(Customer).save(
+        ds.getRepository(Customer).create({
+          name: 'Voucher Cust',
+          creditEnabled: true,
+          creditLimit: 100000,
+        }),
+      );
+      const { sale, receipts } = await service.createFromVoucher({
+        customerId: customer.id,
+        lines: [{ itemId, quantity: 1, unitPrice: 1300 }],
+        splits: [
+          { accountId: cashAccountId, amount: 200 },
+          { accountId: bankAccountId, amount: 800 },
+          { accountId: cashAccountId, amount: 200 },
+        ],
+      });
+      expect(Number(sale.netAmount)).toBe(1300);
+      expect(Number(sale.paidAmount)).toBe(1200);
+      expect(Number(sale.dueAmount)).toBe(100);
+      expect(receipts).toHaveLength(3);
+      // The residual still rides as A/R on the customer ledger, not as a
+      // hidden fourth payment row.
+      const allPayments = await ds
+        .getRepository(Payment)
+        .find({ where: { referenceId: sale.id } });
+      expect(allPayments).toHaveLength(3);
+    });
+
+    it('oversplit (splits > net) is rejected before any write: no Sale, no Payment', async () => {
+      await expect(
+        service.createFromVoucher({
+          lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+          splits: [
+            { accountId: cashAccountId, amount: 400 },
+            { accountId: bankAccountId, amount: 200 },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(await ds.getRepository(Sale).count()).toBe(0);
+      expect(await ds.getRepository(Payment).count()).toBe(0);
+    });
+  });
 });
