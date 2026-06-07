@@ -524,6 +524,86 @@ describe('SalesService', () => {
       expect(await ds.getRepository(Payment).count()).toBe(0);
     });
 
+    describe('customer-credit split', () => {
+      let customerId: string;
+
+      beforeEach(async () => {
+        // Customer paid Rs 5,000 advance previously (sits as on-account
+        // credit on the customer ledger: prior Receipt of 5,000, no sale
+        // to allocate against → A/R = -5,000).
+        const c = await ds.getRepository(Customer).save(
+          ds.getRepository(Customer).create({
+            name: 'Credit Customer',
+            creditEnabled: true,
+            creditLimit: 100000,
+          }),
+        );
+        customerId = c.id;
+        const paymentRepo = ds.getRepository(Payment);
+        const seq = await testModule
+          .get(SequenceService)
+          .next('RCT', () => paymentRepo.count());
+        await paymentRepo.save(
+          paymentRepo.create({
+            voucherNo: seq,
+            direction: 'IN' as const,
+            accountId: cashAccountId,
+            customerId,
+            amount: 5000,
+            referenceType: 'ADVANCE',
+            notes: 'Customer paid Rs 5,000 advance',
+          }),
+        );
+      });
+
+      it('applies existing customer credit toward the bill — no extra Payment row created', async () => {
+        const { sale, receipts } = await service.createFromVoucher({
+          customerId,
+          lines: [{ itemId, quantity: 1, unitPrice: 8000 }],
+          splits: [
+            { accountId: cashAccountId, amount: 3000 },
+            { kind: 'CUSTOMER_CREDIT', amount: 5000 },
+          ],
+        });
+        expect(Number(sale.netAmount)).toBe(8000);
+        expect(Number(sale.paidAmount)).toBe(8000);
+        expect(Number(sale.dueAmount)).toBe(0);
+        // Only the cash split gets a Receipt row — the credit split is a
+        // ledger-side application, no second receipt is written.
+        expect(receipts).toHaveLength(1);
+        expect(Number(receipts[0].amount)).toBe(3000);
+        // Total Payment rows for this customer = the original advance (1)
+        // + the cash split for this voucher (1) = 2. No phantom credit row.
+        const allPayments = await ds
+          .getRepository(Payment)
+          .find({ where: { customerId } });
+        expect(allPayments).toHaveLength(2);
+      });
+
+      it('rejects credit splits that exceed the customer\'s available credit', async () => {
+        await expect(
+          service.createFromVoucher({
+            customerId,
+            lines: [{ itemId, quantity: 1, unitPrice: 8000 }],
+            splits: [
+              // Customer holds 5000 credit; trying to apply 7000 should fail.
+              { kind: 'CUSTOMER_CREDIT', amount: 7000 },
+              { accountId: cashAccountId, amount: 1000 },
+            ],
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it('rejects credit splits when no customer is on the voucher', async () => {
+        await expect(
+          service.createFromVoucher({
+            lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+            splits: [{ kind: 'CUSTOMER_CREDIT', amount: 500 }],
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
+
     describe('tracked serials', () => {
       let trackedItemId: string;
       let customerId: string;

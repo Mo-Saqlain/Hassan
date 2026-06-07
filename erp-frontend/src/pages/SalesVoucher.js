@@ -30,7 +30,9 @@ import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 export default function SalesVoucher() {
   const navigate = useNavigate();
   const { data: items } = useResource('/items');
-  const { data: customers } = useResource('/reports/customer-balances');
+  const { data: customers, reload: reloadCustomers } = useResource(
+    '/reports/customer-balances',
+  );
   const { data: accounts } = useResource('/accounts');
 
   const blankLine = () => ({
@@ -50,6 +52,12 @@ export default function SalesVoucher() {
       .filter(Boolean);
   const blankSplit = () => ({
     accountId: '',
+    // Sentinel handled client-side: 'CASH' (default, uses accountId) or
+    // 'CUSTOMER_CREDIT' (applies prior customer credit; no accountId,
+    // capped at customer's available credit). When the cashier picks the
+    // pseudo-option from the split dropdown we flip kind to CUSTOMER_CREDIT
+    // and stop requiring an accountId on that row.
+    kind: 'CASH',
     amount: 0,
     reference: '',
     _key: Math.random().toString(36).slice(2),
@@ -82,6 +90,13 @@ export default function SalesVoucher() {
   const [useSchedule, setUseSchedule] = useState(false);
   const [commitments, setCommitments] = useState([blankCommitment()]);
 
+  // Inline customer create — owner often signs up a new walk-in mid-bill,
+  // and bouncing out to the Customers tab loses the in-progress voucher.
+  const [showNewCust, setShowNewCust] = useState(false);
+  const [newCust, setNewCust] = useState({ name: '', phone: '', address: '' });
+  const [newCustErr, setNewCustErr] = useState(null);
+  const [newCustBusy, setNewCustBusy] = useState(false);
+
   // Pre-pin the cash drawer / on-hand account on the first split so an
   // owner who's doing a quick walk-in voucher only has to type the amount.
   const cashAccount = useMemo(
@@ -104,6 +119,25 @@ export default function SalesVoucher() {
   );
   const residual = Number((netTotal - paidTotal).toFixed(2));
   const overSplit = paidTotal > netTotal + 0.005;
+
+  // Available customer credit comes from the per-party balance roll-up:
+  // negative balance = customer overpaid in the past → that surplus can
+  // settle part of this bill without taking new cash. Walk-ins have no
+  // ledger so always 0.
+  const availableCredit = useMemo(() => {
+    if (!customerId) return 0;
+    const c = customers.find((x) => x.id === customerId);
+    const bal = c ? Number(c.balance ?? 0) : 0;
+    return Math.max(0, -bal);
+  }, [customerId, customers]);
+  const ccSplitTotal = useMemo(
+    () =>
+      splits
+        .filter((s) => s.kind === 'CUSTOMER_CREDIT')
+        .reduce((s, x) => s + Number(x.amount || 0), 0),
+    [splits],
+  );
+  const ccOverApplied = ccSplitTotal > availableCredit + 0.005;
 
   const scheduleTotal = useMemo(
     () => commitments.reduce((s, c) => s + Number(c.expectedAmount || 0), 0),
@@ -145,7 +179,14 @@ export default function SalesVoucher() {
         l.itemId && l.quantity > 0 && l.unitPrice >= 0 && lineSerialOk(l),
     ) &&
     !overSplit &&
-    splits.every((sp) => Number(sp.amount || 0) === 0 || sp.accountId) &&
+    splits.every(
+      (sp) =>
+        Number(sp.amount || 0) === 0 ||
+        sp.kind === 'CUSTOMER_CREDIT' ||
+        sp.accountId,
+    ) &&
+    !ccOverApplied &&
+    (ccSplitTotal === 0 || !!customerId) &&
     !scheduleMismatch &&
     !scheduleBadRow;
 
@@ -287,6 +328,39 @@ export default function SalesVoucher() {
     }
   };
 
+  /**
+   * Inline customer create. Stays on the voucher screen — POSTs to
+   * /customers, refreshes the customer balance list, then auto-selects
+   * the new id. New customers default to creditEnabled=false; the
+   * Customers tab is still the place to flip credit on with a limit.
+   */
+  const createCustomer = async (e) => {
+    e.preventDefault();
+    const name = newCust.name.trim();
+    if (!name) {
+      setNewCustErr('Name is required.');
+      return;
+    }
+    setNewCustErr(null);
+    setNewCustBusy(true);
+    try {
+      const r = await api.post('/customers', {
+        name,
+        phone: newCust.phone.trim() || undefined,
+        address: newCust.address.trim() || undefined,
+      });
+      const created = r.data;
+      await reloadCustomers();
+      if (created?.id) setCustomerId(created.id);
+      setShowNewCust(false);
+      setNewCust({ name: '', phone: '', address: '' });
+    } catch (err) {
+      setNewCustErr(err.uiMessage ?? 'Could not create customer');
+    } finally {
+      setNewCustBusy(false);
+    }
+  };
+
   const reset = () => {
     setCustomerId('');
     setNotes('');
@@ -321,11 +395,21 @@ export default function SalesVoucher() {
         }),
         splits: splits
           .filter((sp) => Number(sp.amount || 0) > 0)
-          .map((sp) => ({
-            accountId: sp.accountId,
-            amount: Number(sp.amount),
-            reference: sp.reference.trim() || undefined,
-          })),
+          .map((sp) => {
+            if (sp.kind === 'CUSTOMER_CREDIT') {
+              return {
+                kind: 'CUSTOMER_CREDIT',
+                amount: Number(sp.amount),
+                reference: sp.reference.trim() || undefined,
+              };
+            }
+            return {
+              kind: 'CASH',
+              accountId: sp.accountId,
+              amount: Number(sp.amount),
+              reference: sp.reference.trim() || undefined,
+            };
+          }),
       };
       if (useSchedule && residual > 0) {
         payload.paymentCommitments = commitments
@@ -378,9 +462,93 @@ export default function SalesVoucher() {
 
       {/* ── Header ───────────────────────────────────────────────────── */}
       <section style={{ marginTop: 14 }}>
-        <div className="eyebrow" style={{ marginBottom: 6 }}>
-          Customer
+        <div
+          className="eyebrow"
+          style={{
+            marginBottom: 6,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+          }}
+        >
+          <span>Customer</span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setShowNewCust((v) => !v)}
+          >
+            {showNewCust ? 'Close' : '+ New customer'}
+          </button>
         </div>
+
+        {showNewCust && (
+          <div
+            className="card"
+            style={{
+              padding: 10,
+              marginBottom: 10,
+              background: 'var(--surface-2, transparent)',
+            }}
+          >
+            {newCustErr && (
+              <div className="alert alert-error" style={{ marginBottom: 8 }}>
+                {newCustErr}
+              </div>
+            )}
+            <div className="form-row">
+              <div>
+                <label>Name *</label>
+                <input
+                  autoFocus
+                  value={newCust.name}
+                  onChange={(e) =>
+                    setNewCust((p) => ({ ...p, name: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <label>Phone</label>
+                <input
+                  value={newCust.phone}
+                  onChange={(e) =>
+                    setNewCust((p) => ({ ...p, phone: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <label>Address</label>
+                <input
+                  value={newCust.address}
+                  onChange={(e) =>
+                    setNewCust((p) => ({ ...p, address: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={createCustomer}
+                disabled={newCustBusy || !newCust.name.trim()}
+              >
+                {newCustBusy ? 'Saving…' : 'Save & select'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setShowNewCust(false);
+                  setNewCust({ name: '', phone: '', address: '' });
+                  setNewCustErr(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="form-row">
           <div>
             <label>Customer</label>
@@ -702,18 +870,43 @@ export default function SalesVoucher() {
             </tr>
           </thead>
           <tbody>
-            {splits.map((split, idx) => (
+            {splits.map((split, idx) => {
+              // Combined value handles three states in one <select>:
+              //   ''                       → blank (default pick)
+              //   '__CUSTOMER_CREDIT__'    → kind=CUSTOMER_CREDIT row
+              //   <uuid>                   → kind=CASH, accountId=<uuid>
+              const dropdownValue =
+                split.kind === 'CUSTOMER_CREDIT'
+                  ? '__CUSTOMER_CREDIT__'
+                  : split.accountId;
+              return (
               <tr key={split._key}>
                 <td>
                   <select
-                    value={split.accountId}
-                    onChange={(e) =>
-                      updateSplit(split._key, { accountId: e.target.value })
-                    }
+                    value={dropdownValue}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '__CUSTOMER_CREDIT__') {
+                        updateSplit(split._key, {
+                          kind: 'CUSTOMER_CREDIT',
+                          accountId: '',
+                        });
+                      } else {
+                        updateSplit(split._key, {
+                          kind: 'CASH',
+                          accountId: v,
+                        });
+                      }
+                    }}
                   >
                     <option value="">
                       {idx === 0 && cashAccount ? cashAccount.name : '— Pick account —'}
                     </option>
+                    {availableCredit > 0 && (
+                      <option value="__CUSTOMER_CREDIT__">
+                        Customer credit · available {availableCredit.toFixed(2)}
+                      </option>
+                    )}
                     {accounts
                       .filter((a) =>
                         ['CASH', 'BANK', 'WALLET', 'CASH_ON_HAND'].includes(a.type),
@@ -759,9 +952,22 @@ export default function SalesVoucher() {
                   </button>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
+        {ccOverApplied && (
+          <div className="alert alert-error" style={{ marginTop: 8 }}>
+            Customer credit applied ({ccSplitTotal.toFixed(2)}) exceeds the
+            available credit ({availableCredit.toFixed(2)}). Reduce the
+            credit split or top it up with a cash split.
+          </div>
+        )}
+        {ccSplitTotal > 0 && !customerId && (
+          <div className="alert alert-error" style={{ marginTop: 8 }}>
+            Pick a customer above before applying customer credit.
+          </div>
+        )}
         <div style={{ marginTop: 8 }}>
           <button type="button" className="btn btn-sm" onClick={addSplit}>
             + Add split

@@ -341,6 +341,34 @@ export class SalesService {
       );
     }
 
+    // Per-split shape check. The DTO marks `accountId` and `kind` both
+    // optional so the JSON parser is lenient; this block enforces the
+    // actual coupling: CASH must carry an accountId, CUSTOMER_CREDIT
+    // must NOT carry one and requires a customer on the voucher header.
+    const ccSplitTotal = (dto.splits ?? [])
+      .filter((s) => s.kind === 'CUSTOMER_CREDIT')
+      .reduce((s, x) => s + Number(x.amount || 0), 0);
+    for (const sp of dto.splits ?? []) {
+      const kind = sp.kind ?? 'CASH';
+      if (kind === 'CASH' && !sp.accountId) {
+        throw new BadRequestException(
+          'Cash/Bank/Wallet splits need a destination account.',
+        );
+      }
+      if (kind === 'CUSTOMER_CREDIT') {
+        if (!dto.customerId) {
+          throw new BadRequestException(
+            'Customer credit can only be applied when the voucher names a customer.',
+          );
+        }
+        if (sp.accountId) {
+          throw new BadRequestException(
+            'Customer-credit splits must not carry an accountId — credit applies against the customer ledger, not a cash account.',
+          );
+        }
+      }
+    }
+
     // Pre-flight serial validation — runs BEFORE the transaction so a bad
     // serials list throws cleanly without leaving an orphan sequence number.
     // We need each line's Item to know if tracksSerials / serialRequiredOnSale
@@ -393,9 +421,32 @@ export class SalesService {
       };
       const sale = await this.createInTransaction(manager, baseDto);
 
-      // 2. Per-split: a normal Receipt voucher row + a balancing journal
-      //    Dr <accountId> / Cr A/R (or Deferred). Posting these inside the
-      //    same manager keeps the whole flow atomic.
+      // 2a. CUSTOMER_CREDIT splits — cap by the customer's pre-sale available
+      //     credit. The helper measures `opening + sum(due) - sum(receipts)`;
+      //     a negative figure is credit, so available = max(0, -outstanding).
+      //     This runs against the manager AFTER the Sale has been written,
+      //     so we adjust by netTotal (which was just added to A/R) to recover
+      //     the pre-sale figure.
+      if (ccSplitTotal > 0 && dto.customerId) {
+        const postSaleOutstanding = await this.customerOutstanding(
+          manager,
+          dto.customerId,
+        );
+        const preSaleOutstanding = postSaleOutstanding - netTotal;
+        const availableCredit = Math.max(0, -preSaleOutstanding);
+        if (ccSplitTotal > availableCredit + 0.005) {
+          throw new BadRequestException(
+            `Customer credit (${availableCredit.toFixed(2)}) is less than the credit splits (${ccSplitTotal.toFixed(2)}). Reduce the credit split or top it up with cash.`,
+          );
+        }
+      }
+
+      // 2b. Per-split: a normal Receipt voucher row + a balancing journal
+      //     Dr <accountId> / Cr A/R (or Deferred). CUSTOMER_CREDIT splits
+      //     skip both — the prior advance receipt already moved cash and
+      //     credited A/R; posting a second pair here would double-count.
+      //     Both kinds still reduce Sale.dueAmount in step 3 below so the
+      //     Sale-level "settled" status reads honest.
       const sysAR = await this.accounts.findSystem('A_R');
       const sysDeferred = await this.accounts.findSystem('DEFERRED_RECEIVABLE');
       const residualAccountId =
@@ -410,6 +461,7 @@ export class SalesService {
         const split = splitList[i];
         const amount = Number(split.amount);
         if (amount <= 0) continue;
+        if ((split.kind ?? 'CASH') === 'CUSTOMER_CREDIT') continue;
         const seq = await this.sequences.next('RCT', () => paymentRepo.count());
         const voucher = paymentRepo.create({
           voucherNo: seq,
@@ -434,7 +486,7 @@ export class SalesService {
             description: `${sale.invoiceNo} split #${i + 1}`,
             lines: [
               {
-                accountId: split.accountId,
+                accountId: split.accountId!,
                 debit: amount,
                 narration: `Voucher ${sale.invoiceNo} payment via account`,
               },

@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -38,18 +39,30 @@ export class CreateSaleVoucherLineDto {
 }
 
 /**
- * A single payment row inside a sale-voucher submission. Each split lands as
- * one Receipt voucher in the payments ledger plus a journal pair
- * Dr <accountId> / Cr A/R (or Deferred Cash Receivables).
+ * A single payment row inside a sale-voucher submission. Two flavours via
+ * `kind`:
  *
- * `accountId` is the destination account the cash physically lands in
- * (cash drawer, HBL bank, JazzCash wallet, …) — exactly what an OUT-of-band
- * receipt voucher would carry. The customer's account is taken from the
- * voucher header.
+ *  - `CASH` (default) — money lands in a real account (cash drawer / bank /
+ *    wallet). Posts a `RCT-…` Receipt row + a journal pair
+ *    `Dr <accountId> / Cr A/R (or Deferred Cash Receivables)`. `accountId`
+ *    is required.
+ *
+ *  - `CUSTOMER_CREDIT` — applies the customer's existing on-account credit
+ *    balance toward this bill. No Receipt row, no journal entry (the prior
+ *    advance already moved cash and credited the customer's A/R at the
+ *    time it was received — re-posting now would double-count). The Sale's
+ *    paidAmount/dueAmount still drop so the Sale-level "settled" status is
+ *    honest. `accountId` is omitted; `customerId` on the voucher header is
+ *    required; the customer's pre-sale credit must cover the split amount.
  */
 export class CreateSaleVoucherSplitDto {
+  @IsIn(['CASH', 'CUSTOMER_CREDIT'])
+  @IsOptional()
+  kind?: 'CASH' | 'CUSTOMER_CREDIT';
+
   @IsUUID()
-  accountId: string;
+  @IsOptional()
+  accountId?: string;
 
   @IsNumber()
   @Min(0)
