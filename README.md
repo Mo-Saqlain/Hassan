@@ -79,8 +79,8 @@ Master data lives inside the operational hubs in the sidebar, not in a separate 
 **Categories** carry an optional uppercase `code` (≤ 8 chars, e.g. `COOLER`, `FAN`, `STAND`) used as the segment of auto-generated local serials: `LOCAL-<code>-<year>-<seq>`. Uniqueness enforced in the service layer.
 
 ### 3. Transactions
-- **POS sales** generate invoices (`INV-…`) with stock OUT
-- **Sales Voucher** — bill-book style multi-tender entry at `POST /sales/voucher`. One sale + N receipt splits (Cash + Bank + Wallet + on-account, any combination) all in one atomic transaction; an oversplit or a stale account id rolls the whole thing back so a partial sale can't strand. Each split lands as a normal `RCT-…` Receipt row plus a balancing `Dr account / Cr A/R (or Deferred Cash Receivables)` journal pair — the customer ledger reads exactly as if each split had been entered manually.
+- **POS sales** generate invoices (`INV-…`) with stock OUT — scan-driven session/cart flow at `/#/pos` (still reachable by URL; no longer in the sidebar — Sales Voucher is the default Sales-hub tab now).
+- **Sales Voucher** (`/#/sales-voucher`, default Sales-hub tab) — bill-book entry screen + `POST /sales/voucher`. Customer header, line table (qty / unit price), N payment splits (Cash + Bank + Wallet + on-account, any combination) and a live Net / Paid / Residual footer. Submit posts one Sale + N Receipt rows in a single atomic transaction; an oversplit or stale account id rolls the whole thing back so a partial sale can't strand. Each split lands as a normal `RCT-…` Receipt plus a balancing `Dr account / Cr A/R (or Deferred Cash Receivables)` journal pair — the customer ledger reads exactly as if each split had been entered manually. After save the printable invoice opens in a new tab and the cashier is dropped onto Sales history.
 - **Sale returns** (`SR-…`) — goods back from customers, stock IN
 - **Purchases** (`BILL-…`) — stock IN from suppliers; in-flow `+ New` button to create items mid-purchase
 - **Purchase returns** (`PR-…`) — goods returned to suppliers, stock OUT

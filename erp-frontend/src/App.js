@@ -17,6 +17,7 @@ import StockLedger from './pages/StockLedger';
 import POS from './pages/POS';
 import Transactions from './pages/Transactions';
 import Sales from './pages/Sales';
+import SalesVoucher from './pages/SalesVoucher';
 import SaleReturns from './pages/SaleReturns';
 import Purchases from './pages/Purchases';
 import PurchaseReturns from './pages/PurchaseReturns';
@@ -97,6 +98,7 @@ export default function App() {
                 />
               }
             >
+              <Route path="sales-voucher" element={<SalesVoucher />} />
               <Route path="sales" element={<Sales />} />
               <Route path="sale-returns" element={<SaleReturns />} />
               <Route path="deliveries" element={<Deliveries />} />

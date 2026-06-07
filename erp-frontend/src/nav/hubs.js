@@ -44,13 +44,23 @@ export const HUBS = {
     label: 'Sales',
     title: 'Sales',
     subtitle:
-      'Posted invoices, sale returns, delivery tracking, and overdue bookings.',
+      'Bill-book voucher entry, posted invoices, returns, deliveries, and overdue bookings.',
     icon: 'receipt',
     colorVar: '--nav-sales',
-    defaultTo: '/sales',
-    paths: ['/sales', '/sale-returns', '/deliveries', '/overdue-bookings'],
+    // Voucher is the daily entry point; landing the sidebar Sales click
+    // directly on the new-voucher form mirrors how the shop owner uses a
+    // physical bill book. History sits one tab over.
+    defaultTo: '/sales-voucher',
+    paths: [
+      '/sales-voucher',
+      '/sales',
+      '/sale-returns',
+      '/deliveries',
+      '/overdue-bookings',
+    ],
     tabs: [
-      { to: '/sales', label: 'History', icon: 'receipt' },
+      { to: '/sales-voucher', label: 'New Voucher', icon: 'receipt' },
+      { to: '/sales', label: 'History', icon: 'ledger' },
       { to: '/sale-returns', label: 'Returns', icon: 'transfer' },
       { to: '/deliveries', label: 'Deliveries', icon: 'truck' },
       {
@@ -212,7 +222,10 @@ const { system: SYSTEM_HUB, ...HUBS_WITHOUT_SYSTEM } = HUBS;
 
 export const SIDEBAR = [
   { to: '/', label: 'Dashboard', end: true, icon: 'dashboard', colorVar: '--nav-dashboard' },
-  { to: '/pos', label: 'POS Terminal', icon: 'pos', colorVar: '--nav-pos' },
+  // POS Terminal sidebar entry was removed when the Sales Voucher (bill-book
+  // entry) became the default Sales-hub tab. The /pos route is still mounted
+  // for muscle-memory bookmarks and for cashiers who prefer the scan-driven
+  // session flow — type "/pos" into the URL bar to reach it.
   { to: '/cash-register', label: 'Cash Book', icon: 'cash', colorVar: '--nav-cashbook' },
   // Operational hubs (customer / sales / supplier / purchase / item / stock /
   // employee / account)
