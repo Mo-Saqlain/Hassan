@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
@@ -13,14 +13,19 @@ import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
  *
  * Layout follows the hand-drawn wireframe the shop owner sketched:
  *   ┌─ Customer + invoice meta ─────────────────────────┐
- *   ├─ Line items (Item · Qty · Unit · Line total) ─────┤
+ *   ├─ Scan code · Line items (Item · Qty · Unit · Tot) ┤
  *   ├─ Payment splits (Account · Amount · Reference) ───┤
+ *   ├─ Deferred schedule (when residual > 0) ───────────┤
  *   │  Net · Paid · Residual footer ─────────────────────┤
  *   └─ Submit · Cancel ─────────────────────────────────┘
  *
+ * Keyboard shortcuts:
+ *   F2          — focus the scan/barcode input
+ *   Ctrl+Enter  — submit the voucher
+ *
  * The Submit button is disabled until the lines have a non-zero net AND
- * the splits sum does not exceed the net (server enforces the same check,
- * this is just immediate feedback).
+ * the splits sum does not exceed the net AND (if scheduling is on) the
+ * commitments sum to the residual. The server re-validates everything.
  */
 export default function SalesVoucher() {
   const navigate = useNavigate();
@@ -40,6 +45,12 @@ export default function SalesVoucher() {
     reference: '',
     _key: Math.random().toString(36).slice(2),
   });
+  const blankCommitment = () => ({
+    dueDate: '',
+    expectedAmount: 0,
+    notes: '',
+    _key: Math.random().toString(36).slice(2),
+  });
 
   const [customerId, setCustomerId] = useState('');
   const [notes, setNotes] = useState('');
@@ -48,6 +59,19 @@ export default function SalesVoucher() {
   const [splits, setSplits] = useState([blankSplit()]);
   const [submitErr, setSubmitErr] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Scan input — barcode / SKU / model no goes here; Enter resolves the
+  // line. Stays in DOM at the top of the items table; F2 focuses it.
+  const [scanCode, setScanCode] = useState('');
+  const [scanErr, setScanErr] = useState(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const scanRef = useRef(null);
+
+  // Deferred schedule: optional, only meaningful when residual > 0. When
+  // ON the residual routes to the Deferred Cash Receivables system account
+  // and each commitment becomes a row the dashboard can chase.
+  const [useSchedule, setUseSchedule] = useState(false);
+  const [commitments, setCommitments] = useState([blankCommitment()]);
 
   // Pre-pin the cash drawer / on-hand account on the first split so an
   // owner who's doing a quick walk-in voucher only has to type the amount.
@@ -71,20 +95,65 @@ export default function SalesVoucher() {
   );
   const residual = Number((netTotal - paidTotal).toFixed(2));
   const overSplit = paidTotal > netTotal + 0.005;
+
+  const scheduleTotal = useMemo(
+    () => commitments.reduce((s, c) => s + Number(c.expectedAmount || 0), 0),
+    [commitments],
+  );
+  // The schedule must clear the residual exactly when it's on — half a
+  // schedule is worse than no schedule (the dashboard would chase the
+  // wrong amount and the rest would hide in plain A/R).
+  const scheduleMismatch =
+    useSchedule && residual > 0
+      ? Math.abs(scheduleTotal - residual) > 0.005
+      : false;
+  const scheduleBadRow =
+    useSchedule &&
+    residual > 0 &&
+    commitments.some(
+      (c) =>
+        Number(c.expectedAmount || 0) > 0 &&
+        (!c.dueDate || isNaN(new Date(c.dueDate).getTime())),
+    );
+
   const canSubmit =
     !submitting &&
     netTotal > 0 &&
     lines.every((l) => l.itemId && l.quantity > 0 && l.unitPrice >= 0) &&
     !overSplit &&
-    splits.every((sp) => Number(sp.amount || 0) === 0 || sp.accountId);
+    splits.every((sp) => Number(sp.amount || 0) === 0 || sp.accountId) &&
+    !scheduleMismatch &&
+    !scheduleBadRow;
 
   const isDirty =
     netTotal > 0 ||
     customerId !== '' ||
     notes.trim() !== '' ||
     lines.some((l) => l.itemId) ||
-    splits.some((sp) => Number(sp.amount || 0) > 0);
+    splits.some((sp) => Number(sp.amount || 0) > 0) ||
+    useSchedule;
   useUnsavedChangesPrompt(isDirty);
+
+  // F2 = focus scan, Ctrl+Enter = submit. Registered at the document level
+  // so it works while the cashier is typing in any input within the form.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'F2') {
+        e.preventDefault();
+        scanRef.current?.focus();
+        scanRef.current?.select();
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        // Click the submit button rather than reproducing the submit logic
+        // — keeps the disabled-state and form-validity check honest.
+        document
+          .querySelector('form .btn.btn-primary[type="submit"]')
+          ?.click();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   const updateLine = (key, patch) => {
     setLines((prev) =>
@@ -120,12 +189,90 @@ export default function SalesVoucher() {
       prev.length === 1 ? prev : prev.filter((s) => s._key !== key),
     );
 
+  const updateCommitment = (key, patch) =>
+    setCommitments((prev) =>
+      prev.map((c) => (c._key === key ? { ...c, ...patch } : c)),
+    );
+  const addCommitment = () =>
+    setCommitments((prev) => [...prev, blankCommitment()]);
+  const removeCommitment = (key) =>
+    setCommitments((prev) =>
+      prev.length === 1 ? prev : prev.filter((c) => c._key !== key),
+    );
+
+  /**
+   * Scan-to-add: looks up an exact match by barcode / SKU / model no via
+   * `GET /items/lookup?code=X`. If the resolved item is already on a
+   * blank-priced row in the table we stack quantity (typical scan twice =
+   * qty 2). Otherwise we add a new row pre-filled at the item's sale
+   * price. The scan input stays focused after every successful add so a
+   * cashier with a wedge scanner can rip through a basket without
+   * reaching for the mouse.
+   */
+  const onScan = async (e) => {
+    e.preventDefault();
+    const code = scanCode.trim();
+    if (!code) return;
+    setScanErr(null);
+    setScanBusy(true);
+    try {
+      const r = await api.get(
+        `/items/lookup?code=${encodeURIComponent(code)}`,
+      );
+      const item = r.data;
+      if (!item?.id) {
+        setScanErr(`No item matches "${code}".`);
+        return;
+      }
+      setLines((prev) => {
+        // Stack on the first existing line for this item that's still at
+        // the item's default sale price (i.e. nobody has overridden it
+        // mid-bill). Bumps qty by 1. If none qualifies, append a new row.
+        const stackable = prev.find(
+          (l) =>
+            l.itemId === item.id &&
+            Number(l.unitPrice) === Number(item.salePrice ?? 0),
+        );
+        if (stackable) {
+          return prev.map((l) =>
+            l._key === stackable._key
+              ? { ...l, quantity: Number(l.quantity || 0) + 1 }
+              : l,
+          );
+        }
+        const blankFirst =
+          prev.length === 1 && prev[0].itemId === '' ? prev[0] : null;
+        const newRow = {
+          ...blankLine(),
+          itemId: item.id,
+          quantity: 1,
+          unitPrice: Number(item.salePrice ?? 0),
+        };
+        if (blankFirst) {
+          return [{ ...blankFirst, ...newRow, _key: blankFirst._key }];
+        }
+        return [...prev, newRow];
+      });
+      setScanCode('');
+      // Keep the scanner in focus — cashiers expect F2-like persistence.
+      requestAnimationFrame(() => scanRef.current?.focus());
+    } catch (err) {
+      setScanErr(err.uiMessage ?? 'Lookup failed');
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
   const reset = () => {
     setCustomerId('');
     setNotes('');
     setDiscount(0);
     setLines([blankLine()]);
     setSplits([blankSplit()]);
+    setUseSchedule(false);
+    setCommitments([blankCommitment()]);
+    setScanCode('');
+    setScanErr(null);
     setSubmitErr(null);
   };
 
@@ -152,6 +299,15 @@ export default function SalesVoucher() {
             reference: sp.reference.trim() || undefined,
           })),
       };
+      if (useSchedule && residual > 0) {
+        payload.paymentCommitments = commitments
+          .filter((c) => Number(c.expectedAmount || 0) > 0 && c.dueDate)
+          .map((c) => ({
+            dueDate: c.dueDate,
+            expectedAmount: Number(c.expectedAmount),
+            notes: c.notes.trim() || undefined,
+          }));
+      }
       const r = await api.post('/sales/voucher', payload);
       const saleId = r.data?.sale?.id;
       const invoiceNo = r.data?.sale?.invoiceNo;
@@ -244,9 +400,49 @@ export default function SalesVoucher() {
 
       {/* ── Line items ───────────────────────────────────────────────── */}
       <section style={{ marginTop: 18 }}>
-        <div className="eyebrow" style={{ marginBottom: 6 }}>
-          Items
+        <div
+          className="eyebrow"
+          style={{
+            marginBottom: 6,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+          }}
+        >
+          <span>Items</span>
+          <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}>
+            Press F2 to focus the scanner · Ctrl+Enter to submit
+          </span>
         </div>
+
+        {/* Barcode / SKU scan input. Posts to /items/lookup, stacks qty on
+            a matching row, otherwise adds a new line. */}
+        <div style={{ marginBottom: 10 }}>
+          <input
+            ref={scanRef}
+            value={scanCode}
+            onChange={(e) => setScanCode(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onScan(e);
+            }}
+            placeholder="Scan barcode or type SKU / model no, then Enter"
+            disabled={scanBusy}
+            style={{
+              width: '100%',
+              maxWidth: 460,
+              fontFamily: 'Cascadia Code, Consolas, monospace',
+            }}
+          />
+          {scanErr && (
+            <div
+              className="muted"
+              style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}
+            >
+              {scanErr}
+            </div>
+          )}
+        </div>
+
         <table>
           <thead>
             <tr>
@@ -472,6 +668,147 @@ export default function SalesVoucher() {
           </button>
         </div>
       </section>
+
+      {/* ── Deferred-cash schedule (only when there's a residual) ────── */}
+      {residual > 0 && (
+        <section style={{ marginTop: 18 }}>
+          <div
+            className="eyebrow"
+            style={{
+              marginBottom: 6,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontWeight: 400,
+            }}
+          >
+            <input
+              id="use-schedule-toggle"
+              type="checkbox"
+              checked={useSchedule}
+              onChange={(e) => setUseSchedule(e.target.checked)}
+              style={{ width: 'auto', margin: 0 }}
+            />
+            <label
+              htmlFor="use-schedule-toggle"
+              style={{
+                margin: 0,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                fontSize: 12,
+              }}
+            >
+              Schedule remaining {residual.toFixed(2)} as deferred cash
+            </label>
+            <span className="muted" style={{ fontSize: 11 }}>
+              (routes residual to Deferred Cash Receivables · dashboard chases each due date)
+            </span>
+          </div>
+
+          {useSchedule && (
+            <>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: 180 }}>Due date</th>
+                    <th className="right" style={{ width: 160 }}>
+                      Expected amount
+                    </th>
+                    <th>Notes</th>
+                    <th style={{ width: 40 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {commitments.map((c) => (
+                    <tr key={c._key}>
+                      <td>
+                        <input
+                          type="date"
+                          value={c.dueDate}
+                          onChange={(e) =>
+                            updateCommitment(c._key, { dueDate: e.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="right"
+                          value={c.expectedAmount}
+                          onChange={(e) =>
+                            updateCommitment(c._key, {
+                              expectedAmount:
+                                e.target.value === ''
+                                  ? 0
+                                  : Number(e.target.value),
+                            })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={c.notes}
+                          onChange={(e) =>
+                            updateCommitment(c._key, { notes: e.target.value })
+                          }
+                          placeholder='e.g. "Pay half on the 20th"'
+                        />
+                      </td>
+                      <td className="right">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger"
+                          onClick={() => removeCommitment(c._key)}
+                          disabled={commitments.length === 1}
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div
+                style={{
+                  marginTop: 8,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={addCommitment}
+                >
+                  + Add due date
+                </button>
+                <div
+                  className="muted"
+                  style={{
+                    fontSize: 12,
+                    fontVariantNumeric: 'tabular-nums',
+                    color: scheduleMismatch ? 'var(--danger)' : undefined,
+                  }}
+                >
+                  Scheduled {scheduleTotal.toFixed(2)} / residual{' '}
+                  {residual.toFixed(2)}
+                  {scheduleMismatch &&
+                    ` (off by ${(scheduleTotal - residual).toFixed(2)})`}
+                </div>
+              </div>
+              {scheduleBadRow && (
+                <div className="alert alert-error" style={{ marginTop: 8 }}>
+                  Every scheduled row with an amount needs a due date.
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
       {/* ── Footer totals + submit ───────────────────────────────────── */}
       <section
