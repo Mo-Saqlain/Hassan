@@ -341,6 +341,40 @@ export class SalesService {
       );
     }
 
+    // Pre-flight serial validation — runs BEFORE the transaction so a bad
+    // serials list throws cleanly without leaving an orphan sequence number.
+    // We need each line's Item to know if tracksSerials / serialRequiredOnSale
+    // applies, so resolve all of them up-front and cache.
+    const itemIds = Array.from(new Set(dto.lines.map((l) => l.itemId)));
+    const items = await this.dataSource
+      .getRepository(Item)
+      .findBy({ id: In(itemIds) });
+    const itemMap = new Map(items.map((i) => [i.id, i]));
+    for (const ln of dto.lines) {
+      const it = itemMap.get(ln.itemId);
+      if (!it || !it.tracksSerials) continue;
+      const provided = (ln.serials ?? []).map((s) => s.trim()).filter(Boolean);
+      if (it.serialRequiredOnSale && provided.length !== ln.quantity) {
+        throw new BadRequestException(
+          `${it.name}: ${ln.quantity} serial number${ln.quantity === 1 ? '' : 's'} required (got ${provided.length}). One serial per unit.`,
+        );
+      }
+      if (
+        !it.serialRequiredOnSale &&
+        provided.length > 0 &&
+        provided.length !== ln.quantity
+      ) {
+        throw new BadRequestException(
+          `${it.name}: either supply ${ln.quantity} serial${ln.quantity === 1 ? '' : 's'} (one per unit) or leave the box empty.`,
+        );
+      }
+      if (new Set(provided).size !== provided.length) {
+        throw new BadRequestException(
+          `${it.name}: duplicate serial numbers within the line.`,
+        );
+      }
+    }
+
     const result = await this.dataSource.transaction(async (manager) => {
       // 1. Create the Sale itself with the whole net on the receivable side.
       //    Each split below clears its slice via a normal Receipt voucher.
@@ -417,11 +451,7 @@ export class SalesService {
 
       // 3. Reflect the at-sale-time payments on the Sale header so the
       //    customer-balances roll-up and the booking-hold gate see consistent
-      //    numbers. Sale.dueAmount drops by the total splits collected; the
-      //    booking state machine (BOOKED serials) was already set inside
-      //    createInTransaction based on the initial dueAmount = netTotal, so
-      //    if sum(splits) clears the residual to zero we also flip any
-      //    booked serials to DELIVERED — same hook settleCommitment uses.
+      //    numbers. Sale.dueAmount drops by the total splits collected.
       if (splitTotal > 0) {
         const saleRepo = manager.getRepository(Sale);
         sale.paidAmount = Number(
@@ -435,9 +465,52 @@ export class SalesService {
           Number((Number(sale.dueAmount ?? 0) - splitTotal).toFixed(2)),
         );
         await saleRepo.save(sale);
+      }
 
-        if (sale.dueAmount <= 0.005) {
-          await this.itemSerials.markDelivered(sale.invoiceNo, manager);
+      // 4. Bind tracked serials — same dueAmount-branched policy POS uses:
+      //    full pay (dueAmount ≈ 0) → bindToSale per serial (DELIVERED +
+      //    warranty stamp); residual remains → reserveForBooking (BOOKED,
+      //    physical status stays IN_STOCK on the floor). Done after the
+      //    splits land so the branch sees the final dueAmount, not the
+      //    pre-split residual that always equals netTotal.
+      const isBooking = Number(sale.dueAmount ?? 0) > 0.005;
+      for (const ln of dto.lines) {
+        const it = itemMap.get(ln.itemId);
+        if (!it || !it.tracksSerials) continue;
+        const provided = (ln.serials ?? [])
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (provided.length === 0) continue;
+        if (isBooking) {
+          await this.itemSerials.reserveForBooking(
+            {
+              serials: provided,
+              itemId: ln.itemId,
+              saleInvoiceNo: sale.invoiceNo,
+              soldToCustomerId: dto.customerId,
+              bookedAt: sale.createdAt,
+            },
+            manager,
+          );
+        } else {
+          for (const serial of provided) {
+            await this.itemSerials.bindToSale(
+              {
+                serial,
+                itemId: ln.itemId,
+                saleInvoiceNo: sale.invoiceNo,
+                soldAt: sale.createdAt,
+                soldToCustomerId: dto.customerId,
+                warrantyDays: it.hasWarranty
+                  ? it.warrantyDays ?? undefined
+                  : undefined,
+                warrantyType: it.hasWarranty
+                  ? it.warrantyType ?? undefined
+                  : undefined,
+              },
+              manager,
+            );
+          }
         }
       }
 

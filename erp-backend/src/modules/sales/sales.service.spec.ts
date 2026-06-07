@@ -66,10 +66,16 @@ describe('SalesService', () => {
     stock = testModule.get(StockService);
     ds = testModule.get(DataSource);
 
+    // The seeded "Phone" item is the generic stand-in for every non-serial
+    // test in this file. Explicitly disable serial tracking — the Item
+    // entity defaults both tracksSerials + serialRequiredOnSale to true,
+    // which would force every voucher / sale test to supply serials.
     const item = await ds.getRepository(Item).save(
       ds.getRepository(Item).create({
         name: 'Phone', sku: 'PHN-1',
         purchasePrice: 300, salePrice: 500,
+        tracksSerials: false,
+        serialRequiredOnSale: false,
       }),
     );
     itemId = item.id;
@@ -516,6 +522,120 @@ describe('SalesService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(await ds.getRepository(Sale).count()).toBe(0);
       expect(await ds.getRepository(Payment).count()).toBe(0);
+    });
+
+    describe('tracked serials', () => {
+      let trackedItemId: string;
+      let customerId: string;
+
+      beforeEach(async () => {
+        const tracked = await ds.getRepository(Item).save(
+          ds.getRepository(Item).create({
+            name: 'Refrigerator',
+            sku: 'RF-1',
+            purchasePrice: 60000,
+            salePrice: 80000,
+            tracksSerials: true,
+            serialRequiredOnSale: true,
+            hasWarranty: true,
+            warrantyType: 'COMPANY',
+            warrantyDays: 365,
+          }),
+        );
+        trackedItemId = tracked.id;
+        await stock.recordMovement({
+          itemId: trackedItemId,
+          type: 'IN',
+          quantity: 3,
+          referenceType: 'PURCHASE',
+          referenceId: 'seed-tracked-voucher',
+        });
+        const c = await ds.getRepository(Customer).save(
+          ds.getRepository(Customer).create({
+            name: 'Voucher Tracked Cust',
+            creditEnabled: true,
+            creditLimit: 1000000,
+          }),
+        );
+        customerId = c.id;
+      });
+
+      it('full-payment voucher binds serial to DELIVERED with warranty stamp', async () => {
+        const { sale } = await service.createFromVoucher({
+          customerId,
+          lines: [
+            {
+              itemId: trackedItemId,
+              quantity: 1,
+              unitPrice: 80000,
+              serials: ['SN-VCHR-FULL-1'],
+            },
+          ],
+          splits: [{ accountId: cashAccountId, amount: 80000 }],
+        });
+        expect(Number(sale.dueAmount)).toBe(0);
+
+        const row = await ds
+          .getRepository(ItemSerial)
+          .findOne({ where: { serial: 'SN-VCHR-FULL-1' } });
+        expect(row?.status).toBe('SOLD');
+        expect(row?.allocationStatus).toBe('DELIVERED');
+        expect(row?.saleInvoiceNo).toBe(sale.invoiceNo);
+        // Warranty pulled from the Item template (365 days).
+        expect(row?.warrantyDays).toBe(365);
+        expect(row?.warrantyEndAt).toBeTruthy();
+      });
+
+      it('partial-payment voucher flips serial to BOOKED (physical IN_STOCK)', async () => {
+        const { sale } = await service.createFromVoucher({
+          customerId,
+          lines: [
+            {
+              itemId: trackedItemId,
+              quantity: 1,
+              unitPrice: 80000,
+              serials: ['SN-VCHR-BOOK-1'],
+            },
+          ],
+          splits: [{ accountId: cashAccountId, amount: 30000 }],
+        });
+        expect(Number(sale.dueAmount)).toBe(50000);
+
+        const row = await ds
+          .getRepository(ItemSerial)
+          .findOne({ where: { serial: 'SN-VCHR-BOOK-1' } });
+        expect(row?.allocationStatus).toBe('BOOKED');
+        expect(row?.status).toBe('IN_STOCK');
+        expect(row?.saleInvoiceNo).toBe(sale.invoiceNo);
+        expect(row?.bookedAt).toBeTruthy();
+        // Warranty should NOT be stamped yet — only stamps on bindToSale.
+        expect(row?.warrantyEndAt).toBeFalsy();
+      });
+
+      it('serial-count mismatch rejected before any DB write', async () => {
+        await expect(
+          service.createFromVoucher({
+            customerId,
+            lines: [
+              {
+                itemId: trackedItemId,
+                quantity: 2,
+                unitPrice: 80000,
+                serials: ['SN-ONLY-ONE'], // 1 serial but qty 2
+              },
+            ],
+            splits: [{ accountId: cashAccountId, amount: 160000 }],
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        // Sale + Payment counts unchanged
+        expect(await ds.getRepository(Sale).count()).toBe(0);
+        expect(await ds.getRepository(Payment).count()).toBe(0);
+        expect(
+          await ds
+            .getRepository(ItemSerial)
+            .findOne({ where: { serial: 'SN-ONLY-ONE' } }),
+        ).toBeNull();
+      });
     });
   });
 });

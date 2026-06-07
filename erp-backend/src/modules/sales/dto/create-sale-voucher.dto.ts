@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -10,10 +11,31 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import {
-  CreatePaymentCommitmentDto,
-  CreateSaleLineDto,
-} from './create-sale.dto';
+import { CreatePaymentCommitmentDto } from './create-sale.dto';
+
+/**
+ * Voucher line shape — extends the regular sale line with an optional
+ * `serials` array for items flagged `tracksSerials`. One trimmed string
+ * per physical unit (must match quantity when serialRequiredOnSale=true,
+ * or be empty when serials are optional for the item).
+ */
+export class CreateSaleVoucherLineDto {
+  @IsUUID()
+  itemId: string;
+
+  @IsInt()
+  @Min(1)
+  quantity: number;
+
+  @IsNumber()
+  @Min(0)
+  unitPrice: number;
+
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  serials?: string[];
+}
 
 /**
  * A single payment row inside a sale-voucher submission. Each split lands as
@@ -83,8 +105,8 @@ export class CreateSaleVoucherDto {
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => CreateSaleLineDto)
-  lines: CreateSaleLineDto[];
+  @Type(() => CreateSaleVoucherLineDto)
+  lines: CreateSaleVoucherLineDto[];
 
   @IsArray()
   @IsOptional()

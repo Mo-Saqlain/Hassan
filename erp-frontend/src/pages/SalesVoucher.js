@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
@@ -37,8 +37,17 @@ export default function SalesVoucher() {
     itemId: '',
     quantity: 1,
     unitPrice: 0,
+    serials: '',
     _key: Math.random().toString(36).slice(2),
   });
+
+  // Parse a free-text serial blob (one per line / whitespace / comma) into
+  // a clean array. Used for both the count-validation pass and the payload.
+  const parseSerials = (txt) =>
+    String(txt ?? '')
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
   const blankSplit = () => ({
     accountId: '',
     amount: 0,
@@ -116,10 +125,25 @@ export default function SalesVoucher() {
         (!c.dueDate || isNaN(new Date(c.dueDate).getTime())),
     );
 
+  // Per-line serial check: when the picked item has tracksSerials=true,
+  // the count of parsed serials must match the row quantity (or, for
+  // serialRequiredOnSale=false, be 0 — cashier explicitly skipped it).
+  const lineSerialOk = (l) => {
+    const it = items.find((x) => x.id === l.itemId);
+    if (!it || !it.tracksSerials) return true;
+    const parsed = parseSerials(l.serials);
+    const qty = Number(l.quantity || 0);
+    if (it.serialRequiredOnSale) return parsed.length === qty;
+    return parsed.length === 0 || parsed.length === qty;
+  };
+
   const canSubmit =
     !submitting &&
     netTotal > 0 &&
-    lines.every((l) => l.itemId && l.quantity > 0 && l.unitPrice >= 0) &&
+    lines.every(
+      (l) =>
+        l.itemId && l.quantity > 0 && l.unitPrice >= 0 && lineSerialOk(l),
+    ) &&
     !overSplit &&
     splits.every((sp) => Number(sp.amount || 0) === 0 || sp.accountId) &&
     !scheduleMismatch &&
@@ -286,11 +310,15 @@ export default function SalesVoucher() {
         customerId: customerId || undefined,
         discount: Number(discount) || 0,
         notes: notes.trim() || undefined,
-        lines: lines.map((l) => ({
-          itemId: l.itemId,
-          quantity: Number(l.quantity),
-          unitPrice: Number(l.unitPrice),
-        })),
+        lines: lines.map((l) => {
+          const parsed = parseSerials(l.serials);
+          return {
+            itemId: l.itemId,
+            quantity: Number(l.quantity),
+            unitPrice: Number(l.unitPrice),
+            ...(parsed.length > 0 ? { serials: parsed } : {}),
+          };
+        }),
         splits: splits
           .filter((sp) => Number(sp.amount || 0) > 0)
           .map((sp) => ({
@@ -463,8 +491,22 @@ export default function SalesVoucher() {
             {lines.map((line) => {
               const lineTotal =
                 Number(line.unitPrice || 0) * Number(line.quantity || 0);
+              const lineItem = items.find((x) => x.id === line.itemId);
+              const tracked = !!lineItem?.tracksSerials;
+              const parsedCount = parseSerials(line.serials).length;
+              const qty = Number(line.quantity || 0);
+              const required =
+                tracked &&
+                lineItem?.serialRequiredOnSale &&
+                parsedCount !== qty;
+              const optionalBadCount =
+                tracked &&
+                !lineItem?.serialRequiredOnSale &&
+                parsedCount > 0 &&
+                parsedCount !== qty;
               return (
-                <tr key={line._key}>
+                <Fragment key={line._key}>
+                <tr>
                   <td>
                     <select
                       value={line.itemId}
@@ -527,6 +569,64 @@ export default function SalesVoucher() {
                     </button>
                   </td>
                 </tr>
+                {tracked && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      style={{
+                        background: 'var(--surface-2, transparent)',
+                        paddingTop: 4,
+                        paddingBottom: 8,
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: 'block',
+                          fontSize: 11,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          color:
+                            required || optionalBadCount
+                              ? 'var(--danger)'
+                              : 'var(--text-muted)',
+                          marginBottom: 4,
+                        }}
+                      >
+                        Serials · one per unit ({parsedCount}/{qty})
+                        {lineItem?.serialRequiredOnSale
+                          ? ' · required'
+                          : ' · optional'}
+                      </label>
+                      <textarea
+                        rows={Math.min(4, Math.max(1, qty))}
+                        value={line.serials}
+                        onChange={(e) =>
+                          updateLine(line._key, { serials: e.target.value })
+                        }
+                        placeholder="Scan or paste one serial per line"
+                        style={{
+                          width: '100%',
+                          fontFamily: 'Cascadia Code, Consolas, monospace',
+                        }}
+                      />
+                      {(required || optionalBadCount) && (
+                        <div
+                          className="muted"
+                          style={{
+                            fontSize: 12,
+                            color: 'var(--danger)',
+                            marginTop: 4,
+                          }}
+                        >
+                          {required
+                            ? `${qty} serial${qty === 1 ? '' : 's'} required for this item.`
+                            : `Either ${qty} serial${qty === 1 ? '' : 's'} (one per unit) or leave the box empty — no half-rows.`}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>
