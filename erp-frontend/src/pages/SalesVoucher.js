@@ -171,24 +171,64 @@ export default function SalesVoucher() {
     return parsed.length === 0 || parsed.length === qty;
   };
 
-  const canSubmit =
-    !submitting &&
-    netTotal > 0 &&
-    lines.every(
-      (l) =>
-        l.itemId && l.quantity > 0 && l.unitPrice >= 0 && lineSerialOk(l),
-    ) &&
-    !overSplit &&
-    splits.every(
-      (sp) =>
-        Number(sp.amount || 0) === 0 ||
-        sp.kind === 'CUSTOMER_CREDIT' ||
-        sp.accountId,
-    ) &&
-    !ccOverApplied &&
-    (ccSplitTotal === 0 || !!customerId) &&
-    !scheduleMismatch &&
-    !scheduleBadRow;
+  // Compile every gate that's still blocking save into a single user-facing
+  // list. The disabled Save button is silent on its own — surfacing the
+  // specific reason next to the button means the cashier never has to guess
+  // "why isn't this saving?". Order matches the natural top-to-bottom scan
+  // of the screen so the first item in the list is the highest one in view.
+  const blockReasons = [];
+  if (netTotal <= 0) {
+    blockReasons.push('Add at least one line with a price.');
+  } else {
+    lines.forEach((l, idx) => {
+      if (!l.itemId)
+        blockReasons.push(`Line ${idx + 1}: pick an item.`);
+      else if (!(Number(l.quantity) > 0))
+        blockReasons.push(`Line ${idx + 1}: quantity must be > 0.`);
+      else if (Number(l.unitPrice) < 0)
+        blockReasons.push(`Line ${idx + 1}: unit price can't be negative.`);
+      else if (!lineSerialOk(l)) {
+        const it = items.find((x) => x.id === l.itemId);
+        const parsed = parseSerials(l.serials).length;
+        const q = Number(l.quantity || 0);
+        if (it?.serialRequiredOnSale) {
+          blockReasons.push(
+            `Line ${idx + 1} (${it.name}): needs ${q} serial${q === 1 ? '' : 's'} (got ${parsed}). Type or scan one per unit in the box below the row, or turn off "serial required" on the item.`,
+          );
+        } else {
+          blockReasons.push(
+            `Line ${idx + 1} (${it?.name ?? 'item'}): either ${q} serial${q === 1 ? '' : 's'} (one per unit) or none — got ${parsed}.`,
+          );
+        }
+      }
+    });
+  }
+  if (overSplit)
+    blockReasons.push(
+      `Splits exceed the net by ${(paidTotal - netTotal).toFixed(2)}.`,
+    );
+  splits.forEach((sp, idx) => {
+    const amt = Number(sp.amount || 0);
+    if (amt > 0 && sp.kind !== 'CUSTOMER_CREDIT' && !sp.accountId) {
+      blockReasons.push(`Split ${idx + 1}: pick a destination account.`);
+    }
+  });
+  if (ccOverApplied)
+    blockReasons.push(
+      `Customer credit applied (${ccSplitTotal.toFixed(2)}) exceeds available (${availableCredit.toFixed(2)}).`,
+    );
+  if (ccSplitTotal > 0 && !customerId)
+    blockReasons.push('Pick a customer to apply customer credit.');
+  if (scheduleMismatch)
+    blockReasons.push(
+      `Schedule total (${scheduleTotal.toFixed(2)}) must equal the residual (${residual.toFixed(2)}) — off by ${(scheduleTotal - residual).toFixed(2)}.`,
+    );
+  if (scheduleBadRow)
+    blockReasons.push(
+      'Every scheduled row with an amount needs a due date.',
+    );
+
+  const canSubmit = !submitting && blockReasons.length === 0;
 
   const isDirty =
     netTotal > 0 ||
@@ -1178,16 +1218,29 @@ export default function SalesVoucher() {
         </div>
       )}
 
+      {blockReasons.length > 0 && (
+        <div
+          className="alert alert-error"
+          style={{ marginTop: 12 }}
+          role="status"
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            Save is blocked — fix the following:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {blockReasons.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div style={{ marginTop: 14, display: 'flex', gap: 8 }}>
         <button
           type="submit"
           className="btn btn-primary"
           disabled={!canSubmit}
-          title={
-            !canSubmit
-              ? 'Pick at least one item and make sure splits do not exceed net'
-              : ''
-          }
+          title={!canSubmit ? blockReasons.join('\n') : ''}
         >
           {submitting ? 'Saving…' : 'Save voucher'}
         </button>
