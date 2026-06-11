@@ -346,6 +346,19 @@ npm start                  # http://localhost:3000
 
 On first boot the backend seeds a SUPERUSER (`admin` / `Tech@123`). Change the password from `Users → Change Password`.
 
+### Seed stress-test data
+```bash
+cd erp-backend
+npm run seed                 # heavy: ~400 items, ~5k sales, plus every other module
+SEED_SCALE=medium npm run seed
+SEED_SCALE=light  npm run seed
+```
+`src/seed.ts` boots the Nest application context (no HTTP server, so the global `AuthGuard` is bypassed) and drives the **real domain services** — so every generated row is internally consistent: stock movements, double-entry journals, serial bindings, weighted-average cost roll-ups and sequence numbers all come out as they would in production. It always writes to the local **SQLite** file the dev server uses (it blanks `DATABASE_URL` before the app module loads, so it never touches Supabase). It covers master data, items (serialised + model-only), purchases, sales (plain, bill-book voucher with split receipts, and POS), payments, returns, service tickets, deliveries, fund/stock transfers, damaged goods, purchase orders, attendance, employee transactions, incentives, and cash-register sessions — heavy produces ~73k coherent rows. Each write is retried on transient SQLite transaction races and tallied (it prints a per-phase summary plus the on-disk counts it persisted). Runs are additive and safe to repeat.
+
+Two caveats specific to seeding bulk volume into SQLite:
+- **Stop the dev server first** — SQLite is single-writer; a second process holding the file silently drops the seed's transactional commits.
+- The seeder **detaches the `AuditSubscriber`** for the run. That subscriber fires `audit.record(...)` fire-and-forget on every write; under the seed's tight loop those un-awaited INSERTs interleave with a `dataSource.transaction()` on the shared better-sqlite3 connection and poison it (a second `BEGIN` → `no such savepoint`), rolling the transaction back on close. Detaching it keeps every transaction clean — the trade-off is that seeded rows carry no audit-log entries (synthetic data doesn't need them; the live app keeps its subscriber untouched).
+
 ### Production builds
 ```bash
 cd erp-backend && npm run build      # → erp-backend/dist

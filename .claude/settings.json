@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/check-codebase-map.ps1",
+            "timeout": 20,
+            "statusMessage": "Checking codebase-map freshness"
+          }
+        ]
+      }
+    ]
+  }
+}
