@@ -116,7 +116,7 @@ All voucher numbers are auto-generated `<PREFIX>-NNNNNN` based on row count + 1.
 
 ### 5b. Delivery & Service workflow (appliance-retail specifics)
 - **Deliveries** (`/deliveries`, also a Sales-hub tab) — operational tracking of truck-out / installation handover. Stock is already deducted at sale time, so the only inventory effect is the `reservedQty` overlay (see §4). Statuses: PENDING / OUT_FOR_DELIVERY / DELIVERED / INSTALLATION_PENDING / INSTALLED / CANCELLED. Auto-fills customer + address + phone from the linked sale's customer record.
-- **Service tickets** (`/service-tickets`, Customer-hub tab) — RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED, plus UNREPAIRABLE. Optional serial link auto-pulls the in-warranty flag from the warranty endpoint. Status tally tiles on the page summarise the queue at a glance.
+- **Service tickets** (`/service-tickets`, Customer-hub tab) — RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED, plus UNREPAIRABLE. Optional serial link auto-pulls the in-warranty flag from the warranty endpoint; a receipt-number lookup does the same for model-only units (no serial) by attaching the originating sale line. Status tally tiles on the page summarise the queue at a glance.
 
 ### 6. Cash Register
 A real cashier's day book.
@@ -569,15 +569,16 @@ A directional roadmap, agreed for a single-shop install operated by the owner an
   - `hasWarranty=false` → "⚠ NO WARRANTY COVERAGE / SOLD AS-IS"
   - `warrantyType=CHECKING_ONLY` → "No warranty. Item checked at time of sale."
   - `warrantyType=NONE` → "No Warranty"
-  - `warrantyType=COMPANY|SHOP` → cover length + per-unit serial + expiry date
+  - `warrantyType=COMPANY|SHOP` → cover length + per-unit serial + expiry date (serialised), or cover length + expiry date (model-only)
   Warranty fields freeze on the `item_serials` row at sale time, so a later edit to the Item template doesn't rewrite what was promised. Public `GET /api/item-serials/warranty/:serial` returns only non-PII data (model, status, sold date, expiry, active flag) — safe to expose to walk-in customers via a counter terminal. A Customer-hub tab `/warranty-lookup` wraps the endpoint with a counter-friendly UI.
+- ✅ **Model-only warranty (no serial)** — some appliances ship without a usable serial, so warranty has to ride on the stamped receipt instead of a per-unit record. At sale time the warranty window (`warrantyType`, `warrantyDays`, `warrantyStartAt`, `warrantyEndAt`) is also frozen onto the **sale line** (`sale_items`), for every entry path (POS, bill-book voucher, plain sale) and on the cloud receiver. The window starts on the sale date — a model-only item has no booking-hold mechanic, so the goods leave with the receipt. The `/warranty-lookup` tab gains three extra resolve modes that read this line snapshot via the `GET /api/sales/warranty/{by-invoice/:invoiceNo, by-customer/:customerId, by-model?itemId=&from=&to=}` family: **Receipt no.** (customer brought the stamped receipt), **Customer** (receipt lost — look the buyer up in our DB), and **Model + date** (buyer not in the system). The snapshot is also written for serialised lines as a detach-proof mirror, so the same lookups keep working after a return unbinds a serial.
 - ✅ **Booking-Hold state machine** — `ItemSerial.allocationStatus ∈ { AVAILABLE, BOOKED, DELIVERED }` orthogonal to the physical `status`. Partial-pay sales hold units BOOKED until the balance clears. Strict-handover guard on `DeliveriesService` prevents DELIVERED transitions while `dueAmount > 0`. See §4 Inventory.
 - ✅ **Overdue Bookings dashboard** (Sales hub) — Release-to-Floor cancels stuck bookings and reverts serials to AVAILABLE. Advance stays as customer credit (no auto-refund).
 - ✅ **Booking Hold customer receipt** (`/print/booking-receipt/:id`) — red "BALANCE PENDING" header banner, line-item table with serials, payment schedule, customer + cashier signature lines. Printed at POS checkout alongside the normal sale receipt for any partial-pay invoice.
 - ✅ **Box Hold Tag** (`/print/box-tag/:id`) — 4"×6" landscape layout with the customer name in bold + an oversized "DO NOT SELL" watermark + serials + balance due. Taped to the physical box on the warehouse floor.
 - ✅ **Local serial auto-generation** — `LOCAL-<CategoryCode>-<Year>-<seq>` for unbranded items. `POST /item-serials/generate-local`. Print route `/print/serial-label/:serial` for the 2"×1" sticker.
 - ✅ **Delivery / dispatch tracking** — `deliveries (saleId, address, phone, assignedTo, vehicle, status, scheduledFor, deliveredAt)`. Six-status workflow PENDING → OUT_FOR_DELIVERY → DELIVERED with installation branch. Sales-hub tab.
-- ✅ **Service / repair tickets** — seven-status workflow RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED → UNREPAIRABLE. Optional serial link auto-pulls in-warranty flag. Customer-hub tab.
+- ✅ **Service / repair tickets** — seven-status workflow RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED → UNREPAIRABLE. Optional serial link auto-pulls in-warranty flag; for model-only units a receipt-number lookup attaches the originating sale line (`saleItemId`) and auto-fills the in-warranty flag the same way. Customer-hub tab.
 
 ### Sales & inventory features
 

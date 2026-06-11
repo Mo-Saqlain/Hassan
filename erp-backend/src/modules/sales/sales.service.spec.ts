@@ -718,4 +718,88 @@ describe('SalesService', () => {
       });
     });
   });
+
+  describe('model-only warranty snapshot + lookup', () => {
+    // An item sold by model only (no serial) that still carries 1-year cover.
+    let warrantyItemId: string;
+
+    beforeEach(async () => {
+      const item = await ds.getRepository(Item).save(
+        ds.getRepository(Item).create({
+          name: 'Ceiling Fan',
+          sku: 'FAN-1',
+          purchasePrice: 1000,
+          salePrice: 2000,
+          tracksSerials: false,
+          serialRequiredOnSale: false,
+          hasWarranty: true,
+          warrantyType: 'COMPANY',
+          warrantyDays: 365,
+        }),
+      );
+      warrantyItemId = item.id;
+      await stock.recordMovement({
+        itemId: warrantyItemId,
+        type: 'IN',
+        quantity: 5,
+        referenceType: 'PURCHASE',
+        referenceId: 'seed',
+      });
+    });
+
+    it('freezes a line-level warranty window at sale time', async () => {
+      const sale = await service.create({
+        lines: [{ itemId: warrantyItemId, quantity: 1, unitPrice: 2000 }],
+      });
+      const line = await ds
+        .getRepository(SaleItem)
+        .findOne({ where: { saleId: sale.id } });
+      expect(line?.warrantyType).toBe('COMPANY');
+      expect(line?.warrantyDays).toBe(365);
+      expect(line?.warrantyStartAt).toBeTruthy();
+      expect(line?.warrantyEndAt).toBeTruthy();
+      const days =
+        (new Date(line!.warrantyEndAt!).getTime() -
+          new Date(line!.warrantyStartAt!).getTime()) /
+        86400000;
+      expect(Math.round(days)).toBe(365);
+    });
+
+    it('does NOT stamp a window when the item has no real cover', async () => {
+      // The default "Phone" item (itemId) has no warrantyDays → no window.
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+      });
+      const line = await ds
+        .getRepository(SaleItem)
+        .findOne({ where: { saleId: sale.id } });
+      expect(line?.warrantyEndAt).toBeFalsy();
+      expect(line?.warrantyType).toBeFalsy();
+    });
+
+    it('lookupByInvoice surfaces an active warranty line', async () => {
+      const sale = await service.create({
+        lines: [{ itemId: warrantyItemId, quantity: 2, unitPrice: 2000 }],
+      });
+      const res = await service.warrantyByInvoice(sale.invoiceNo);
+      expect(res).not.toBeNull();
+      expect(res!.lines).toHaveLength(1);
+      expect(res!.lines[0].active).toBe(true);
+      expect(res!.lines[0].warrantyType).toBe('COMPANY');
+      expect(res!.lines[0].quantity).toBe(2);
+    });
+
+    it('warrantyByModel filters to the requested item only', async () => {
+      const sale = await service.create({
+        lines: [
+          { itemId: warrantyItemId, quantity: 1, unitPrice: 2000 },
+          { itemId, quantity: 1, unitPrice: 500 },
+        ],
+      });
+      const rows = await service.warrantyByModel(warrantyItemId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].itemId).toBe(warrantyItemId);
+      expect(rows[0].invoiceNo).toBe(sale.invoiceNo);
+    });
+  });
 });

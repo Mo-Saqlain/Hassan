@@ -2,6 +2,7 @@ import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { ItemSerial } from '../../item-serials/entities/item-serial.entity';
+import { SaleItem } from '../../sales/entities/sale-item.entity';
 
 /**
  * Repair / warranty-claim workflow. One row per unit a customer drops off
@@ -28,6 +29,7 @@ export type ServiceTicketStatus =
 @Index(['status'])
 @Index(['customerId'])
 @Index(['itemSerialId'])
+@Index(['saleItemId'])
 @Index(['receivedAt'])
 export class ServiceTicket extends BaseEntity {
   @Column({ name: 'ticket_no' })
@@ -49,9 +51,20 @@ export class ServiceTicket extends BaseEntity {
   @JoinColumn({ name: 'item_serial_id' })
   itemSerial?: ItemSerial;
 
-  /** Manually-typed item description for cases where the serial isn't
-   *  known (older unit, lost label, gray-market). Either this or
-   *  `itemSerial` must be set; both is fine. */
+  /** Soft link to the originating *sale line* — the model-only counterpart to
+   *  `itemSerialId`. Populated when the unit was sold by model (no per-unit
+   *  serial) but we matched it back to its receipt line via the warranty
+   *  lookup. Drives the same `inWarranty` flag the serial path does. */
+  @Column({ name: 'sale_item_id', nullable: true })
+  saleItemId?: string;
+
+  @ManyToOne(() => SaleItem, { nullable: true, eager: true })
+  @JoinColumn({ name: 'sale_item_id' })
+  saleItem?: SaleItem;
+
+  /** Manually-typed item description for cases where neither a serial nor a
+   *  sale line is known (older unit, lost label, gray-market). At least one of
+   *  `itemSerial`, `saleItem`, or this must be set; any combination is fine. */
   @Column({ name: 'item_description', nullable: true })
   itemDescription?: string;
 

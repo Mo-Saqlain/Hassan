@@ -27,6 +27,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const blank = () => ({
   customerId: '',
   itemSerialId: '',
+  saleItemId: '',
   itemDescription: '',
   complaint: '',
   inWarranty: false,
@@ -47,6 +48,8 @@ export default function ServiceTickets() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(blank());
   const [serialLookup, setSerialLookup] = useState('');
+  const [invoiceLookup, setInvoiceLookup] = useState('');
+  const [receiptLines, setReceiptLines] = useState([]);
   const [submitErr, setSubmitErr] = useState(null);
 
   useEffect(() => {
@@ -69,6 +72,7 @@ export default function ServiceTickets() {
         ? {
             customerId: row.customerId ?? '',
             itemSerialId: row.itemSerialId ?? '',
+            saleItemId: row.saleItemId ?? '',
             itemDescription: row.itemDescription ?? '',
             complaint: row.complaint ?? '',
             inWarranty: !!row.inWarranty,
@@ -86,7 +90,44 @@ export default function ServiceTickets() {
         : blank(),
     );
     setShowForm(true);
+    setSerialLookup('');
+    setInvoiceLookup('');
+    setReceiptLines([]);
     setSubmitErr(null);
+  };
+
+  // Model-only path: the customer brought the stamped receipt (or we found it
+  // by their name). Pull the receipt's lines so the operator can attach the
+  // exact item being serviced — no serial needed.
+  const lookupInvoice = async () => {
+    if (!invoiceLookup.trim()) return;
+    setSubmitErr(null);
+    setReceiptLines([]);
+    try {
+      const r = await api.get(
+        `/sales/warranty/by-invoice/${encodeURIComponent(invoiceLookup.trim())}`,
+      );
+      if (r.data && r.data.lines?.length) {
+        setReceiptLines(r.data.lines);
+      } else {
+        setSubmitErr(`No receipt found for "${invoiceLookup.trim()}".`);
+      }
+    } catch (e) {
+      setSubmitErr(e.uiMessage ?? 'Receipt lookup failed');
+    }
+  };
+
+  const pickReceiptLine = (line) => {
+    setForm((f) => ({
+      ...f,
+      saleItemId: line.saleItemId,
+      itemSerialId: '',
+      itemDescription:
+        line.itemName + (line.modelNo ? ` · ${line.modelNo}` : ''),
+      inWarranty: !!line.active,
+      customerId: line.customerId ?? f.customerId,
+    }));
+    setReceiptLines([]);
   };
 
   const lookupSerial = async () => {
@@ -98,6 +139,7 @@ export default function ServiceTickets() {
       if (r.data) {
         setForm((f) => ({
           ...f,
+          saleItemId: '',
           itemDescription: r.data.modelNo ?? f.itemDescription,
           inWarranty: !!r.data.active,
           customerId: f.customerId,
@@ -116,6 +158,7 @@ export default function ServiceTickets() {
     const payload = {
       customerId: form.customerId || undefined,
       itemSerialId: form.itemSerialId || undefined,
+      saleItemId: form.saleItemId || undefined,
       itemDescription: form.itemDescription || undefined,
       complaint: form.complaint,
       inWarranty: form.inWarranty,
@@ -241,6 +284,22 @@ export default function ServiceTickets() {
                 </button>
               </div>
             </div>
+            <div style={{ minWidth: 220 }}>
+              <label title="Model-only item with no serial? Type the receipt number the customer brought (or that you found by their name) and pick the line being serviced. Warranty auto-fills.">
+                Receipt no. (model-only)
+              </label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={invoiceLookup}
+                  onChange={(e) => setInvoiceLookup(e.target.value)}
+                  placeholder="e.g. INV-000123"
+                  style={{ fontFamily: 'var(--font-mono)', flex: 1 }}
+                />
+                <button type="button" className="btn btn-sm" onClick={lookupInvoice}>
+                  Lookup
+                </button>
+              </div>
+            </div>
             <div>
               <label>Item description</label>
               <input
@@ -262,6 +321,52 @@ export default function ServiceTickets() {
               />
             </div>
           </div>
+          {receiptLines.length > 0 && (
+            <div className="card" style={{ marginBottom: 12, background: 'var(--surface-2)' }}>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                Pick the line being serviced:
+              </div>
+              {receiptLines.map((line) => (
+                <div
+                  key={line.saleItemId}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '4px 0',
+                  }}
+                >
+                  <span style={{ flex: 1 }}>
+                    {line.itemName}
+                    {line.modelNo ? ` · ${line.modelNo}` : ''}{' '}
+                    {line.warrantyEndAt ? (
+                      <span
+                        className={`chip ${line.active ? 'chip-success' : 'chip-danger'}`}
+                      >
+                        {line.active
+                          ? `In warranty till ${new Date(line.warrantyEndAt).toLocaleDateString()}`
+                          : 'Warranty expired'}
+                      </span>
+                    ) : (
+                      <span className="chip">No warranty recorded</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={() => pickReceiptLine(line)}
+                  >
+                    Attach
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {form.saleItemId && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+              ✓ Linked to a receipt line (model-only warranty).
+            </div>
+          )}
           <div>
             <label>Complaint *</label>
             <textarea

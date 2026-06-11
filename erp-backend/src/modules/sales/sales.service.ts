@@ -101,12 +101,16 @@ export class SalesService {
       let totalAmount = 0;
       let totalCogs = 0;
       const lines: SaleItem[] = [];
+      // itemId → Item, so the warranty snapshot below can read each line's
+      // cover config without a second round-trip to the repo.
+      const lineItems = new Map<string, Item>();
 
       for (const line of dto.lines) {
         const item = await itemRepo.findOne({ where: { id: line.itemId } });
         if (!item) {
           throw new NotFoundException(`Item ${line.itemId} not found`);
         }
+        lineItems.set(item.id, item);
         const unitPrice =
           line.unitPrice != null ? line.unitPrice : Number(item.salePrice);
         const lineTotal = Number((unitPrice * line.quantity).toFixed(2));
@@ -204,6 +208,36 @@ export class SalesService {
         lines,
       });
       const persisted = await saleRepo.save(sale);
+
+      // Freeze the line-level warranty window now that we have the real sale
+      // date. Non-serialised (model-only) items have no per-unit ItemSerial to
+      // carry warranty, so this snapshot IS their warranty record — the thing
+      // the receipt prints and the by-invoice / by-customer / by-model lookups
+      // resolve against. Serialised lines get it too as a detach-proof mirror.
+      // Warranty starts on the sale date: a model-only item has no booking-hold
+      // mechanic (no serials to reserve), so the goods leave with the receipt.
+      const warrantyLines = persisted.lines.filter((ln) => {
+        const it = lineItems.get(ln.itemId);
+        return (
+          it?.hasWarranty &&
+          (it.warrantyType === 'COMPANY' || it.warrantyType === 'SHOP') &&
+          Number(it.warrantyDays) > 0
+        );
+      });
+      if (warrantyLines.length > 0) {
+        const lineRepo = manager.getRepository(SaleItem);
+        for (const ln of warrantyLines) {
+          const it = lineItems.get(ln.itemId)!;
+          const start = new Date(persisted.createdAt);
+          const end = new Date(start);
+          end.setDate(end.getDate() + Number(it.warrantyDays));
+          ln.warrantyType = it.warrantyType;
+          ln.warrantyDays = it.warrantyDays ?? undefined;
+          ln.warrantyStartAt = start;
+          ln.warrantyEndAt = end;
+        }
+        await lineRepo.save(warrantyLines);
+      }
 
       for (const ln of persisted.lines) {
         await this.stockService.recordMovement(
@@ -591,6 +625,98 @@ export class SalesService {
     const sale = await this.sales.findOne({ where: { id } });
     if (!sale) throw new NotFoundException(`Sale ${id} not found`);
     return sale;
+  }
+
+  /**
+   * Receipt-backed warranty lookup for model-only items. Where the serial
+   * route (`/item-serials/warranty/:serial`) resolves a single physical unit,
+   * these resolve the warranty stamped onto the *sale line* — the trail we
+   * keep for items that ship without a per-unit serial. Three entry points
+   * cover the counter cases:
+   *   - by invoice  → customer brought the stamped receipt
+   *   - by customer → receipt lost, look the buyer up in our DB
+   *   - by model    → buyer not in the system, find sales of the model
+   *
+   * `buildLineCard` produces the same shape for all three so the UI renders
+   * one card component.
+   */
+  private buildLineCard(sale: Sale, ln: SaleItem) {
+    const end = ln.warrantyEndAt ? new Date(ln.warrantyEndAt) : null;
+    return {
+      saleId: sale.id,
+      invoiceNo: sale.invoiceNo,
+      soldAt: sale.createdAt,
+      customerId: sale.customerId ?? null,
+      customerName: sale.customer?.name ?? null,
+      customerPhone: sale.customer?.phone ?? null,
+      saleItemId: ln.id,
+      itemId: ln.itemId,
+      modelNo: ln.item?.modelNo ?? null,
+      itemName: ln.item?.name ?? ln.itemId,
+      tracksSerials: !!ln.item?.tracksSerials,
+      quantity: ln.quantity,
+      warrantyType: ln.warrantyType ?? null,
+      warrantyDays: ln.warrantyDays ?? null,
+      warrantyStartAt: ln.warrantyStartAt ?? null,
+      warrantyEndAt: end,
+      dueAmount: Number(sale.dueAmount ?? 0),
+      active:
+        end != null &&
+        end > new Date() &&
+        ln.warrantyType !== 'NONE' &&
+        ln.warrantyType !== 'CHECKING_ONLY',
+    };
+  }
+
+  async warrantyByInvoice(invoiceNo: string) {
+    const sale = await this.sales.findOne({
+      where: { invoiceNo: invoiceNo.trim() },
+    });
+    if (!sale) return null;
+    return {
+      invoiceNo: sale.invoiceNo,
+      soldAt: sale.createdAt,
+      customerName: sale.customer?.name ?? null,
+      lines: (sale.lines ?? []).map((ln) => this.buildLineCard(sale, ln)),
+    };
+  }
+
+  async warrantyByCustomer(customerId: string) {
+    const sales = await this.sales.find({
+      where: { customerId },
+      order: { createdAt: 'DESC' },
+      take: 200,
+    });
+    return sales.flatMap((sale) =>
+      (sale.lines ?? []).map((ln) => this.buildLineCard(sale, ln)),
+    );
+  }
+
+  async warrantyByModel(itemId: string, from?: string, to?: string) {
+    if (!itemId) return [];
+    const qb = this.sales
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.lines', 'line')
+      .leftJoinAndSelect('line.item', 'item')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .where('line.itemId = :itemId', { itemId });
+    // Bind Date objects, not interpolated strings — TypeORM formats them per
+    // driver, sidestepping the SQLite 'T'-vs-space ISO mismatch that makes a
+    // string compare drop same-day rows.
+    if (from) qb.andWhere('sale.createdAt >= :from', { from: new Date(from) });
+    if (to) {
+      qb.andWhere('sale.createdAt <= :to', {
+        to: new Date(`${to}T23:59:59.999`),
+      });
+    }
+    const sales = await qb.orderBy('sale.createdAt', 'DESC').take(200).getMany();
+    // The join pulls every line of a matching sale; keep only the model asked
+    // for so a mixed-basket receipt doesn't leak unrelated lines.
+    return sales.flatMap((sale) =>
+      (sale.lines ?? [])
+        .filter((ln) => ln.itemId === itemId)
+        .map((ln) => this.buildLineCard(sale, ln)),
+    );
   }
 
   /**

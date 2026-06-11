@@ -14,7 +14,7 @@ import { api } from '../api/client';
  *   4. warrantyType === 'COMPANY' | 'SHOP' → "Warranty: COMPANY · expires <date>"
  *                                              plus per-unit serial listing
  */
-function LineWarrantyNotice({ item, serials }) {
+function LineWarrantyNotice({ item, serials, line }) {
   if (!item) return null;
   if (item.hasWarranty === false) {
     return (
@@ -33,13 +33,19 @@ function LineWarrantyNotice({ item, serials }) {
   if (item.warrantyType === 'NONE') {
     return <div className="line-warranty line-no-warranty">No Warranty</div>;
   }
-  // COMPANY / SHOP — show per-unit serial + expiry.
+  // COMPANY / SHOP — show per-unit serial + expiry when serialised, or the
+  // line-level expiry (frozen on the sale line at sale time) for model-only
+  // items that have no serial to print. The line expiry is what the by-receipt
+  // / by-customer / by-model warranty lookups resolve against later.
   const fmt = (d) => (d ? new Date(d).toLocaleDateString() : '—');
   return (
     <div className="line-warranty line-has-warranty">
       <div>
         Warranty: {item.warrantyType}
         {item.warrantyDays ? ` · ${item.warrantyDays} days` : ''}
+        {serials.length === 0 && line?.warrantyEndAt
+          ? ` · expires ${fmt(line.warrantyEndAt)}`
+          : ''}
       </div>
       {serials.length > 0 && (
         <ul className="line-serials">
@@ -177,6 +183,7 @@ export default function InvoicePrint({ type }) {
                     <LineWarrantyNotice
                       item={ln.item}
                       serials={lineSerials}
+                      line={ln}
                     />
                   )}
                 </td>

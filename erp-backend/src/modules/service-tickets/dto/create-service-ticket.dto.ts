@@ -30,6 +30,10 @@ export class CreateServiceTicketDto {
   @IsOptional()
   itemSerialId?: string;
 
+  @IsUUID()
+  @IsOptional()
+  saleItemId?: string;
+
   @IsString()
   @IsOptional()
   itemDescription?: string;

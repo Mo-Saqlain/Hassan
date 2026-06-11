@@ -69,6 +69,33 @@ export class SalesController {
     return this.service.overdueBookings(Number.isFinite(n) ? n : 7);
   }
 
+  /**
+   * Receipt-backed warranty lookup for model-only items (no per-unit serial).
+   * Three counter cases: customer has the receipt (by-invoice), receipt lost
+   * so look the buyer up (by-customer), or buyer isn't in the system so search
+   * the model in a date window (by-model). Declared above `:id` so the literal
+   * `warranty` segment isn't eaten by the UUID route. See SalesService for the
+   * card shape — shared with the per-serial lookup on the front end.
+   */
+  @Get('warranty/by-invoice/:invoiceNo')
+  warrantyByInvoice(@Param('invoiceNo') invoiceNo: string) {
+    return this.service.warrantyByInvoice(invoiceNo);
+  }
+
+  @Get('warranty/by-customer/:customerId')
+  warrantyByCustomer(@Param('customerId', ParseUUIDPipe) customerId: string) {
+    return this.service.warrantyByCustomer(customerId);
+  }
+
+  @Get('warranty/by-model')
+  warrantyByModel(
+    @Query('itemId') itemId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.warrantyByModel(itemId, from, to);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);
