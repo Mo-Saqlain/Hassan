@@ -60,3 +60,4 @@ Changes.txt
 erp-desktop/build-resources/installer.nsh
 
 Manual.txt
+erp-backend/erp.sqlite.pre-seed-backup
