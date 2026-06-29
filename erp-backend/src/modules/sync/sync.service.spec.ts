@@ -12,13 +12,16 @@ import { PurchasesService } from '../purchases/purchases.service';
 
 describe('SyncService', () => {
   let service: SyncService;
-  let salesMock: { create: jest.Mock };
+  let salesMock: { create: jest.Mock; createFromVoucher: jest.Mock };
   let purchasesMock: { create: jest.Mock };
   let ds: DataSource;
 
   beforeEach(async () => {
     salesMock = {
       create: jest.fn().mockResolvedValue({ id: 'sale-id-1' }),
+      createFromVoucher: jest
+        .fn()
+        .mockResolvedValue({ sale: { id: 'voucher-sale-1' }, receipts: [] }),
     };
     purchasesMock = {
       create: jest.fn().mockResolvedValue({ id: 'purchase-id-1' }),
@@ -87,6 +90,20 @@ describe('SyncService', () => {
     // The payload handed to SalesService.create should NOT contain sessionId.
     const callArg = salesMock.create.mock.calls[0][0];
     expect(callArg.sessionId).toBeUndefined();
+  });
+
+  it('PROCESSES SALE_VOUCHER_CREATED via createFromVoucher', async () => {
+    const id = '88888888-8888-8888-8888-888888888888';
+    const [r] = await service.push([
+      {
+        id,
+        type: 'SALE_VOUCHER_CREATED',
+        payload: { lines: [], splits: [], invoiceNo: 'INV-000123' },
+      },
+    ]);
+    expect(r.status).toBe('PROCESSED');
+    expect(r.resultId).toBe('voucher-sale-1');
+    expect(salesMock.createFromVoucher).toHaveBeenCalled();
   });
 
   it('PROCESSES PURCHASE_CREATED via purchases service', async () => {

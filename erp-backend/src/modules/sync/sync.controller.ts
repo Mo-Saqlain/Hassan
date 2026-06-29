@@ -30,6 +30,15 @@ export class SyncController {
     return this.service.listQueue();
   }
 
+  /**
+   * Live database connection health — used by the System → Connection page to
+   * confirm the app is talking to Supabase (or the local SQLite file).
+   */
+  @Get('connection')
+  connection() {
+    return this.service.connectionInfo();
+  }
+
   @Get('status')
   async status() {
     return {

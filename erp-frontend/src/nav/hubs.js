@@ -202,12 +202,13 @@ export const HUBS = {
   system: {
     label: 'System',
     title: 'System',
-    subtitle: 'Backups, audit trail, and runtime error log.',
+    subtitle: 'Connection, backups, audit trail, and runtime error log.',
     icon: 'backup',
     colorVar: '--nav-system',
-    defaultTo: '/backup',
-    paths: ['/backup', '/audit-log', '/error-log'],
+    defaultTo: '/connection',
+    paths: ['/connection', '/backup', '/audit-log', '/error-log'],
     tabs: [
+      { to: '/connection', label: 'Connection', icon: 'rotate' },
       { to: '/backup', label: 'Backups', icon: 'backup' },
       // `superuserOnly` tabs are stripped from the strip in HubFrame for
       // regular users so they don't see (or 403) those pages.

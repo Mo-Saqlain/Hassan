@@ -45,6 +45,56 @@ export class SyncService {
     private readonly purchasesService: PurchasesService,
   ) {}
 
+  // ---------- Connection check ----------
+  /**
+   * Live health check on the primary database connection. When `DATABASE_URL`
+   * points at Supabase this confirms the cloud Postgres is reachable; on a
+   * desktop install it reports the local SQLite file. Runs a trivial query and
+   * times it. Never leaks credentials — only driver / host / database / port.
+   */
+  async connectionInfo() {
+    const conn = this.events.manager.connection;
+    const opts = conn.options as {
+      type: string;
+      host?: string;
+      port?: number;
+      database?: unknown;
+    };
+    const isPostgres = opts.type === 'postgres';
+    const target = isPostgres
+      ? opts.host?.includes('supabase')
+        ? 'Supabase (Postgres)'
+        : 'PostgreSQL'
+      : 'Local SQLite';
+    const started = Date.now();
+    try {
+      await conn.query('SELECT 1');
+      return {
+        connected: true,
+        target,
+        driver: opts.type,
+        host: isPostgres ? opts.host ?? null : null,
+        port: isPostgres ? opts.port ?? null : null,
+        database: isPostgres
+          ? typeof opts.database === 'string'
+            ? opts.database
+            : null
+          : String(opts.database ?? ''),
+        latencyMs: Date.now() - started,
+      };
+    } catch (e) {
+      return {
+        connected: false,
+        target,
+        driver: opts.type,
+        host: isPostgres ? opts.host ?? null : null,
+        port: isPostgres ? opts.port ?? null : null,
+        latencyMs: Date.now() - started,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
   // ---------- Inbound (cloud receiver) ----------
   async push(events: SyncEventDto[]): Promise<SyncEventResult[]> {
     const results: SyncEventResult[] = [];
@@ -76,6 +126,17 @@ export class SyncService {
           const sale = await this.salesService.create(salePayload, {
             skipOutbox: true,
           });
+          resultId = sale.id;
+          break;
+        }
+        case 'SALE_VOUCHER_CREATED': {
+          // Bill-book voucher sale: replays through createFromVoucher, which
+          // rebuilds the Sale + its receipt splits atomically. It re-enqueues
+          // only when CLOUD_SYNC_URL is set, which the terminal cloud receiver
+          // doesn't have — so there's no onward push loop here.
+          const { sale } = await this.salesService.createFromVoucher(
+            event.payload as any,
+          );
           resultId = sale.id;
           break;
         }
