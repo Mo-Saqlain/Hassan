@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import WhatsAppButton from '../components/WhatsAppButton';
+import { invoiceMessage } from '../utils/whatsapp';
 
 /**
  * Renders the per-line warranty notice block on the printed receipt. The
@@ -247,6 +249,15 @@ export default function InvoicePrint({ type }) {
         <button className="btn btn-primary" onClick={() => window.print()}>
           Print
         </button>{' '}
+        {isSale && (
+          <>
+            <WhatsAppButton
+              phone={data.customer?.phone}
+              message={invoiceMessage(data)}
+              label="Send invoice on WhatsApp"
+            />{' '}
+          </>
+        )}
         <button className="btn" onClick={() => window.close()}>
           Close
         </button>

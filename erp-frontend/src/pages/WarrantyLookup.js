@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
+import WhatsAppButton from '../components/WhatsAppButton';
+import { warrantyMessage } from '../utils/whatsapp';
 
 /**
  * Counter-friendly warranty lookup. Four ways in, because not every unit can
@@ -170,6 +172,18 @@ function SerialCard({ r }) {
         <span className="muted">Warranty length</span>
         <span>{r.warrantyDays == null ? '—' : `${r.warrantyDays} days`}</span>
       </div>
+      <div style={{ marginTop: 12 }}>
+        <WhatsAppButton
+          message={warrantyMessage({
+            model: r.modelNo,
+            serial: r.serial,
+            warrantyType: r.warrantyType,
+            warrantyEndAt: r.warrantyEndAt,
+            warrantyDays: r.warrantyDays,
+          })}
+          label="Send warranty on WhatsApp"
+        />
+      </div>
     </div>
   );
 }
@@ -249,6 +263,19 @@ function LineCard({ line, showCustomer }) {
         <span>
           {line.warrantyDays == null ? '—' : `${line.warrantyDays} days`}
         </span>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <WhatsAppButton
+          phone={line.customerPhone}
+          message={warrantyMessage({
+            model: line.modelNo ?? line.itemName,
+            invoiceNo: line.invoiceNo,
+            warrantyType: line.warrantyType,
+            warrantyEndAt: line.warrantyEndAt,
+            warrantyDays: line.warrantyDays,
+          })}
+          label="Send warranty on WhatsApp"
+        />
       </div>
     </div>
   );

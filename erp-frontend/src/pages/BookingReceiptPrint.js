@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import WhatsAppButton from '../components/WhatsAppButton';
+import { bookingMessage } from '../utils/whatsapp';
 
 /**
  * Booking Hold customer receipt. Printed at POS time for any sale where
@@ -216,6 +218,11 @@ export default function BookingReceiptPrint() {
         <button className="btn btn-primary" onClick={() => window.print()}>
           Print
         </button>{' '}
+        <WhatsAppButton
+          phone={sale.customer?.phone}
+          message={bookingMessage(sale)}
+          label="Send booking on WhatsApp"
+        />{' '}
         <button className="btn" onClick={() => window.close()}>
           Close
         </button>

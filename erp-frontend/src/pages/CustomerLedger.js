@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import LedgerView from '../components/LedgerView';
 import AgingPanel from '../components/AgingPanel';
+import WhatsAppButton from '../components/WhatsAppButton';
+import { balanceReminderMessage } from '../utils/whatsapp';
 
 export default function CustomerLedger() {
   const { id } = useParams();
@@ -36,6 +38,12 @@ export default function CustomerLedger() {
   }, [selectedId]);
 
   const customer = customers.find((c) => c.id === selectedId);
+  // Outstanding A/R = sum of unpaid invoice residuals (same source the aging
+  // panel renders). Drives the balance-reminder WhatsApp button below.
+  const outstanding = (aging?.lines ?? []).reduce(
+    (s, l) => s + Number(l.residualAmount || 0),
+    0,
+  );
 
   return (
     <>
@@ -68,6 +76,18 @@ export default function CustomerLedger() {
               {customer.address && (
                 <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
                   {customer.address}
+                </div>
+              )}
+              {outstanding > 0.005 && (
+                <div style={{ marginTop: 10 }}>
+                  <WhatsAppButton
+                    phone={customer.phone}
+                    message={balanceReminderMessage({
+                      name: customer.name,
+                      balance: outstanding,
+                    })}
+                    label="Send balance reminder"
+                  />
                 </div>
               )}
             </div>
