@@ -1,10 +1,10 @@
 # Hassan Electronics — Home-Appliances ERP & POS
 
-Offline-first ERP with an integrated Point-of-Sale terminal for a single home-appliances retail shop. Inventory, master data, vouchers, customer / supplier / account ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Wallet ↔ Credit), an incentive-tracking system that feeds adjusted-net-income, daily JSON backups with restore, the four standard financial statements, and access control with a single superuser who approves new users. The same backend codebase runs locally against SQLite (desktop install) or against Supabase Postgres in the cloud. Designed to keep selling even when the internet is down — sales queue up locally and sync to the cloud when connectivity returns.
+Offline-first ERP with an integrated Point-of-Sale terminal for a single home-appliances retail shop. Inventory, master data, vouchers, customer / supplier / employee / account ledgers, a daily cash register with session-based opening, fund transfers between owner accounts (Capital ↔ Cash ↔ Bank ↔ Wallet ↔ Credit), a manufacturer-incentive engine that feeds adjusted-net-income, daily JSON backups with verify + restore, the four standard financial statements, a true double-entry journal with period locking, and access control with a single superuser who approves new users. The same backend codebase runs locally against SQLite (desktop install) or against Supabase Postgres in the cloud. Designed to keep selling even when the internet is down — sales queue up locally and sync to the cloud (HMAC-signed) when the cashier clicks the Sync button.
 
-![Status](https://img.shields.io/badge/status-Phase%201%20%2B%202%20%2B%203%20complete-brightgreen)
-![Tests](https://img.shields.io/badge/tests-142%20Jest%20specs-success)
-![Backend](https://img.shields.io/badge/backend-NestJS%2011%20%2B%20TypeORM-e0234e)
+![Status](https://img.shields.io/badge/status-Phase%201--5%20shipped-brightgreen)
+![Tests](https://img.shields.io/badge/tests-157%20Jest%20specs-success)
+![Backend](https://img.shields.io/badge/backend-NestJS%2011%20%2B%20TypeORM%200.3-e0234e)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20HashRouter-61dafb)
 ![Desktop](https://img.shields.io/badge/desktop-Electron%2040%20%2B%20NSIS-47848f)
 ![Theme](https://img.shields.io/badge/themes-light%20%2B%20dark-0078d4)
@@ -23,46 +23,53 @@ Offline-first ERP with an integrated Point-of-Sale terminal for a single home-ap
 8. [Mobile / LAN access](#mobile--lan-access)
 9. [Desktop installer (Electron)](#desktop-installer-electron)
 10. [Backups](#backups)
-11. [Testing](#testing)
-12. [Project conventions](#project-conventions)
+11. [CSV import & data migration](#csv-import--data-migration)
+12. [Testing](#testing)
+13. [Project conventions](#project-conventions)
+14. [Roadmap — shipped & out of scope](#roadmap--shipped--out-of-scope)
 
 ---
 
 ## What this is
 
-A retail ERP for a single-store shop selling home appliances. The cashier rings up sales through a barcode / model-no driven POS terminal. The same database tracks purchases from suppliers, stock movements, customer credit, supplier dues, employee payroll + incentives, and produces the four standard financial statements.
+A retail ERP for a single-store shop selling home appliances. The cashier rings up sales through a barcode / model-no driven POS terminal, or enters bill-book vouchers by hand. The same database tracks purchases from suppliers, stock movements, customer credit, supplier dues, employee payroll + incentives, repairs, deliveries, and produces the four standard financial statements plus aging and profitability reports — all backed by a parallel double-entry journal.
 
-Everything is **offline-first**: the cashier can keep selling when the internet is down. Sales, purchases, payments, stock movements, and POS sessions queue up locally in an outbox table and sync to the cloud when connectivity returns.
+Everything is **offline-first**: the cashier can keep selling when the internet is down. Sales, purchases, payments, stock movements, and POS sessions queue up locally in an outbox table and sync to the cloud when the user triggers a sync.
 
 The UI follows a deliberate **flat Windows 10** direction — Segoe UI system fonts, sharp 90° corners (no border-radius), 1px borders, solid surfaces, no glass / blur / aurora / animation. Built for low-end shop PCs while still feeling modern.
+
+The backend has **36 NestJS feature modules** owning **48 entities** (plus an abstract `BaseEntity` and a `Setting` key/value store), wired in `app.module.ts`.
 
 ---
 
 ## Functional features
 
 ### 1. Point of Sale (POS)
+The POS terminal is a server-side session: the cart lives in `pos_cart_items` (local SQLite) and is cleared on checkout. (`/pos` is still mounted but no longer has a sidebar entry — Sales Voucher is the default Sales-hub tab now; reach POS by typing the URL.)
+
 - **Model-number scan** — single auto-focused input. Backend matches barcode first, then SKU, then model-no. UI placeholder reads *"Type model no. — e.g. DAWLANCE LVS-15"*.
-- **Cart with re-scan stacking** — scanning the same item again increments the existing line.
+- **Cart with re-scan stacking** — scanning the same item again increments the existing line and overwrites its price with the latest (no duplicate rows; enforced by the `sessionId + itemId` composite index).
 - **Inline quantity** +/− buttons, line remove, clear cart.
 - **Payment methods**: Cash, Card, Bank, Credit.
-- **Receiving account picker** — on every CASH / CARD / BANK sale the cashier picks which cash drawer / bank / wallet account is being credited. Picker is filtered to `CASH` accounts for cash sales and to `BANK + WALLET` for card / bank transfers. The sale's paid amount flows through `/reports/account-ledger/:id`, the Balance Sheet, and the Cash Flow statement against the chosen account — so a Rs 50,000 card-tap sale credits the correct HBL account, not a generic "cash" bucket. CREDIT sales don't ask for an account (nothing is collected yet).
-- **Partial payment + Booking Hold** — paid amount can be less than net; the remainder becomes a customer receivable. Selecting a customer is required for partial pay and for CREDIT sales (frontend + backend enforce this). When the sale carries serialised items, partial-pay flips the unit's `allocationStatus` to **BOOKED** instead of DELIVERED — the goods are reserved on the floor until balance is cleared. The success banner offers immediate **"Print booking hold slip"** + **"Print box tag"** links so the cashier can tape a 4×6 RESERVED tag to the unit before the customer leaves. See §4 Inventory for the full state machine.
+- **Receiving account picker** — on every CASH / CARD / BANK sale the cashier picks which cash drawer / bank / wallet account is being credited. Picker is filtered to `CASH` accounts for cash sales and to `BANK + WALLET` for card / bank transfers; if exactly one account is eligible it auto-selects. The sale's paid amount flows through `/reports/account-ledger/:id`, the Balance Sheet, and the Cash Flow statement against the chosen account — so a Rs 50,000 card-tap sale credits the correct HBL account, not a generic "cash" bucket. CREDIT sales don't ask for an account — `paidAmount` is forced to 0 and `accountId` is stripped (nothing is collected yet).
+- **Partial payment + Booking Hold** — paid amount can be less than net; the remainder becomes a customer receivable. Selecting a customer is required for partial pay and for CREDIT sales (frontend + backend enforce this). When the sale carries serialised items, partial-pay (`dueAmount > 0.005`) flips the unit's `allocationStatus` to **BOOKED** instead of DELIVERED — the goods are reserved on the floor until balance is cleared. The success banner offers immediate **"Print booking hold slip"** + **"Print box tag"** links so the cashier can tape a 4×6 RESERVED tag to the unit before the customer leaves. See §4 Inventory for the full state machine.
+- **Serial capture at checkout** — items with `tracksSerials` show a per-line serial textarea (newline / comma separated). When `serialRequiredOnSale` is true, the entered count must equal the line quantity or checkout blocks; when false, it must be either zero or exactly the quantity (all-or-none); whitespace-only entries are trimmed away; duplicates within a row are rejected. The same rules run client-side and on the server.
 - **POS keyboard shortcuts** — `F2` focus scan input · `F4` focus customer · `F8` charge · `F9` clear cart. Reduces mouse trips during a busy till.
 - **Incentive-aware cost warnings** — when an active manufacturer incentive target is past its trigger threshold, the cart row shows a `+ Rs N/unit incentive` chip and the "below cost" warning is softened to `Below raw cost · incentive covers` when the effective cost (`avgCost − perUnitCredit`) is still met. A solid red `Below cost` warning fires only when even the incentive can't recover the loss.
-- **Local serial auto-generation** — items flagged `isInternalGenerated` (unbranded local goods) get a `+ Generate & Print Local IDs` button on the cart row. Click mints N serials in `LOCAL-<CategoryCode>-<Year>-<4-digit-seq>` format and opens the print-label tab(s) automatically.
-- **Customer credit limit** — every Customer carries `creditEnabled` (master switch, default off) and `creditLimit` (rupee ceiling). Any sale that would leave `dueAmount > 0` for a customer is rejected by `SalesService.create()` if (a) the customer has `creditEnabled === false`, or (b) the projected outstanding (current A/R + this sale's due) would exceed `creditLimit`. Walk-in / no-customer sales are exempt. Current outstanding is computed the same way the customer ledger computes balance: `openingBalance + sum(sale.dueAmount) − sum(receipts)`.
+- **Local serial auto-generation** — items flagged `isInternalGenerated` (unbranded local goods) get a `+ Generate & Print Local IDs` button on the cart row. Click mints N serials in `LOCAL-<CategoryCode>-<Year>-<4-digit-seq>` format and opens up to the first 5 print-label tabs automatically.
+- **Customer credit limit** — every Customer carries `creditEnabled` (master switch, **default off**) and `creditLimit` (rupee ceiling). Any sale that would leave `dueAmount > 0` for a customer is rejected by `SalesService.create()` if (a) the customer has `creditEnabled === false`, or (b) the projected outstanding (current A/R + this sale's due) would exceed `creditLimit`. Walk-in / no-customer sales are exempt. Current outstanding is computed the same way the customer ledger computes balance: `openingBalance + sum(sale.dueAmount) − sum(receipts)`.
 - **Change due** — when paid > net, the row reads `Change · …`.
 - **In-flow customer create** — `+` next to the customer dropdown opens a modal that saves and auto-selects on close.
-- **Session lifecycle** — Start session → ring up sales → Close session. Running `salesTotal` and `salesCount` displayed.
-- **Receipt printing** — every checkout shows a Print receipt link that opens a print-friendly route and auto-fires the browser's print dialog.
+- **Session lifecycle** — Start session (optional opening float) → ring up sales → Close session. Running `salesTotal` and `salesCount` displayed. Closing a session enqueues a `POS_SESSION_CLOSED` outbox event when cloud sync is configured.
+- **Receipt printing** — every checkout shows a Print receipt link that opens a print-friendly route and auto-fires the browser's print dialog. Checkout calls `SalesService.create(..., { skipOutbox: true })` then enqueues its own single `POS_SALE_CREATED` event.
 
 ### 2. Master data (hubs)
-Master data lives inside the operational hubs in the sidebar, not in a separate "Catalogue" screen. Each hub renders its sub-entities as a horizontal tab strip:
+Master data lives inside the operational hubs in the sidebar, not in a separate "Catalogue" screen. The `MasterData` screen renders a tile grid that switches the active CRUD panel inline; entity sub-routes reuse the same screen with an `entity` prop. Each hub renders its sub-entities as a horizontal tab strip:
 
 | Hub | Tabs |
 |---|---|
 | Customer | Info · Receipts · Ledger · Warranty · Service |
-| Sales | History · Returns · Deliveries · Overdue Bookings |
+| Sales | New Voucher · History · Returns · Deliveries · Overdue Bookings |
 | Supplier | Info · Brands · Payments · Incentives · Ledger |
 | Purchase | Orders · Bills · Returns |
 | Item | Catalogue · Categories |
@@ -72,136 +79,310 @@ Master data lives inside the operational hubs in the sidebar, not in a separate 
 | Users (admin) | Info · Allow Access · Recent Login · Change Password |
 | System | Backups · Audit · Errors |
 
-**Item identifier:** Model No is the primary identifier (used as the item's display name). SKU auto-derives from Model No on save (suffixed `-2`, `-3` … on collision). Barcode is optional. **Quick search** at the top of every list filters as you type (`searchKeys={[...]}` per page).
+The Customers / Suppliers / Employees grids load from `/reports/*-balances` (computed running balances) so the master list shows live A/R, A/P, and staff-owed figures; CRUD still hits the base entity endpoints.
 
-**Accounts:** five user-facing flavours — **Cash**, **Bank**, **Wallet** (Easypaisa / JazzCash), **Capital** (owner's equity), **Credit** (credit card or credit line — shows as a liability on the balance sheet when negative). Plus seven **system accounts** seeded on first boot for the double-entry journal (`Sales Revenue` 4100, `Cost of Goods Sold` 5100, `Inventory` 1150, `Accounts Receivable` 1140, `Deferred Cash Receivables` 1145, `Accounts Payable` 2100, `Cash on Hand` 1110). System accounts can be renamed but not deleted.
+Every master-data list (Items, Categories, Brands, Customers, Suppliers, Stores, Accounts, Employees) has an **Import CSV** button next to the CSV / PDF export — for bulk-loading records migrated from a previous system. It also offers a one-click blank template. See **[CSV import & data migration](#csv-import--data-migration)** for the exact column schema each table expects.
 
-**Categories** carry an optional uppercase `code` (≤ 8 chars, e.g. `COOLER`, `FAN`, `STAND`) used as the segment of auto-generated local serials: `LOCAL-<code>-<year>-<seq>`. Uniqueness enforced in the service layer.
+**Item identifier:** Model No is the primary identifier (used as the item's display name; bulk accessories may have no model number and fall back to a typed name). SKU auto-derives from Model No on save (suffixed `-2`, `-3` … on collision). Barcode is optional and globally unique. **Quick search** at the top of every list filters as you type (`searchKeys={[...]}` per page).
+
+**Accounts:** five user-facing flavours — **Cash**, **Bank**, **Wallet** (Easypaisa / JazzCash), **Capital** (owner's equity), **Credit** (credit card or credit line — shows as a liability on the balance sheet when negative). Plus seven **system accounts** seeded idempotently on boot for the double-entry journal (`Sales Revenue` 4100, `Cost of Goods Sold` 5100, `Inventory` 1150, `Accounts Receivable` 1140, **`Deferred Cash Receivables` 1145**, `Accounts Payable` 2100, `Cash on Hand` 1110) and eight **control nodes** (1000 Assets, 1100 Current Assets, 1200 Fixed Assets, 2000 Liabilities, 3000 Equity, 4000 Revenue, 5000 COGS, 6000 Operating Expenses). System accounts can be renamed but not deleted; control accounts are non-postable.
+
+**Categories** are a self-referencing tree (`parent_id`, cycle-guarded in the service). Each carries an optional uppercase `code` (≤ 8 chars, e.g. `COOLER`, `FAN`, `STAND`) used as the segment of auto-generated local serials: `LOCAL-<code>-<year>-<seq>`. Code uniqueness is enforced in the service layer (app-level, not a DB constraint — a partial-unique index for many NULLs has dialect-specific syntax).
 
 ### 3. Transactions
-- **POS sales** generate invoices (`INV-…`) with stock OUT — scan-driven session/cart flow at `/#/pos` (still reachable by URL; no longer in the sidebar — Sales Voucher is the default Sales-hub tab now).
-- **Sales Voucher** (`/#/sales-voucher`, default Sales-hub tab) — bill-book entry screen + `POST /sales/voucher`. Customer header with **inline `+ New customer`** (POST /customers without leaving the voucher), scan-to-add input (barcode / SKU / model no via `/items/lookup` — stacks qty on the same row if scanned twice), line table (qty / unit price), per-line **tracked-serial entry** that appears for items with `tracksSerials=true` (one serial per unit, paste-multiline supported; count must equal qty when `serialRequiredOnSale=true`), N payment splits with two flavours — **CASH** (Cash + Bank + Wallet — posts a `RCT-…` Receipt + journal pair) and **CUSTOMER_CREDIT** (uses the customer's existing on-account credit to settle part of the bill; surfaced in the split dropdown as "Customer credit · available X.XX" only when the picked customer has a negative balance; reduces Sale.dueAmount without creating a Payment row or journal entry — the prior advance Receipt already moved cash and credited A/R, so re-posting would double-count), live Net / Paid / Residual footer, and an optional **Deferred-cash schedule** that appears when residual > 0 (rows of `{ dueDate, expectedAmount, notes }`; sum must clear the residual — when on, the residual routes to `Deferred Cash Receivables (#1145)` so the dashboard can chase each due date). Keyboard shortcuts: **F2** focuses the scanner, **Ctrl+Enter** submits. Submit posts one Sale + N Receipt rows in a single atomic transaction; serial state flips inside the same transaction via the existing booking-hold state machine — full pay (`dueAmount = 0`) → `bindToSale` per serial (DELIVERED + warranty stamp from the Item template), residual remains → `reserveForBooking` (BOOKED, physical `status` stays IN_STOCK). An oversplit, a serial-count mismatch, or a stale account id rolls the whole submission back so a partial sale can't strand. Each split lands as a normal `RCT-…` Receipt plus a balancing `Dr account / Cr A/R (or Deferred Cash Receivables)` journal pair — the customer ledger reads exactly as if each split had been entered manually. After save the printable invoice opens in a new tab and the cashier is dropped onto Sales history.
-- **Sale returns** (`SR-…`) — goods back from customers, stock IN
-- **Purchases** (`BILL-…`) — stock IN from suppliers; in-flow `+ New` button to create items mid-purchase
+- **POS sales** generate invoices (`INV-…`) with stock OUT — scan-driven session/cart flow at `/#/pos`.
+- **Sales Voucher** (`/#/sales-voucher`, default Sales-hub tab) — bill-book entry screen + `POST /sales/voucher`, built entirely client-side and posted atomically. Customer header with **inline `+ New customer`** (POST /customers without leaving the voucher), scan-to-add input (barcode / SKU / model no via `/items/lookup` — stacks qty on the same row if scanned twice at the same price), line table (qty / unit price), per-line **tracked-serial entry** that appears for items with `tracksSerials=true` (one serial per unit, paste-multiline supported; count must equal qty when `serialRequiredOnSale=true`, else all-or-none), N payment splits with two flavours — **CASH** (Cash + Bank + Wallet — posts a `RCT-…` Receipt + journal pair) and **CUSTOMER_CREDIT** (uses the customer's existing on-account credit to settle part of the bill; surfaced in the split dropdown as "Customer credit · available X.XX" only when the picked customer has a negative balance; capped at the available credit; reduces `Sale.dueAmount` without creating a Payment row or journal entry — the prior advance Receipt already moved cash and credited A/R, so re-posting would double-count), live Net / Paid / Residual footer, and an optional **Deferred-cash schedule** that appears when residual > 0 (rows of `{ dueDate, expectedAmount, notes }`; sum must clear the residual — when on, the residual routes to `Deferred Cash Receivables (#1145)` so the dashboard can chase each due date). Keyboard shortcuts: **F2** focuses the scanner, **Ctrl+Enter** submits. Submit posts one Sale (created `CREDIT` / `paidAmount 0`) + N Receipt rows in a single atomic transaction; serial state flips inside the same transaction via the booking-hold state machine — full pay (`dueAmount = 0`) → `bindToSale` per serial (DELIVERED + warranty stamp from the Item template), residual remains → `reserveForBooking` (BOOKED, physical `status` stays IN_STOCK). An oversplit, a serial-count mismatch, or a stale account id rolls the whole submission back so a partial sale can't strand. A `SALE_VOUCHER_CREATED` outbox event is enqueued when cloud sync is configured. After save the printable invoice opens in a new tab and the cashier is dropped onto Sales history.
+- **Sale returns** (`SR-…`) — goods back from customers, stock IN; per-line serials flip back to `RETURNED` (best-effort)
+- **Purchases** (`BILL-…`) — stock IN from suppliers; rolls weighted-average `avgCost`; optional per-line serial intake (count need not match qty); in-flow `+ New` button to create items mid-purchase
 - **Purchase returns** (`PR-…`) — goods returned to suppliers, stock OUT
-- **Receipts** (`RCT-…`) — money in from customers
-- **Payments** (`PMT-…`) — money out to suppliers
+- **Receipts** (`RCT-…`) — money in from customers (direction `IN`)
+- **Payments** (`PMT-…`) — money out to suppliers (direction `OUT`)
 - **Fund transfers** (`TRF-…`) — move money between your own accounts (Capital → Cash, Cash → Bank, Bank → Credit, etc.)
-- **Purchase orders** (`PO-…`) — Draft → Sent → Received workflow
+- **Purchase orders** (`PO-…`) — Draft → Sent → Received → Cancelled workflow; a pure planning document with no stock / journal / outbox impact (receipt of goods is a separate Purchase).
+- **Reversals** — `POST /sales/:id/reverse`, `/purchases/:id/reverse`, `/payments/:id/reverse`, `/fund-transfers/:id/reverse` (see §12). Returns / vouchers themselves are immutable history from the UI.
 
-All voucher numbers are auto-generated `<PREFIX>-NNNNNN` based on row count + 1.
+All voucher numbers are auto-generated `<PREFIX>-NNNNNN` via `SequenceService` (`count + 1` seed; not gap-free).
 
 ### 4. Inventory
-- **Stock Summary** — per item: `onHand`, `reserved` (promised to a pending delivery), `available = onHand − reserved`, `avgCost` (weighted-average), `valueAtCost`, Low/OK status. Reserved is the figure the POS path should respect; on-hand is the physical count.
-- **Weighted-average inventory costing.** Every purchase rolls the running `avgCost` and `costedQty` on the Item via `newAvg = (oldQty × oldAvg + inQty × unitCost) / (oldQty + inQty)`. Sales snapshot `avgCost` onto the `SaleItem.costAtSaleTime` column and post COGS using that frozen value — historical margins never shift retroactively. Returns and reversals adjust `costedQty` symmetrically (avgCost preserved). The Item's `purchasePrice` is kept as a UI-only "latest-cost reference"; **it's never consulted for COGS again**. Selling below `avgCost` is allowed (relationship pricing is normal) — the POS just flags the line with a non-blocking warning.
-- **Reserved inventory.** The Delivery module increments `Item.reservedQty` when a delivery's status is PENDING / OUT_FOR_DELIVERY / INSTALLATION_PENDING, and releases it on DELIVERED / INSTALLED / CANCELLED. The Stock Summary's `available` column reflects this so the cashier never sells a unit that's already loaded on the truck.
-- **Per-unit booking-hold state machine.** `ItemSerial.allocationStatus` has three values that run orthogonal to the physical `status`:
+- **Stock Summary** — per item: `onHand` (derived `SUM(IN − OUT)`, never stored), `reserved` (`Item.reservedQty`, promised to a pending delivery), `available = onHand − reserved` (floored at 0), `avgCost` (running weighted-average), `valueAtCost`, Low/OK status. Reserved is the figure the POS path respects; on-hand is the physical count.
+- **Append-only stock ledger.** Every movement is a `stock_movements` row tagged with a `referenceType` (`PURCHASE`, `SALE`, `PURCHASE_RETURN`, `SALE_RETURN`, `ADJUSTMENT`, `SALE_REVERSAL`, `PURCHASE_REVERSAL`). All mutations funnel through `StockService.recordMovement`, the single point that enforces positive quantity and throws `BadRequestException` if an OUT would drive on-hand negative — rolling back the surrounding transaction.
+- **Weighted-average inventory costing.** Every purchase rolls the running `avgCost` and `costedQty` on the Item via `newAvg = (oldQty × oldAvg + inQty × unitCost) / (oldQty + inQty)`. Sales snapshot `avgCost` onto the `SaleItem.costAtSaleTime` column and post COGS using that frozen value — historical margins never shift retroactively. Returns and reversals adjust `costedQty` symmetrically (avgCost preserved — a reversal can't reliably un-roll a weighted average). The Item's `purchasePrice` is kept as a UI-only "latest-cost reference"; **it's never consulted for COGS again**. Selling below `avgCost` is allowed (relationship pricing is normal) — the POS just flags the line with a non-blocking warning.
+- **Reserved inventory.** The Delivery module increments `Item.reservedQty` when a delivery's status is PENDING / OUT_FOR_DELIVERY / INSTALLATION_PENDING, and releases it on DELIVERED / INSTALLED / CANCELLED. The reservation overlay is a no-op for "loose" deliveries with no linked sale. The Stock Summary's `available` column reflects this so the cashier never sells a unit that's already loaded on the truck.
+- **Per-unit booking-hold state machine.** `ItemSerial.allocationStatus` has three values that run orthogonal to the physical `status` (IN_STOCK / SOLD / RETURNED / DAMAGED / WRITE_OFF):
   - `AVAILABLE` — free for sale to any cash customer.
-  - `BOOKED` — held by a partial-payment sale. Physically on the floor but reserved by `saleInvoiceNo` + `bookedAt`.
+  - `BOOKED` — held by a partial-payment sale. Physically on the floor (status stays IN_STOCK) but reserved by `saleInvoiceNo` + `bookedAt`.
   - `DELIVERED` — fully paid and handed over (or sold cash-and-walk).
 
-  Transitions are atomic via `ItemSerialsService.reserveForBooking()` / `releaseBooking()` / `markDelivered()`. `PosService.checkout()` branches on `dueAmount > 0`: partial-pay sales call `reserveForBooking` (BOOKED); full-pay sales call `bindToSale` (DELIVERED). When the last commitment settles via `POST /sales/:id/settle-commitment`, the serials flip BOOKED → DELIVERED automatically. **Strict Delivery Handover Authorisation**: `DeliveriesService.update()` throws if the linked sale still has `dueAmount > 0` when status transitions to DELIVERED — the catastrophic "took the AC home then disputed the bill" failure mode is structurally closed. The warranty-lookup page surfaces a top-priority amber "On hold · payment pending" chip so the floor cashier instantly sees DO NOT SELL.
-- **Overdue Bookings dashboard** (Sales-hub tab `/overdue-bookings`) — every sale with at least one BOOKED serial older than N days (default 7). **Release to Floor** action cancels the booking and reverts BOOKED → AVAILABLE. Reuses the existing reversal pipeline (idempotent). Advance amount stays as customer credit — never auto-refunded.
-- **Local serial auto-generation** — items flagged `isInternalGenerated` mint serials in `LOCAL-<CategoryCode>-<Year>-<4-digit-seq>` via `POST /item-serials/generate-local`. Sequence keyed per (category-code, year) in the existing `sequences` table; Jan 1 resets. Print route `/print/serial-label/:serial` produces a 2"×1" thermal-sticker layout — barcode-style bars + serial + item name. POS shows a `+ Generate & Print Local IDs` button on the cart row for these items.
+  Transitions are atomic via `ItemSerialsService.reserveForBooking()` / `releaseBooking()` / `markDelivered()` / `bindToSale()` / `unbindFromInvoice()`, each accepting an optional `EntityManager` so the caller can enlist them in its own transaction. `PosService.checkout()` and the Sales Voucher branch on `dueAmount > 0.005`: partial-pay sales call `reserveForBooking` (BOOKED); full-pay sales call `bindToSale` (DELIVERED + warranty stamp). When the last commitment settles via `POST /sales/:id/settle-commitment`, the serials flip BOOKED → DELIVERED automatically. **Strict Delivery Handover Authorisation**: `DeliveriesService.update()` throws if the linked sale still has `dueAmount > 0` when status transitions to DELIVERED — the catastrophic "took the AC home then disputed the bill" failure mode is structurally closed. This guard is gated solely on `Sale.dueAmount > 0.005` (no extra conditions, by design). The warranty-lookup page surfaces a top-priority amber "On hold · payment pending" chip so the floor cashier instantly sees DO NOT SELL.
+- **Overdue Bookings dashboard** (Sales-hub tab `/overdue-bookings`) — every sale with at least one BOOKED serial older than N days (default 7). **Release to Floor** (`POST /sales/:id/release-booking`) cancels the booking and reverts BOOKED → AVAILABLE; it reuses the reversal pipeline (idempotent) with a `RELEASE-TO-FLOOR ·` audit prefix. Advance amount stays as customer credit — never auto-refunded; the owner refunds manually via a Receipt reversal.
+- **Local serial auto-generation** — items flagged `isInternalGenerated` mint serials in `LOCAL-<CategoryCode>-<Year>-<4-digit-seq>` via `POST /item-serials/generate-local`. Sequence keyed per (category-code, year) in the `sequences` table; Jan 1 resets. The item's category must have a `code`. Print route `/print/serial-label/:serial` produces a 2"×1" thermal-sticker layout — placeholder barcode-style bars + serial + item name (no real barcode library yet — swapping in `jsbarcode` is one component change).
 - **Stock Ledger** — every IN / OUT movement, filterable by item / category / brand / supplier / date range, with running balance per row.
 - **Reason-driven manual adjustment** — `POST /api/stock/adjust`. The frontend never asks the user to pick "IN" or "OUT" directly; they pick a **reason** (`Loss / stolen`, `Damaged`, `Found`, `Stock count — was over / under`, `Correction +/−`) and the direction follows. Form shows current on-hand and the projected new on-hand, blocks submission if the adjustment would drive stock negative.
-- **Damaged goods** register — DAMAGED / IN_REPAIR / WRITE_OFF / REPAIRED workflow. DAMAGED books an immediate stock OUT; REPAIRED books a reversing IN so items rejoin sellable inventory.
+- **Stock transfers** (`STK-TRF-…`) — atomic inter-store transfer: one OUT at the source store + one IN at the destination, in a single transaction (if the OUT is short, the whole thing rolls back). Disabled in the UI with fewer than two stores.
+- **Damaged goods** (`DMG-…`) register — DAMAGED / IN_REPAIR / WRITE_OFF → REPAIRED workflow. Creation books an immediate stock OUT; flipping to REPAIRED books a reversing IN so items rejoin sellable inventory. A record still out-of-stock can't be deleted (must be REPAIRED first so the stock reverses).
 
 ### 5. Ledgers
-- **Customer Ledger** — chronological sale / sale-return / payment-at-sale / receipt rows with Debit / Credit / running Balance. Positive balance = customer owes us.
-- **Supplier Ledger** — purchase / purchase-return / payment rows.
-- **Employee Ledger** — salary accruals / payments / advances / reimbursements / earned incentives, with running balance. Positive balance = we owe the employee.
-- **Account Ledger** — every cash / bank / wallet movement (sales paid, payments out, fund transfers, cash-book entries) against one specific account, asOf-filtered.
-- **All-balances pages** — single GROUP-BY query that returns the closing balance for every customer / supplier / employee at once (avoids N+1 over per-row ledgers).
+All ledger balances are server-computed (the reports API returns `openingBalance` / `closingBalance` and a per-row running `balance`); the frontend `LedgerView` only renders them.
+
+- **Customer Ledger** — chronological sale / sale-return / payment-at-sale / receipt rows with Debit / Credit / running Balance. Positive balance = customer owes us. An `AgingPanel` (per-invoice aging detail, with a Past-Promise column) sits above it.
+- **Supplier Ledger** — purchase / purchase-return / payment rows; symmetric `AgingPanel` (bills, no promise column).
+- **Employee Ledger** — salary accruals (debit = we owe) / payments / advances / reimbursements / earned incentives, with running balance and an "Incentives earned this period" figure. Positive balance = we owe the employee.
+- **Account Ledger** — every cash / bank / wallet movement (sales paid, payments out, fund transfers, legacy null-account cash sales for CASH accounts) against one specific account, `asOf`-filtered, grouped by account type in the picker.
+- **All-balances pages** — single GROUP-BY queries that return the closing balance for every customer / supplier / employee / account at once (avoids N+1 over per-row ledgers).
 
 ### 5b. Delivery & Service workflow (appliance-retail specifics)
-- **Deliveries** (`/deliveries`, also a Sales-hub tab) — operational tracking of truck-out / installation handover. Stock is already deducted at sale time, so the only inventory effect is the `reservedQty` overlay (see §4). Statuses: PENDING / OUT_FOR_DELIVERY / DELIVERED / INSTALLATION_PENDING / INSTALLED / CANCELLED. Auto-fills customer + address + phone from the linked sale's customer record.
-- **Service tickets** (`/service-tickets`, Customer-hub tab) — RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED, plus UNREPAIRABLE. Optional serial link auto-pulls the in-warranty flag from the warranty endpoint; a receipt-number lookup does the same for model-only units (no serial) by attaching the originating sale line. Status tally tiles on the page summarise the queue at a glance.
+- **Deliveries** (`DLV-…`, `/deliveries`, also a Sales-hub tab) — operational tracking of truck-out / installation handover. Stock is already deducted at sale time, so the only inventory effect is the `reservedQty` overlay (see §4). Six statuses: PENDING / OUT_FOR_DELIVERY / DELIVERED / INSTALLATION_PENDING / INSTALLED / CANCELLED. Auto-fills customer + address + phone from the linked sale's customer record. A `FunnelStages` chart and a status tally summarise the pipeline.
+- **Service tickets** (`SVC-…`, `/service-tickets`, Customer-hub tab) — seven statuses RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED, plus UNREPAIRABLE (terminal). Optional serial link auto-pulls the in-warranty flag from the warranty endpoint; a receipt-number lookup does the same for model-only units (no serial) by attaching the originating sale line (`saleItemId`). `inWarranty` is a snapshot at ticket-open time. Status tally tiles + a `FunnelStages` chart summarise the queue.
 
 ### 6. Cash Register
 A real cashier's day book.
-- **One session per shop-day** — opened with an `actualOpening` count. The opening flow optionally books a Capital → Cash `FundTransfer` atomically to cover any shortfall.
-- **Cash-book entries** — small expenses, wallet top-ups, miscellaneous in / out. Blocked client-side once the session is CLOSED.
-- **Daily closing** — denomination-counter modal lists every standard Pakistani note (Rs 5000 / 1000 / 500 / 100 / 50 / 20 / 10), the cashier types counts per row, the modal auto-sums to `actualClosing`. The variance vs expected closing colour-codes red (short) / green (over). Counts are persisted as JSON on the session so a "two 5000s short" investigation is one click away.
+- **One session per shop-day** — enforced by a unique index on `session_date`. Opened with an `actualOpening` count; the opening flow optionally books a Capital → Cash `FundTransfer` atomically (shared transaction) to cover any shortfall, storing its id on `openingTransferId`.
+- **Cash-book entries** — small expenses, wallet top-ups, miscellaneous in / out (`EXPENSE`, `MISC`, `OPENING`, `CLOSING_ADJUSTMENT`, `OTHER`). Blocked client-side once the session is CLOSED.
+- **Daily book** — consolidates cash-affecting sales (`CASH`, paid > 0), cash purchases, cash payment vouchers, and cash-book entries into one running-balance view (inter-cash fund transfers net to zero and are excluded). A MISC-warning fires when miscellaneous throughput is meaningfully large (≥ Rs 1000 and > 10% of the day's throughput).
+- **Daily closing** — denomination-counter modal lists every standard Pakistani note (Rs 5000 / 1000 / 500 / 100 / 50 / 20 / 10), the cashier types counts per row, the modal auto-sums to `actualClosing` (with a manual-override field). The variance vs expected closing colour-codes red (short) / green (over). Counts are persisted as JSON on the session so a "two 5000s short" investigation is one click away. **Variance is recorded numerically only** — open/close post no journal or stock side effects; the register is reconciliation, not posting. A 30-session variance-trend mini-chart highlights persistent drift.
 
 ### 7. Incentives & Adjusted Profit
 - **Supplier / brand incentive targets** — sell N units of an item or brand between dates to unlock a bonus. The shop sometimes sells at a per-unit loss because clearing the target unlocks an incentive that exceeds the loss — so true profit must include incentives.
-- **Effective-cost adjustment from triggered targets** — every target carries a `triggerThresholdPct` (default 80). Once net-sold qty crosses that percentage of `targetQuantity`, the per-unit incentive credit (`incentiveAmount / targetQuantity`) is treated as a likely earnback. `GET /incentives/cost-adjustments` returns the per-item credit map. POS uses it to:
+- **Effective-cost adjustment from triggered targets** — every target carries a `triggerThresholdPct` (default 80). Once net-sold qty crosses that percentage of `targetQuantity`, the per-unit incentive credit (`incentiveAmount / targetQuantity`) is treated as a likely earnback. `GET /incentives/cost-adjustments` returns the per-item credit map (recomputed live — never snapshotted onto a sale). POS uses it to:
   - Show a blue `+ Rs N/unit incentive` chip on the cart row when an active credit applies.
-  - Soften the "below cost" warning: amber `Below raw cost · incentive covers` when unit price < `avgCost` but >= `avgCost − perUnitCredit`; solid red `Below cost` only when even the incentive can't recover.
-  
+  - Soften the "below cost" warning: amber `Below raw cost · incentive covers` when unit price < `avgCost` but ≥ `avgCost − perUnitCredit`; solid red `Below cost` only when even the incentive can't recover.
+
   Brand-basis targets propagate the credit to every item in the brand. If multiple active+triggered targets touch the same item, the bigger credit wins (the cashier sees the best available recovery).
-- **Awards** — booked when the target is achieved and the supplier pays out. The Income Statement adds the sum of awards in the period to net income to produce **Adjusted Net Income**.
-- **Employee incentive rules** — a percentage of base amount per matching sale (basis ITEM or BRAND, optional date range). Earned incentives flow into the employee ledger.
+- **Awards** — booked (`POST /incentives/awards`) when the target is achieved and the supplier pays out. The Income Statement adds the sum of awards in the period to net income to produce **Adjusted Net Income**.
+- **Employee incentive rules** — a percentage of qualifying sale lines (basis `ALL_SALES` / `CATEGORY` / `ITEM` / `BRAND`, optional date range). Multiple rules stack — each emits its own ledger line and they sum independently; returns net out as negative adjustment rows. Earned incentives flow into the employee ledger via `computeForPeriod`. (Note: the employee-incentive `IncentiveBasis` union differs from the supplier-target one.)
+
+Both incentive engines are pure read-derivation off Sales / Returns / Items — neither writes Sale / Stock / Journal / Serial state; awards are the only manually-booked records.
 
 ### 8. Reports — four financial statements + ledgers + aging + profitability
-- **Income Statement** — Revenue → COGS → Gross Profit → Operating Expenses → Net Income → Incentive Awards → Adjusted Net Income.
-- **Balance Sheet** — Assets (cash, bank, wallet, A/R) | Liabilities (A/P, credit lines) + Equity (Capital − Drawings + Retained Earnings). `asOf` filterable.
-- **Cash Flow Statement** — operating + investing-style cash movement, including fund transfer deltas per account.
-- **Statement of Changes in Equity** — Opening + Adjusted Net Income − Drawings = Closing.
-- **Stock Ledger** with category / brand / supplier filters.
+`ReportsModule` is **read-only** by design — no writes allowed inside it.
+
+- **Income Statement** — Revenue → COGS → Gross Profit → Operating Expenses (incl. employee incentives) → Net Income → Incentive Awards → Adjusted Net Income.
+- **Balance Sheet** — Assets (cash, bank, wallet, inventory, A/R) | Liabilities (A/P, credit lines) + Equity (Capital contributed + Retained Earnings). `asOf` filterable.
+- **Cash Flow Statement** — direct-method operating cash movement, including fund-transfer deltas per account.
+- **Statement of Changes in Equity** — Opening + (Adjusted) Net Income − Drawings = Closing, with a reconciliation balance check.
+- **Stock Ledger** with category / brand / supplier / date filters and running balance.
 - **A/R aging** (`GET /reports/ar-aging?asOf=…`) — for every customer with an outstanding balance, residual amounts bucketed 0-30 / 31-60 / 61-90 / 90+ days. Receipts are consumed FIFO against the oldest unpaid sale; opening balance is treated as oldest and consumed first. Each row also carries:
   - `pastPromise` overlay flagging residuals where a commitment in `paymentCommitments` is past its `dueDate` — surfaces missed "pay half on the 20th" promises that would otherwise hide inside the 0-30 bucket.
   - `maxDaysElapsed` + `oldestUnpaidDate` — the age of the customer's oldest unpaid invoice.
   - `daysSinceFirstPastPromise` — for AR rows only, how long ago the earliest broken PENDING commitment was promised (different from `maxDaysElapsed` — a fresh invoice can carry an ancient broken promise).
-- **Per-invoice aging detail** — `GET /reports/ar-aging/:customerId` and `/ap-aging/:supplierId` return per-document rows with `daysElapsed`, `residualAmount`, `hasPendingCommitment`. Surfaced as an `AgingPanel` above the per-party ledger and feeds the "Oldest unpaid: 47d (Ali Khan)" line on the Dashboard's Receivables/Payables card.
-- **Deferred-cash commitments on sales** — POS captures structured `paymentCommitments: [{ dueDate, expectedAmount, status }]` for credit / partial-pay invoices. Residual lands on a dedicated **Deferred Cash Receivables** system account (`#1145`) rather than open A/R. `POST /sales/:id/settle-commitment` posts a Receipt voucher and books the second journal half (Dr Cash / Cr Deferred Receivables). `GET /sales/deferred/upcoming` powers the dashboard widget — every PENDING commitment due within 7 days, overdue-flagged.
+- **Per-invoice / per-bill aging detail** — `GET /reports/ar-aging/:customerId` and `/ap-aging/:supplierId` return per-document rows with `daysElapsed`, `residualAmount`, `hasPendingCommitment`. Surfaced as an `AgingPanel` above the per-party ledger and feeds the "Oldest unpaid: 47d (Ali Khan)" line on the Dashboard's Receivables/Payables card.
+- **Deferred-cash commitments on sales** — POS and the voucher capture structured `paymentCommitments: [{ dueDate, expectedAmount, status }]` for credit / partial-pay invoices. Residual lands on the dedicated **Deferred Cash Receivables** system account (`#1145`) rather than open A/R. `POST /sales/:id/settle-commitment` posts a Receipt voucher and books the second journal half (Dr Cash / Cr Deferred Receivables), caps at the commitment's residual and surfaces any overflow to the caller. `GET /sales/deferred/upcoming` powers the dashboard widget — every PENDING commitment due within 7 days, overdue-flagged.
 - **A/P aging** (`GET /reports/ap-aging?asOf=…`) — symmetric for suppliers: unpaid purchases minus payments-out, bucketed by age.
 - **Item profitability** (`GET /reports/item-margins?from=…&to=…`) — qty sold, revenue, COGS (using the **weighted-average cost snapshotted on each sale line at sale time** — historical margins never shift retroactively), gross profit, margin %.
-- **Slow-moving stock** (`GET /reports/slow-moving-stock?asOf=…`) — for every active item still on hand, days since last sale + value at avg cost, bucketed fresh / slowing / cold / dead (>90 days or never sold). Summary section surfaces total locked value in dead + cold stock — the "what's tying up cash" report.
+- **Slow-moving stock** (`GET /reports/slow-moving-stock?asOf=…`) — for every active item still on hand, days since last sale + value at avg cost, bucketed fresh / slowing / cold / dead (>90 days or never sold). Summary surfaces total locked value in dead + cold stock — the "what's tying up cash" report.
 - **Margin analytics** (`GET /reports/margin-analytics?from=…&to=…`) — three slices: by-brand roll-up (qty / revenue / COGS / margin %), 20 lowest-margin sale lines (spot pricing leaks), 20 highest-discount sales (spot relationship-pricing patterns). Observation only — the system never restricts a price the salesman enters.
+- **Journal-derived reports (parallel ledger)** — `GET /reports/trial-balance?asOf=…`, `/income-statement-from-journals`, `/balance-sheet-from-journals` aggregate `journal_lines` directly and ship alongside the operational-table reports so a reconciliation tool can diff them. Each carries a `balanced` flag. See §12.
+
+> **Note on one operational report:** the operational `incomeStatement` / `balanceSheet` still compute inventory + COGS from `item.purchasePrice` as a stand-in (no per-batch costing in those two paths), whereas `item-margins` and `margin-analytics` use the correct `costAtSaleTime` snapshot. The journal-derived statements are the parity check; the read-side flip lands once a closing cycle proves they match.
 
 ### 9. Cloud sync (offline-first, manual trigger, HMAC-signed)
-- Every business transaction at the local node enqueues an event in the `sync_queue` outbox table (`SALE_CREATED`, `PURCHASE_CREATED`, `POS_SALE_CREATED`, `POS_SESSION_STARTED`, `POS_SESSION_CLOSED`).
-- **Sync is manual, not scheduled.** A "Sync" button in the topbar shows the pending count as a badge, spins while the request is in flight, and toasts the result ("Synced 3 events.", "Nothing to sync.", or the error message from the cloud). Clicking it calls `POST /api/sync/flush`, which drains **every** pending entry (no chunk cap) and returns a `{ ok, cloudConfigured, attempted, succeeded, failed, message }` summary. The button hides itself entirely when `CLOUD_SYNC_URL` is not configured.
-- **Poison-pill isolation.** A single failing event (schema mismatch on the cloud, FK violation, corrupted payload) does NOT stall the queue. The flush loop wraps each event in its own try/catch, flips the failing row to `SYNC_FAILED` with the server's error text in the `error` column, stamps `lastAttemptAt`, and proceeds to the next healthy event. The topbar tooltip shows `"Sync now — N pending, M skipped due to errors"` when there are FAILED rows. `GET /api/sync/failed` lists them; `POST /api/sync/failed/:id/retry` resets one to PENDING for the next flush.
-- The cloud receiver (`POST /api/sync/push`) is **another instance of this same NestJS backend** deployed against Supabase Postgres. It applies events with idempotency by event ID — duplicate event IDs return `DUPLICATE`, never re-applied. So Supabase is always eventually-consistent with what the shop did, with no special online-mode in the cashier UI.
-- **HMAC-SHA256 request signing.** The receiver is public on the internet, so unsigned pushes would let anyone forge `SALE_CREATED` events. Each shop is provisioned with `SHOP_ID` + `SHOP_SYNC_SECRET` (32-byte random hex). The local node computes `HMAC-SHA256(secret, "<RFC3339 timestamp>\n<JSON body>")` and sends `X-Shop-Id`, `X-Sync-Timestamp`, `X-Sync-Signature` headers. The cloud receiver rejects with `401` if: any header is missing, the shop id doesn't match, the timestamp is more than 5 minutes off server time (replay window), or the signature doesn't recompute (constant-time compared). Event-ID idempotency is layered on top — even a signed request with a known event ID returns `DUPLICATE`. The local node refuses to push if the env vars are unset (no silent unsigned fallback).
+- Every business transaction at the local node enqueues an event in the `sync_queue` outbox table via `OutboxService.enqueue` (`SALE_CREATED`, `SALE_VOUCHER_CREATED`, `PURCHASE_CREATED`, `POS_SALE_CREATED`, `POS_SESSION_CLOSED`). Only `SalesService` / `PurchasesService` / `PosService` produce events, and only when `CLOUD_SYNC_URL` is set.
+- **Sync is manual, not scheduled.** There is no `@Cron` — a "Sync" button in the topbar shows the pending count as a badge (polling `GET /api/sync/status` every 30 s), spins while the request is in flight, and toasts the result. Clicking it calls `POST /api/sync/flush`, which drains **every** pending entry (no chunk cap) under a single-flight `isPushing` lock and returns a `{ ok, cloudConfigured, attempted, succeeded, failed, message }` summary. The button hides itself entirely when `CLOUD_SYNC_URL` is not configured. (This is deliberate — the owner asked for manual sync so a flaky link can't bury the till in retry traffic.)
+- **Poison-pill isolation.** A single failing event (schema mismatch on the cloud, FK violation, corrupted payload) does NOT stall the queue. The flush loop wraps each event in its own try/catch, flips the failing row to `FAILED` with the server's error text in the `error` column, stamps `lastAttemptAt`, and proceeds. FAILED rows are **not** auto-retried (they'd spam the banner on an intermittent cloud bug); `GET /api/sync/failed` lists them and `POST /api/sync/failed/:id/retry` resets one to PENDING. A network-level failure (not a per-event error) leaves rows PENDING for the next flush but bumps `attempts`.
+- The cloud receiver (`POST /api/sync/push`) is **another instance of this same NestJS backend** deployed against Supabase Postgres. It applies events with idempotency by event ID — duplicate event IDs return `DUPLICATE`, never re-applied. `POS_SALE_CREATED` is applied as a normal sale (session metadata stripped); `SALE_VOUCHER_CREATED` replays through `createFromVoucher` (rebuilding the sale + its receipt splits); `POS_SESSION_*` are audit-only no-ops cloud-side. The cloud uses `skipOutbox: true` so it never re-enqueues what it receives (and `createFromVoucher` only re-enqueues when `CLOUD_SYNC_URL` is set, which the terminal receiver doesn't have). So Supabase is always eventually-consistent with what the shop did, with no special online-mode in the cashier UI.
+- **HMAC-SHA256 request signing.** The receiver is public on the internet, so unsigned pushes would let anyone forge `SALE_CREATED` events. Each shop is provisioned with `SHOP_ID` + `SHOP_SYNC_SECRET` (32-byte random hex). The local node computes `HMAC-SHA256(secret, "<RFC3339 timestamp>\n<JSON body>")` and sends `X-Shop-Id`, `X-Sync-Timestamp`, `X-Sync-Signature` headers (the JSON body is sent byte-for-byte via an axios `transformRequest` identity so the signature stays valid). The `SyncSignatureGuard` rejects with `401` if any header is missing, the shop id doesn't match, the timestamp is more than 5 minutes off server time (replay window), or the signature doesn't recompute (constant-time compared). The receiver refuses to run at all if `SHOP_ID` / `SHOP_SYNC_SECRET` are unset (no dev bypass); the local node refuses to push if they're unset (no silent unsigned fallback).
 
 ### 10. Backups + verification
-- **Snapshot every business table** to a single JSON file on local disk. Backed-up tables: every entity except the user tables (`users`, `user_access_requests`, `user_login_events`) — those are intentionally excluded so a backup never leaks credentials.
-- **Manual snapshot** — `System → Backups → Save backup now` writes a snapshot to disk; `Download snapshot` streams an in-memory snapshot to the browser as a download (no file persisted server-side — useful for USB-stick copies).
-- **Restore from JSON** — `POST /backup/restore` accepts a multi-megabyte JSON body (Express body limit bumped to 100 MB in `main.ts` for this).
-- **Scheduled daily snapshot** — `@Cron` runs hourly and snapshots if the configured hour has passed and no backup exists for today (default 20:00).
-- **Storage** — defaults to `erp-backend/backups/` in dev; Electron forces `<userData>/backups`. Tracked in a `backups` table with file path, size, and trigger (AUTO / MANUAL).
-- **Integrity verification** — every snapshot row stores a `sha256` hash of the file's bytes at write time. `POST /backup/:id/verify` re-hashes the file on disk and compares; mismatch surfaces as a red badge on the History page (disk corruption, tampering, edited file). The restore flow runs a verify pass first so a corrupted snapshot never wipes the live DB. Legacy rows written before the column existed get backfilled on the first verify.
+- **Snapshot every business table** to a single JSON file on local disk. Backed-up tables: every entity except the user/auth tables (`users`, `user_access_requests`, `user_login_events`) and the `backups` table itself — excluded so a backup never injects a superuser or leaks credentials, and never recurses. M2M join tables (e.g. `item_categories`) are included.
+- **Manual snapshot** — `System → Backups → Save backup now` (`POST /backup`) writes a snapshot to disk; `Download snapshot` (`GET /backup/download-now`, superuser-only) streams an in-memory snapshot to the browser as a download (no file persisted server-side — useful for USB-stick copies). The frontend downloads through an authed axios blob fetch (not `window.location`, which would lack the auth header and 401).
+- **Restore from JSON** — `POST /backup/restore` (superuser + reauth) accepts a multi-megabyte JSON body (Express body limit bumped to 100 MB for this route only). It first takes a **pre-restore safety snapshot**, then wipes and replays every business table inside one transaction with FK enforcement toggled off for the duration. Requires the literal text `RESTORE` plus a one-shot `X-Reauth-Token` (or legacy password).
+- **Scheduled daily snapshot** — a `@Cron` runs hourly and snapshots if the configured hour has passed and no backup exists for today (default 20:00, configurable via `POST /backup/schedule`, stored in the `settings` table). Polling hourly (rather than a precise cron) lets the hour change via API without a restart.
+- **Storage** — defaults to `erp-backend/backups/` in dev; Electron forces `<userData>/backups`. Tracked in a `backups` table with file path, size, trigger (AUTO / MANUAL), and `sha256`.
+- **Integrity verification** — every snapshot row stores a `sha256` hash of the file's bytes at write time. `POST /backup/:id/verify` (superuser-only) re-hashes the file on disk and compares; mismatch surfaces as a red badge on the History page (disk corruption, tampering, edited file). The restore flow runs a verify pass first so a corrupted snapshot never wipes the live DB. Legacy rows written before the column existed get backfilled on the first verify.
 
 ### 11. Access control
-- **Two roles** — `SUPERUSER` (admin) and `USER`. Seeded admin: `admin` / `Tech@123` on first boot.
-- **Passwords** — scrypt hashes (`scrypt:saltHex:hashHex`), never plaintext.
-- **Sessions** — opaque server-issued tokens (not JWT), 12-hour sliding window, sent as `Authorization: Bearer <token>`.
-- **AuthGuard** is global. Exempt routes: `/auth/login`, `/auth/request-access`, `/health`, `/sync/push` (cloud webhook).
-- **Request access flow** — the login page has a "Request access" button. Non-users can submit a `UserAccessRequest`; a SUPERUSER reviews and approves (assigning username + password) or rejects from `Users → Allow Access`.
-- **Login events** — every successful login appends a `UserLoginEvent`. Surfaced under `Users → Recent Login` (superuser-only).
-- **Entity-change audit log** — `AuditSubscriber` (a TypeORM `EntitySubscriber`, not a DB trigger — cross-dialect safe) logs every INSERT / UPDATE / DELETE on the business tables to `audit_logs` with the user, entity type, primary key, and a JSON diff of the fields that changed on UPDATE. Surfaced under `System → Audit`.
-- **User tables are excluded from backups** so a snapshot never leaks credentials.
+- **Two roles only** — `SUPERUSER` (admin) and `USER`. No granular RBAC. Seeded admin: `admin` / `Tech@123` on first boot (idempotent).
+- **Passwords** — scrypt hashes (`scrypt:saltHex:hashHex`, 64-byte key, 16-byte salt), constant-time verify. scrypt (not bcrypt) avoids native deps on Windows/Electron.
+- **Sessions** — opaque server-issued tokens (not JWT), 12-hour **sliding window** (refreshed only when the bump exceeds 60 s, to avoid a DB write per request), one token per user (rotation on login or password change invalidates other devices), sent as `Authorization: Bearer <token>`.
+- **AuthGuard** is global (registered in `UsersModule`). Exempt routes: `/auth/login`, `/auth/request-access`, `/health`, `/sync/push` (HMAC-authed instead), and the public warranty lookup `GET /item-serials/warranty/:serial`.
+- **Re-authentication** — `POST /auth/reauthenticate` issues a one-shot, 60-second, in-memory `X-Reauth-Token` consumed by high-privilege backup endpoints (restore / download). Deleted on first use even on mismatch (anti-replay); lost on process restart by design.
+- **Last-superuser & self protections** — the last active superuser can't be removed / demoted / deactivated; you can't delete or deactivate your own account, or change your own role.
+- **Request access flow** — the login page has a "Request access" button. Non-users submit a `UserAccessRequest`; a SUPERUSER reviews and approves (assigning username + password, creating a regular USER) or rejects from `Users → Allow Access`. Requests never auto-create users.
+- **Login events** — every successful login appends a `UserLoginEvent` (superuser's own logins pre-marked seen so they don't notify themselves). Surfaced under `Users → Recent Login` (superuser-only) and the topbar login bell; clearing keeps the last 30 days.
+- **Entity-change audit log** — `AuditSubscriber` (a TypeORM `EntitySubscriber`, not a DB trigger — cross-dialect safe) logs every INSERT / UPDATE / DELETE on the business tables to `audit_logs` with the entity type, primary key, and a JSON diff of changed fields on UPDATE. User/auth tables, audit/error logs, and outbox rows are skipped to avoid recursion/noise. Surfaced under `System → Audit` (superuser-only).
+- **Error log** — a global `ErrorLogFilter` records every error response to `error_logs` (status ≥ 500 → ERROR, 4xx → WARN) while preserving the default response shape. Surfaced under `System → Errors` (superuser-only).
 
 ### 12. Double-entry journal & period locking
-- **Journal entries** — every sale, purchase, receipt, payment, and fund transfer posts a balanced `JournalEntry` (header) with two-or-more `JournalLine` rows through `JournalService.post()` in the same TypeORM transaction as the source row. The service rejects unbalanced entries (`SUM(debit) !== SUM(credit)`) and single-sided lines. Entry numbers come from the global `SequenceService` as `JE-NNNNNN`.
+- **Journal entries** — every sale, purchase, receipt, payment, fund transfer, and commitment settlement posts a balanced `JournalEntry` (header) with two-or-more `JournalLine` rows through `JournalService.post()` **in the same TypeORM transaction as the source row** (it accepts an external `EntityManager`). The service rejects unbalanced entries (`|SUM(debit) − SUM(credit)| > 0.005`), single-sided / two-positive lines, and any line targeting a control account. Entry numbers come from `SequenceService` as `JE-NNNNNN`. The balance/one-sided invariant is enforced in app code (not a SQL CHECK) for SQLite/Postgres parity.
 - **Posting maps**
-  - **Sale** (`INV-…`): Dr Cash/Bank (or `Cash on Hand` fallback) for `paidAmount`, Dr `A/R` for `dueAmount`, Cr `Sales Revenue` for `netAmount`, plus Dr `COGS` / Cr `Inventory` for `qty × item.purchasePrice`.
-  - **Purchase** (`BILL-…`): Dr `Inventory` for `netAmount`; Cr `Cash on Hand` for `paidAmount`, Cr `A/P` for `dueAmount`.
-  - **Receipt** (`RCT-…`): Dr account or `Cash on Hand` fallback / Cr `A/R`.
-  - **Payment** (`PMT-…`): Dr `A/P` / Cr account or `Cash on Hand` fallback.
+  - **Sale** (`INV-…`): Dr account (or `Cash on Hand` fallback) for `paidAmount`; Dr residual account for `dueAmount` (→ `Deferred Cash Receivables` when commitments exist, else `A/R`); Cr `Sales Revenue` for `netAmount`; Dr `COGS` / Cr `Inventory` for the snapshotted `costAtSaleTime` total.
+  - **Purchase** (`BILL-…`): Dr `Inventory` for `netAmount`; Cr `Cash on Hand` for `paidAmount`; Cr `A/P` for `dueAmount`.
+  - **Receipt** (`RCT-…`): Dr account (or `Cash on Hand` fallback) / Cr `A/R`.
+  - **Payment** (`PMT-…`): Dr `A/P` / Cr account (or `Cash on Hand` fallback).
   - **Fund transfer** (`TRF-…`): Dr destination / Cr source — both user-owned accounts.
-- **Reports — current vs planned source of truth** — the four financial statements still derive from operational tables today. `GET /reports/trial-balance` is the first journal-driven report and provides the parity check. The flip ships once a daily reconciliation report proves journals match operational totals.
-- **Reversal** — `POST /sales/:id/reverse`, `POST /purchases/:id/reverse`, `POST /payments/:id/reverse`. Each posts a balancing journal entry (signs flipped, linked by `reverses_journal_entry_id`), books an inverse stock movement where applicable, and marks the original row `reversedAt` / `reversedBy` / `reversalReason`. Original rows stay visible. Idempotent. Reason text required.
-- **Period locking** — `accounting_periods` with statuses `OPEN`, `SOFT_CLOSED` (posts allowed with UI warning), `HARD_CLOSED` (posts rejected). Endpoints `POST /periods`, `POST /periods/:id/soft-close`, `POST /periods/:id/hard-close`, `POST /periods/:id/reopen`, `GET /periods`. Overlapping ranges are rejected on create. The `JournalService.assertOpen(entryDate)` hook gates every post — anything routed through `JournalService.post()` honours the lock automatically.
+  - **Commitment settlement**: Dr account / Cr `Deferred Cash Receivables`.
+- **Source-of-truth status** — the journals are a **parallel ledger** today: postings happen on every write, but the four operational financial statements still derive from operational tables. `GET /reports/trial-balance`, `/income-statement-from-journals`, and `/balance-sheet-from-journals` derive from `journal_lines` and provide the parity check. The read-side flip ships once a daily reconciliation proves journals match operational totals over a closing cycle.
+- **Reversal** — `POST /sales/:id/reverse`, `/purchases/:id/reverse`, `/payments/:id/reverse`, `/fund-transfers/:id/reverse`. Each posts a balancing journal entry (signs flipped, linked by `reverses_journal_entry_id`, idempotent on that link), books an inverse stock movement where applicable (tagged `SALE_REVERSAL` / `PURCHASE_REVERSAL`), walks back serial allocation state, and marks the original row `reversedAt` / `reversedBy` / `reversalReason`. Original rows stay visible. Idempotent on `reversedAt`. Reason text required. (Sale reversal restores `costedQty` but not `avgCost`.)
+- **Period locking** — `accounting_periods` with statuses `OPEN`, `SOFT_CLOSED` (posts allowed, UI warns), `HARD_CLOSED` (posts rejected). Endpoints `POST /periods`, `POST /periods/:id/{soft-close,hard-close,reopen}`, `GET /periods`. Overlapping ranges are rejected on create; a date with no covering period is implicitly OPEN (fresh installs aren't blocked). `JournalService.post()` calls `PeriodsService.assertOpen(entryDate)` so anything posting through it honours the lock automatically.
 - **Read-only journal browser** — `GET /journals?from=…&to=…&limit=…` lists journal entries newest-first with their lines; `GET /journals/:id` returns one entry with full detail.
 
 ### 13. UX / UI
-- **Branded** — "Hassan Electronics · Home Appliances". The HE monogram (source: `erp-frontend/logo.jpeg`) is the application icon — browser favicon, Windows Start Menu / Taskbar / Explorer thumbnail. [scripts/make-icons.ps1](scripts/make-icons.ps1) chroma-keys out the black backdrop and emits the transparent PNG set + a multi-resolution Windows `.ico`. The logo is rendered **only** on the Sign in and Request access screens (transparent, no chip backdrop). The in-app chrome shows the wordmark, not the logo.
-- **Light & Dark theme** — toggle in the topbar; preference persisted in `localStorage` under `hassan-theme`. Initial theme honours `prefers-color-scheme`. No flash on load (theme bootstrap script in `index.html` runs before React). A theme toggle also sits in the top-right of the login card so users can flip themes before signing in.
-- **Flat Windows 10 design** — [tokens.css](erp-frontend/src/styles/tokens.css) + [app.css](erp-frontend/src/styles/app.css) hold every variable. Solid surfaces, sharp 90° corners (zero border-radius), 1px borders, no glass / blur / aurora / glow / animation. Lightweight `color` / `background` / `border` transitions only. `content-visibility: auto` on long tables. Built for low-end hardware.
-- **Fonts** — Segoe UI Variable / Segoe UI system stack for text; Cascadia Code / Consolas for numbers, voucher refs, SKUs. No web fonts — system stack only.
-- **Coloured sidebar icons** — every nav item gets a tinted square chip in its own `--nav-c` token. Each of the 14 sidebar entries owns a distinct Fluent-palette hue so they're recognisable at a glance: Dashboard blue, POS red, Cash Book forest-green, Customer teal, Sales magenta, Supplier burnt-orange, Purchase lavender, Item sky-blue, Stock moss-green, Employee indigo, Account amber, Users cyan, Reports deep-purple, System grey. Active item paints a 3px accent strip on the left edge of the row.
-- **Sticky topbar** — 44 px tall, solid surface. Global search input on the left, login bell + user chip + theme toggle on the right. Hamburger appears on the left ≤ 860 px to open the off-canvas sidebar.
-- **Collapsible sidebar rail** — the brand chip at the top of the sidebar doubles as the rail toggle: click it to collapse the desktop sidebar to a 56 px icon-only rail; click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). Disabled on mobile (≤ 860 px), where the off-canvas drawer pattern is used.
-- **Responsive** — sidebar becomes a fixed off-canvas drawer ≤ 860 px; grids collapse, tables get horizontal scroll, POS stacks vertically, cart rows reflow.
-- **Status chips** — semantic-color filled rectangles. Used for payment states, low-stock badges, session status, sync-queue status.
-- **Unsaved-changes guard** — every CRUD form (items, categories, brands, customers, suppliers, stores, accounts, employees, users, vouchers, stock transfers, fund transfers, purchase orders, sale/purchase returns, damaged goods, stock adjustments, cash-register sessions, employee payments, incentive targets / awards / rules, POS new-customer modal, etc.) is tracked by a shared [`useUnsavedChangesPrompt` hook](erp-frontend/src/hooks/useUnsavedChangesPrompt.js). The hook diffs the live form against its initial snapshot; when it's dirty it (a) attaches a capture-phase `click` listener to `document` that intercepts any `<a href="#/…">` (sidebar NavLinks, hub-tab links) before React Router sees it, pops a confirm dialog, and only lets the navigation through if the user agrees, and (b) wires `beforeunload` so closing the tab / refreshing the window also asks. Saving / Cancel both clear the dirty flag first, so the prompt never fires on a legitimate completion. The click-interceptor approach was chosen over React Router's `useBlocker` because the app uses the declarative `<HashRouter>` (not a data router), and `useBlocker` only works with `createHashRouter` + `RouterProvider`. No more retyping a half-filled item form because you brushed the Dashboard link with the touchpad.
-- **Seamless title bar (Electron)** — the in-app `.topbar` and the sidebar header (`.brand`) share the exact same background as the Windows-drawn min/max/close overlay (`#fafafa` light, `#333333` dark, both pinned to `--surface-elev` in [tokens.css](erp-frontend/src/styles/tokens.css)). No 1 px border lines anywhere on the top 44 px band — the Windows overlay is opaque and sits on top of the topbar, so any border would appear truncated at the overlay seam. Visual separation from the page content below is supplied by the `--bg` vs `--surface-elev` colour contrast, not a divider line.
-- **Accent colour — hardcoded Windows blue (`#0078d4`).** Every accent surface (primary buttons, hub-tab underline, active sidebar strip, focus rings, the Adjusted Net Income row on the Income Statement, etc.) resolves through `var(--primary)` / `var(--info)` in [tokens.css](erp-frontend/src/styles/tokens.css). The palette ships fixed shades: `--primary-hover` (`#006abb`, 12% darker), `--primary-soft` (`rgba(0,120,212,0.18)` for chip fills), `--accent-pressed` (`#005a9f`, 25% darker), `--primary-fg` (`#ffffff`). The accent is not user-configurable — keeping it fixed avoids an OS-accent bridge, a Settings page, a boot-time shade-derivation script, and the colour-format edge cases that come with reading the OS accent on Windows vs macOS.
+- **Branded** — "Hassan Electronics · Home Appliances". The HE monogram (gold "H" + blue "E", house roof + spark; source: `erp-frontend/logo.png`, an already-transparent PNG) is the application icon — browser favicon, Windows Start Menu / Taskbar / Explorer thumbnail, and electron-builder app/installer icon. [scripts/make-icons.ps1](scripts/make-icons.ps1) uses the PNG source as-is (no chroma-key — that step only applied to the legacy `logo.jpeg` black backdrop) and emits the PNG set (192 / 512 / 1024) + a multi-resolution Windows `.ico` (16–256) into `public/` and `erp-desktop/build-resources/icon.ico`. The logo is rendered **only** on the Sign in and Request access screens (transparent, no chip backdrop). The in-app chrome shows the wordmark, not the logo.
+- **Light & Dark theme** — toggle in the topbar; preference persisted in `localStorage` under `hassan-theme`. Initial theme honours `prefers-color-scheme`. No flash on load (an external `theme-bootstrap.js` runs in `<head>` before React — extracted from inline so the strict `script-src 'self'` CSP holds). A theme toggle also sits in the top-right of the login card.
+- **Flat Windows 10 design** — [tokens.css](erp-frontend/src/styles/tokens.css) + [app.css](erp-frontend/src/styles/app.css) hold the variables (with [App.css](erp-frontend/src/App.css) carrying legacy + print/modal/login rules; tokens.css loads last and wins on shared names). Solid surfaces, sharp 90° corners (zero border-radius), 1px borders, no glass / blur / aurora / glow / animation. Lightweight `color` / `background` / `border` transitions only. `content-visibility: auto` on long tables. Built for low-end hardware.
+- **Fonts** — Segoe UI Variable / Segoe UI system stack for text; Cascadia Code / Consolas for numbers, voucher refs, SKUs. (`public/index.html` still links Google Fonts as a leftover, but the CSS token stack is system-only.)
+- **Coloured sidebar icons** — every nav item gets a tinted square chip in its own `--nav-c` token. The sidebar has **13 entries** (POS Terminal was removed when Sales Voucher became the default Sales tab; `/pos` is URL-reachable): Dashboard (blue), Cash Book (forest-green), Customer (teal), Sales (magenta), Supplier (burnt-orange), Purchase (lavender), Item (sky-blue), Stock (moss-green), Employee (indigo), Account (amber), Users (cyan), Reports (deep-purple), System (grey). Active item paints a 3px accent strip on the left edge.
+- **Global search** — topbar search lazy-loads customers / suppliers / employees / accounts / items on first focus and routes hits to the matching ledger / catalogue page. Auto-generated codes (`CUST-`, `SUPP-`, `EMP-`, `ACC-`) make code-search reliable.
+- **Sticky topbar** — 44 px tall, solid surface. Global search on the left; Sync button, login bell (superuser), user chip, theme toggle on the right. Hamburger appears ≤ 860 px to open the off-canvas sidebar.
+- **Collapsible sidebar rail** — the brand chip at the top of the sidebar doubles as the rail toggle: click it to collapse the desktop sidebar to a 56 px icon-only rail; click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). On mobile (≤ 860 px) the off-canvas drawer pattern is used instead.
+- **Hand-rolled SVG charts** — `MiniCharts` (StackedBar, Donut, Bullet, HorizontalBars, FunnelStages, MiniLine) — no charting library, flat Win10 aesthetic, fixed pixel heights to reserve layout.
+- **Status chips** — semantic-color filled rectangles for payment states, low-stock badges, session status, sync-queue status, warranty status.
+- **WhatsApp share** — a "Send on WhatsApp" button on the sales invoice, booking receipt, warranty lookup cards, and customer ledger (balance reminder). It opens a free `wa.me` deep link (WhatsApp Web/Desktop on a PC, the app on mobile) with the customer's number and a prefilled text message — no backend, no API token, no per-message cost. Phone numbers are normalised to international form for `wa.me` ([`utils/whatsapp.js`](erp-frontend/src/utils/whatsapp.js)); a missing number opens the contact picker instead. The printed PDF (Print → Save as PDF in the browser dialog) is attached manually after the chat opens — `wa.me` can only carry text.
+- **Unsaved-changes guard** — every CRUD form (items, categories, brands, customers, suppliers, stores, accounts, employees, users, vouchers, stock transfers, fund transfers, purchase orders, sale/purchase returns, damaged goods, stock adjustments, cash-register sessions, employee payments, incentive targets / awards / rules, POS new-customer modal, etc.) is tracked by a shared [`useUnsavedChangesPrompt` hook](erp-frontend/src/hooks/useUnsavedChangesPrompt.js). The hook diffs the live form against its initial snapshot; when dirty it (a) attaches a capture-phase `click` listener that intercepts any `<a href="#/…">` before React Router sees it, pops a confirm dialog, and only lets the navigation through if the user agrees, and (b) wires `beforeunload` for tab close / refresh. The click-interceptor approach was chosen over React Router's `useBlocker` because the app uses the declarative `<HashRouter>` (not a data router), where `useBlocker` is unavailable.
+- **Seamless title bar (Electron)** — the in-app `.topbar` and the sidebar header (`.brand`) share the exact same background as the Windows-drawn min/max/close overlay (`#fafafa` light, `#333333` dark, both pinned to `--surface-elev` in tokens.css). No 1 px border lines on the top 44 px band — the opaque overlay sits on top of the topbar, so any border would appear truncated at the seam. Separation from page content comes from the `--bg` vs `--surface-elev` colour contrast.
+- **Accent colour — hardcoded Windows blue (`#0078d4`).** Every accent surface resolves through `var(--primary)` / `var(--info)`. Not user-configurable — keeping it fixed avoids an OS-accent bridge, a Settings page, a boot-time shade-derivation script, and cross-platform colour-format edge cases.
+
+---
+
+## CSV import & data migration
+
+Every master-data list has an **Import CSV** button (next to the CSV / PDF export). Use it to bulk-load records exported from your previous software. The dialog also has a **Download blank template** button that writes a `.csv` with exactly the right header row plus one example line — edit that file and re-upload.
+
+**How it works**
+- The first CSV row is the **header**; column names must match the tables below (case-sensitive, exactly as written). Extra columns are ignored; missing optional columns fall back to the field default.
+- Each data row becomes one record. The file is parsed in the browser and posted to `POST /api/<entity>/import`, which maps every row onto the same Create DTO the on-screen form uses and runs the **same validation**.
+- **Per-row isolation** — a bad row never aborts the import. The result dialog shows how many rows imported and lists each failed row by its CSV line number (row 1 = header, so data starts at line 2) with the reason, so you can fix the spreadsheet and re-upload.
+- **Booleans** accept `true`/`false`, `yes`/`no`, `1`/`0` (blank = the column default). **Numbers** may include thousands separators. **Dates** use `YYYY-MM-DD`.
+- **Auto-generated codes** (`CUST-…`, `SUPP-…`, `ACC-…`, `EMP-…`) can be left blank — they're assigned on insert. Provide a `code` only to preserve your old identifiers.
+- **Relations are referenced by name, not by ID.** Import in dependency order: **Brands** and **Categories** *before* Items; parent categories *above* their children in the Categories file; and **Items + Suppliers + Stores** *before* Purchase Bills.
+- The import **creates** rows; it does not update or de-duplicate existing ones. Re-running a file inserts the rows again (a duplicate SKU/barcode/category-code is rejected per-row).
+
+Legend: **R** = required · cells left blank use the default.
+
+### `customers` → Import on Customer hub → Info (or Master Data → Customers)
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `code` | | text | Blank → auto `CUST-000001`. Set to keep your old code. |
+| `name` | **R** | text | |
+| `phone` | | text | |
+| `email` | | email | Must be a valid email if present. |
+| `address` | | text | |
+| `openingBalance` | | number ≥ 0 | Positive = customer owes the shop. |
+| `creditLimit` | | number ≥ 0 | Rupee ceiling for credit sales. |
+| `creditEnabled` | | boolean | Master switch for credit; default `false`. |
+| `isActive` | | boolean | Default `true`. |
+
+### `suppliers` → Supplier hub → Info
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `code` | | text | Blank → auto `SUPP-000001`. |
+| `name` | **R** | text | |
+| `phone` | | text | |
+| `email` | | email | Valid email if present. |
+| `address` | | text | |
+| `openingBalance` | | number ≥ 0 | Positive = shop owes the supplier. |
+| `isActive` | | boolean | Default `true`. |
+
+### `brands` → Item hub → (Brands panel) / Supplier hub → Brands
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `name` | **R** | text | |
+| `description` | | text | |
+| `isActive` | | boolean | Default `true`. |
+
+### `categories` → Item hub → Categories
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `name` | **R** | text | |
+| `code` | | text ≤ 8, `A–Z`/`0–9` | Uppercased; used in local serials `LOCAL-<code>-<year>-<seq>`. Must be unique. |
+| `description` | | text | |
+| `parent` | | category **name** | Parent category. **List the parent on an earlier line** than its children, or create it first. |
+| `isActive` | | boolean | Default `true`. |
+
+### `items` → Item hub → Catalogue
+
+Import **Brands** and **Categories** first — items reference them by name.
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `modelNo` | * | text | Manufacturer model number; used as the display name. |
+| `name` | * | text | Falls back to `modelNo`. **One of `modelNo`/`name` is required.** |
+| `sku` | | text | Blank → auto-derived from `modelNo` (suffixed `-2`, `-3` on collision). Unique. |
+| `barcode` | | text | Unique if present. |
+| `brand` | | brand **name** | Must already exist. |
+| `categories` | | category **names** | One or more, separated by `;` (e.g. `Refrigerators; Inverter`). Each must already exist. |
+| `purchasePrice` | | number ≥ 0 | UI-default reference price. |
+| `salePrice` | | number ≥ 0 | |
+| `unit` | | text | Default `pcs`. |
+| `minStockLevel` | | whole number ≥ 0 | Low-stock threshold. |
+| `tracksSerials` | | boolean | Default `true`. Off for bulk accessories. |
+| `serialRequiredOnSale` | | boolean | Default `true`. |
+| `hasWarranty` | | boolean | Default `true`. |
+| `warrantyType` | | `COMPANY` / `SHOP` / `CHECKING_ONLY` / `NONE` | Default `COMPANY`. |
+| `warrantyDays` | | whole number | Warranty length in **days** (365 = 1 year). |
+| `isInternalGenerated` | | boolean | Local auto-serial items (unbranded). Default `false`. |
+| `isActive` | | boolean | Default `true`. |
+
+### `stores` → Stock hub → Stores
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `name` | **R** | text | |
+| `location` | | text | |
+| `isActive` | | boolean | Default `true`. |
+
+### `accounts` → Account hub → Info
+
+Only the five **user-facing** account flavours can be imported. The seven system accounts and eight control nodes are seeded automatically on boot — don't put them in the CSV.
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `code` | | text | Blank → auto `ACC-000001`. |
+| `name` | **R** | text | |
+| `type` | **R** | `CASH` / `BANK` / `WALLET` / `CAPITAL` / `CREDIT` | Uppercased. |
+| `bank` | | text | Bank name (for `BANK` accounts). |
+| `accountNumber` | | text | |
+| `openingBalance` | | number | |
+| `isActive` | | boolean | Default `true`. |
+
+### `employees` → Employee hub → Info
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `code` | | text | Blank → auto `EMP-000001`. |
+| `name` | **R** | text | |
+| `role` | | text | e.g. Cashier, Salesman. |
+| `phone` | | text | |
+| `email` | | text | |
+| `address` | | text | |
+| `monthlySalary` | | number ≥ 0 | |
+| `openingBalance` | | number | Positive = shop owes the employee. |
+| `joinedAt` | | date `YYYY-MM-DD` | |
+| `salaryDay` | | whole number 1–31 | Day of month for auto-accrual; blank = no auto-accrual. |
+| `firstSalaryInAdvance` | | boolean | Accrue the joining month too. Default `false`. |
+| `notes` | | text | |
+| `isActive` | | boolean | Default `true`. |
+
+### `purchases` (opening stock via bills) → Purchase hub → Bills
+
+This is **how you load opening stock.** Items on their own carry no quantity — stock only exists once a purchase bill books an IN movement (which also rolls up weighted-average cost and records the supplier payable). Rather than hand-entering a bill per item, import a bills CSV: **one row per line item**.
+
+- Rows that share a non-blank `billNo` collapse into **one multi-line bill**. The bill's header fields (`supplier`, `store`, `discount`, `paidAmount`, `paymentMethod`, `notes`) are read from that bill's **first row**.
+- A **blank `billNo`** makes the row its own single-line bill with an auto `BILL-…` number.
+- Each bill is created exactly like a hand-entered one: stock IN + weighted-average cost roll-up + optional serial intake + a balanced journal entry. Failures are isolated **per bill**.
+- Import **Items, Suppliers, and Stores first** — they're referenced by name.
+- Imported bills are dated **now** (the bill has no historical-date field). That's fine for opening stock; the stock quantity and cost are what matter.
+- To split a bill's goods across branches, put a different `store` on individual lines (the header `store` is the default). Move stock between stores afterwards via **Stock → Transfers**.
+
+| Column | R | Type / values | Notes |
+|---|---|---|---|
+| `billNo` | | text | Groups rows into one bill. Blank → its own auto `BILL-…`. Must be unique across existing bills. |
+| `supplier` | | supplier **name** (or code) | The distributor; blank = no supplier (cash purchase). |
+| `item` | **R** | item **SKU / barcode / model no / name** | Must already exist. |
+| `store` | | store **name** | Where this line's stock lands. Per line; falls back to the bill header's store. |
+| `quantity` | **R** | whole number ≥ 1 | Units received. |
+| `unitPrice` | **R** | number ≥ 0 | Purchase **cost** per unit (feeds weighted-average cost). |
+| `serials` | | text | Optional manufacturer serials for serialised items, separated by `;` (or newlines). Can be left blank and captured later at POS. |
+| `discount` | | number ≥ 0 | Bill-level discount (read from the bill's first row). |
+| `paidAmount` | | number ≥ 0 | Amount paid at bill time; the remainder becomes a supplier payable. |
+| `paymentMethod` | | text | `CASH` / `BANK` / … (label only; the journal credit defaults to Cash on Hand). |
+| `notes` | | text | |
+
+> The column lists above are the single source of truth, mirrored in code at [`erp-frontend/src/utils/importSchemas.js`](erp-frontend/src/utils/importSchemas.js) (UI templates + hints) and the per-module `importRows()` mappers in `erp-backend/src/modules/<entity>/<entity>.service.ts` (purchase bills: [`purchases.service.ts`](erp-backend/src/modules/purchases/purchases.service.ts)). Keep all three in lockstep when a column changes.
 
 ---
 
@@ -209,13 +390,13 @@ A real cashier's day book.
 
 | Layer | Tech |
 |---|---|
-| Backend | NestJS 11 (TypeScript), TypeORM 0.3, class-validator, `@nestjs/schedule` |
-| Database | PostgreSQL via Supabase Session pooler **or** local SQLite (`better-sqlite3`) — same code, switched by env |
-| Frontend | React 19 + HashRouter + axios + CRA build system |
+| Backend | NestJS 11 (TypeScript, target ES2023), TypeORM 0.3.29, class-validator 0.15, `@nestjs/schedule` 6, helmet 8, axios 1.16 |
+| Database | PostgreSQL via Supabase Session pooler **or** local SQLite (`better-sqlite3` 12.9) — same code, switched by env |
+| Frontend | React 19 + HashRouter (`react-router-dom` 7) + axios + CRA build system |
 | Theming | CSS custom properties driven by `data-theme="light"|"dark"` on `<html>` |
 | Desktop | Electron 40 + electron-builder 25 (NSIS / DMG / AppImage targets) |
-| Native | `better-sqlite3` rebuilt against Electron's Node ABI by `@electron/rebuild` during packaging |
-| Testing | Jest with an in-memory SQLite TypeORM data source per spec |
+| Native | `better-sqlite3` rebuilt against Electron's Node ABI by `prebuild-install` / `@electron/rebuild` during packaging |
+| Testing | Jest 30 + ts-jest with an in-memory SQLite TypeORM data source per spec |
 
 ---
 
@@ -227,13 +408,14 @@ A real cashier's day book.
   ┌────────────────────────────────────┐        │  (Session pooler)       │
   │ Electron wrapper                   │        └──────────▲──────────────┘
   │   ├─ NestJS backend (port 3001)    │                   │ sync/push
-  │   │   ├─ TypeORM → SQLite          │                   │ (idempotent
-  │   │   │   <userData>/erp.sqlite    │                   │  by event.id)
-  │   │   ├─ OutboxModule              │                   │
+  │   │   ├─ TypeORM → SQLite          │                   │ (HMAC-signed,
+  │   │   │   <userData>/erp.sqlite    │                   │  idempotent
+  │   │   ├─ OutboxModule              │                   │  by event.id)
   │   │   ├─ SyncModule (manual flush)─┼───────────────────┘ ▲
-  │   │   ├─ ReportsModule (read-only) │      Sync button in │
-  │   │   ├─ AuditSubscriber           │      topbar triggers│
-  │   │   └─ ErrorLogFilter            │      POST /sync/flush
+  │   │   ├─ Journals/PeriodsModule    │      Sync button in │
+  │   │   ├─ ReportsModule (read-only) │      topbar triggers│
+  │   │   ├─ AuditSubscriber           │      POST /sync/flush
+  │   │   └─ ErrorLogFilter            │
   │   │
   │   └─ React build via app://localhost│
   │       (custom protocol; HashRouter) │
@@ -245,11 +427,13 @@ A real cashier's day book.
               │   ├─ TypeORM → Supabase        │
               │   │   (DATABASE_URL set)       │
               │   └─ POST /api/sync/push       │
-              │       SyncModule receiver      │
+              │       SyncSignatureGuard (HMAC)│
               └────────────────────────────────┘
 ```
 
-The backend codebase is the **same** in both places — it switches between SQLite and Postgres based on whether `DATABASE_URL` is set. The cloud-side backend additionally receives sync events; the local-side backend additionally pushes its outbox upstream.
+The backend codebase is the **same** in both places — it switches between SQLite and Postgres based on whether `DATABASE_URL` is set. The cloud-side backend additionally receives sync events (HMAC-authed, idempotent by event id); the local-side backend additionally pushes its outbox upstream on demand.
+
+Key cross-module wiring: `OutboxService` is the only shared dependency between the sales / purchases / POS producers and the sync worker (so `SalesModule` never imports `SyncModule` — that would be circular). `SequenceModule`, `AccountsModule`, `JournalsModule`, `PeriodsModule`, `ItemSerialsModule`, and `UsersModule` are `@Global()` so their services inject anywhere without re-import.
 
 ---
 
@@ -258,66 +442,56 @@ The backend codebase is the **same** in both places — it switches between SQLi
 ```
 erp-backend/
 ├─ src/
-│  ├─ main.ts                 # NestJS bootstrap; listens on PORT (3001)
-│  ├─ app.module.ts           # TypeORM datasource + module wiring; SQLite ↔ Postgres switch
-│  ├─ common/                 # shared entities (BaseEntity, Setting), delete-guard, pagination
-│  ├─ modules/
-│  │  ├─ accounts/            # Cash / Bank / Wallet / Capital / Credit
-│  │  ├─ attendance/
-│  │  ├─ audit-logs/          # AuditSubscriber → audit_logs
-│  │  ├─ backup/              # daily snapshot + restore
-│  │  ├─ brands/
-│  │  ├─ cash-register/       # cash entries + day sessions
-│  │  ├─ categories/          # self-referencing tree
-│  │  ├─ customers/
-│  │  ├─ damaged-goods/
-│  │  ├─ employee-incentives/ # rules + computed earnings
-│  │  ├─ employee-transactions/
-│  │  ├─ employees/           # roster + salary accrual cron
-│  │  ├─ error-logs/          # global exception filter → error_logs
-│  │  ├─ fund-transfers/
-│  │  ├─ incentives/          # supplier/brand targets + awards
-│  │  ├─ items/               # catalogue + categories M2M
-│  │  ├─ outbox/              # local sync queue
-│  │  ├─ payments/            # IN (receipts) + OUT (payments)
-│  │  ├─ pos/                 # sessions + cart + checkout
-│  │  ├─ purchase-orders/
-│  │  ├─ purchases/
-│  │  ├─ reports/             # ledgers + 4 financial statements
-│  │  ├─ returns/             # sale-returns + purchase-returns
-│  │  ├─ sales/               # invoice + lines; transactional stock OUT
-│  │  ├─ stock/               # on-hand summary, movements, reason-driven adjust
-│  │  ├─ stock-transfers/     # inter-store transfers
-│  │  ├─ stores/
-│  │  ├─ suppliers/
-│  │  ├─ sync/                # manual push (POST /sync/flush) + /sync/push receiver (cloud side)
-│  │  └─ users/               # auth, users CRUD, access requests, login events
-│  └─ testing/test-db.ts      # in-memory TypeORM helper for spec files
+│  ├─ main.ts                 # NestJS bootstrap; helmet/CSP, scoped body limits, CORS allow-list,
+│  │                          # global ValidationPipe + ErrorLogFilter, migrations-on-boot
+│  ├─ app.module.ts           # TypeORM datasource + 36 feature modules; SQLite ↔ Postgres switch
+│  ├─ app.controller.ts       # GET /api/health (@Public)
+│  ├─ data-source.ts          # standalone DataSource for the TypeORM migration CLI
+│  ├─ seed.ts                 # stress-test data seeder (npm run seed)
+│  ├─ common/
+│  │  ├─ entities/            # BaseEntity (abstract), Setting (key/value)
+│  │  ├─ delete-guard.ts      # FK-violation → friendly 409
+│  │  └─ sqlite-checkpoint.service.ts  # WAL checkpoint on shutdown
+│  ├─ testing/test-db.ts      # in-memory TypeORM helper for spec files
+│  └─ modules/                # 36 domains:
+│     accounts/ attendance/ audit-logs/ backup/ brands/ cash-register/
+│     categories/ customers/ damaged-goods/ deliveries/ employee-incentives/
+│     employee-transactions/ employees/ error-logs/ fund-transfers/ incentives/
+│     item-serials/ items/ journals/ outbox/ payments/ periods/ pos/
+│     purchase-orders/ purchases/ reports/ returns/ sales/ sequences/
+│     service-tickets/ stock/ stock-transfers/ stores/ suppliers/ sync/ users/
 
 erp-frontend/
 ├─ logo.jpeg                  # source brand mark (HE monogram on black)
 ├─ public/
-│  ├─ index.html              # theme bootstrap before React renders
+│  ├─ index.html              # CSP meta + theme bootstrap before React renders
+│  ├─ theme-bootstrap.js      # applies saved/preferred theme pre-render (CSP-safe, external)
 │  ├─ manifest.json           # PWA name + icon set
 │  ├─ favicon.ico             # generated by scripts/make-icons.ps1
 │  └─ logo192/512/1024.png    # generated; transparent
 ├─ src/
-│  ├─ api/client.js           # axios instance, baseURL resolver, tiny GET cache
-│  ├─ auth/AuthContext.js     # token + user, auto /auth/me on boot
-│  ├─ components/             # Layout, Brand, Icon, ThemeToggle, HubFrame, etc.
+│  ├─ api/client.js           # axios instance, baseURL resolver, tiny GET cache + write-invalidation
+│  ├─ auth/{AuthContext,RequireSuperuser}.js
+│  ├─ components/             # Layout, Brand, Icon, Logo, ThemeToggle, HubFrame, SyncButton,
+│  │                          # GlobalSearch, CrudPage, ReverseAction, ExportButtons, MiniCharts,
+│  │                          # LedgerView, VoucherPage, AgingPanel, master/{Items,Categories}Panel
+│  ├─ hooks/                  # useResource, useUnsavedChangesPrompt
 │  ├─ nav/hubs.js             # single source of truth for sidebar + hubs
-│  ├─ pages/                  # Dashboard, POS, Login, Financials, …
-│  ├─ theme/                  # ThemeContext
+│  ├─ pages/                  # Dashboard, POS, SalesVoucher, Financials, print pages, …
+│  ├─ theme/ThemeContext.js
+│  ├─ utils/exporters.js      # CSV (BOM) + print-to-PDF
 │  └─ styles/                 # tokens.css, app.css (flat Windows 10)
 
 erp-desktop/
-├─ src/main.js                # Electron main: spawn backend, load build, title-bar theme
+├─ src/main.js                # Electron main: app:// protocol, splash, spawn backend, title-bar theme
+├─ src/preload.js             # tiny window.erpBridge (setTitleBarTheme) over IPC
 ├─ build-resources/
 │  ├─ icon.ico                # multi-resolution Windows icon
+│  ├─ installer.nsh           # NSIS install/uninstall narrative
 │  └─ config.example.json     # template for <userData>/config.json
 └─ scripts/
-   ├─ prepare-resources.js    # build backend + frontend + stage native deps
-   ├─ rebuild-native.js       # better-sqlite3 Electron-ABI rebuild
+   ├─ prepare-resources.js    # build backend + frontend + stage production-only backend tree
+   ├─ rebuild-native.js       # better-sqlite3 Electron-ABI rebuild (prebuild-install → rebuild)
    └─ postinstall.js          # lenient native rebuild (dev convenience)
 
 scripts/
@@ -328,9 +502,11 @@ scripts/
 
 ## Setup & run
 
+> The three projects (`erp-backend`, `erp-frontend`, `erp-desktop`) are built and run **independently** — each has its own `package.json`. The root `package.json` is a stray minimal manifest, **not** an npm-workspaces monorepo.
+
 ### Prerequisites
 - **Node.js 24+** (Node 22 also fine if you avoid newer syntax in `prepare-resources.js`)
-- (Optional, for Electron packaging) **Visual Studio Build Tools 2022** with "Desktop development with C++" — node-gyp finds it via the registry. Not needed if you stay on the pinned Electron 40 (uses prebuilt better-sqlite3 binaries).
+- (Optional, for Electron packaging) **Visual Studio Build Tools 2022** with "Desktop development with C++". Not needed if you stay on the pinned Electron 40 (uses prebuilt better-sqlite3 binaries).
 
 ### Two-terminal dev
 ```bash
@@ -344,25 +520,25 @@ npm install
 npm start                  # http://localhost:3000
 ```
 
-On first boot the backend seeds a SUPERUSER (`admin` / `Tech@123`). Change the password from `Users → Change Password`.
+On first boot the backend seeds a SUPERUSER (`admin` / `Tech@123`), the chart of accounts (7 system + 8 control), and (on SQLite) the schema via `synchronize: true`. Change the admin password from `Users → Change Password`.
 
 ### Seed stress-test data
 ```bash
 cd erp-backend
-npm run seed                 # heavy: ~400 items, ~5k sales, plus every other module
+npm run seed                 # heavy (default): ~400 items, ~5k sales, plus every other module
 SEED_SCALE=medium npm run seed
 SEED_SCALE=light  npm run seed
 ```
-`src/seed.ts` boots the Nest application context (no HTTP server, so the global `AuthGuard` is bypassed) and drives the **real domain services** — so every generated row is internally consistent: stock movements, double-entry journals, serial bindings, weighted-average cost roll-ups and sequence numbers all come out as they would in production. It always writes to the local **SQLite** file the dev server uses (it blanks `DATABASE_URL` before the app module loads, so it never touches Supabase). It covers master data, items (serialised + model-only), purchases, sales (plain, bill-book voucher with split receipts, and POS), payments, returns, service tickets, deliveries, fund/stock transfers, damaged goods, purchase orders, attendance, employee transactions, incentives, and cash-register sessions — heavy produces ~73k coherent rows. Each write is retried on transient SQLite transaction races and tallied (it prints a per-phase summary plus the on-disk counts it persisted). Runs are additive and safe to repeat.
+`src/seed.ts` boots the Nest application context (no HTTP server, so the global `AuthGuard` is bypassed) and drives the **real domain services** — so every generated row is internally consistent: stock movements, double-entry journals, serial bindings, weighted-average cost roll-ups and sequence numbers all come out as they would in production. It always writes to the local **SQLite** file the dev server uses (it blanks `DATABASE_URL` before the app module loads, so it never touches Supabase). It covers master data, items (serialised + model-only), purchases, sales (plain, bill-book voucher with split receipts, and POS), payments, returns, service tickets, deliveries, fund/stock transfers, damaged goods, purchase orders, attendance, employee transactions, incentives, and cash-register sessions. Each write is retried on transient SQLite transaction races and tallied (it prints a per-phase summary plus the on-disk counts it persisted). Runs are additive and safe to repeat.
 
 Two caveats specific to seeding bulk volume into SQLite:
 - **Stop the dev server first** — SQLite is single-writer; a second process holding the file silently drops the seed's transactional commits.
-- The seeder **detaches the `AuditSubscriber`** for the run. That subscriber fires `audit.record(...)` fire-and-forget on every write; under the seed's tight loop those un-awaited INSERTs interleave with a `dataSource.transaction()` on the shared better-sqlite3 connection and poison it (a second `BEGIN` → `no such savepoint`), rolling the transaction back on close. Detaching it keeps every transaction clean — the trade-off is that seeded rows carry no audit-log entries (synthetic data doesn't need them; the live app keeps its subscriber untouched).
+- The seeder **detaches the `AuditSubscriber`** for the run. That subscriber fires `audit.record(...)` fire-and-forget on every write; under the seed's tight loop those un-awaited INSERTs interleave with a `dataSource.transaction()` on the shared better-sqlite3 connection and poison it (a second `BEGIN` → `no such savepoint`), rolling the transaction back on close. Detaching it keeps every transaction clean — the trade-off is that seeded rows carry no audit-log entries (the live app keeps its subscriber untouched).
 
 ### Production builds
 ```bash
 cd erp-backend && npm run build      # → erp-backend/dist
-cd erp-frontend && npm run build     # → erp-frontend/build (single-page bundle for app://localhost in Electron, or any static host on the web)
+cd erp-frontend && npm run build     # → erp-frontend/build (SPA bundle for app://localhost, or any static host)
 ```
 
 ---
@@ -387,7 +563,7 @@ BACKUP_DIR=              # default erp-backend/backups/; Electron forces <userDa
 
 # HMAC auth for /sync/push — required on BOTH ends when CLOUD_SYNC_URL is set.
 # The local node refuses to push if these are unset; the cloud receiver
-# rejects every request without a valid signature.
+# refuses to start at all without them and rejects every request without a valid signature.
 SHOP_ID=hassan-main      # short identifier; cloud rejects pushes whose X-Shop-Id doesn't match
 SHOP_SYNC_SECRET=        # 32+ random bytes (hex). Generate with:
                          # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -395,19 +571,19 @@ SHOP_SYNC_SECRET=        # 32+ random bytes (hex). Generate with:
 # Migrations on boot. When `true`, the backend applies any pending TypeORM
 # migrations before opening port 3001. The Electron main process sets this
 # automatically for packaged installs; dev (`npm run start:dev`) leaves it
-# unset and relies on `DB_SYNC=true`.
+# unset and relies on `DB_SYNC=true` / SQLite synchronize.
 DB_MIGRATE_ON_BOOT=false
 ```
 
-**Supabase gotchas** — use the **Session pooler** (`pooler.supabase.com:5432`), NOT the Direct connection (free-tier blocks IPv4) and NOT the Transaction pooler on `:6543` (breaks TypeORM prepared statements). The pooler username is `postgres.<project-ref>`, not plain `postgres`. URL-encode special characters in the password (`@` → `%40`).
+**Supabase gotchas** — use the **Session pooler** (`pooler.supabase.com:5432`), NOT the Direct connection (free-tier blocks IPv4) and NOT the Transaction pooler on `:6543` (breaks TypeORM prepared statements). The pooler username is `postgres.<project-ref>`, not plain `postgres` — `app.module.ts` parses `DATABASE_URL` by hand and passes explicit `username`/`password`/`host`/`port` rather than the `url:` option, because some pg/TLS paths split the dotted username and ship only `postgres` (which the pooler rejects). URL-encode special characters in the password (`@` → `%40`).
 
-> ⚠️ **Production warning — `DB_SYNC=true` is dev-only.** The example `.env` above ships with `DB_SYNC=true` because the project does not have TypeORM migrations yet. On Postgres / Supabase this lets TypeORM silently `ALTER` or `DROP` columns whenever an entity diff changes — irrecoverable data loss is one rogue refactor away. Switch `DB_SYNC=false` before the database holds anything you can't reproduce, and run the schema diff through a migration. Adding proper migration tooling (baseline + per-change, auto-applied at Electron startup before the API port opens) is part of the planned hardening pass at the bottom of this README.
+> ⚠️ **Production warning — `DB_SYNC=true` is dev-only.** On Postgres / Supabase this lets TypeORM silently `ALTER` / `DROP` columns whenever an entity diff changes — irrecoverable data loss is one rogue refactor away. The migration CLI exists ([data-source.ts](erp-backend/src/data-source.ts) + `db:migrate*` scripts); to baseline production: `cd erp-backend && npm run db:migrate:generate -- src/migrations/InitialSchema`, commit it, flip `DB_SYNC=false`, set `DB_MIGRATE_ON_BOOT=true`, and ship every later schema change as a migration. Until that baseline is generated, treat `DB_SYNC=true` against a populated Supabase DB as the one-time first-run.
 
 ---
 
 ## Mobile / LAN access
 
-The CRA dev server binds to `0.0.0.0`. From a phone on the same network, visit `http://<your-LAN-IP>:3000` — the API client at [src/api/client.js](erp-frontend/src/api/client.js) resolves the API base URL from `window.location.hostname`, so the page auto-targets `http://<LAN-IP>:3001` instead of the phone's own localhost.
+The CRA dev server binds to `0.0.0.0`. From a phone on the same network, visit `http://<your-LAN-IP>:3000` — the API client at [src/api/client.js](erp-frontend/src/api/client.js) resolves the API base URL from `window.location.hostname`, so the page auto-targets `http://<LAN-IP>:3001` instead of the phone's own localhost. The backend CORS allow-list ([main.ts](erp-backend/src/main.ts)) permits private-network IPv4 origins (10/8, 172.16/12, 192.168/16) plus the exact `app://localhost` / localhost dev origins.
 
 To find your LAN IP on Windows: `ipconfig` → look for an IPv4 address starting with `192.168.…` or `10.0.…`.
 
@@ -419,28 +595,30 @@ The Electron build doesn't need LAN — the renderer loads from the custom `app:
 
 The Electron wrapper produces a fully self-contained NSIS installer. The shop PC needs no prior Node install — the bundle ships:
 
-- The Electron shell (asar)
-- `resources/backend/{dist,node_modules,package.json}` — the NestJS API the shell launches at startup. Native `better-sqlite3` rebuilt against Electron's Node ABI.
-- `resources/frontend/build/` — the React build the shell serves via a custom `app://localhost` protocol (registered in `erp-desktop/src/main.js` with `protocol.handle('app', …)` and an SPA fallback to `index.html`). The renderer is **not** loaded with `file://` — under `file://` Chromium reports `window.location.origin === "null"`, which makes React Router 7 throw "Failed to construct 'URL': Invalid URL" inside `new URL(path, origin)`. `app://localhost` gives the renderer a real origin and the crash disappears.
+- The Electron shell (asar; native `*.node` binaries unpacked).
+- `resources/backend/{dist,node_modules,package.json}` — the NestJS API the shell launches at startup, staged from a **production-only** dependency tree (no Jest/Webpack/TS/ESLint). Native `better-sqlite3` rebuilt against Electron's Node ABI.
+- `resources/frontend/build/` — the React build the shell serves via a custom `app://localhost` protocol (registered in [erp-desktop/src/main.js](erp-desktop/src/main.js) with `protocol.handle('app', …)` and an SPA fallback to `index.html`). The renderer is **not** loaded with `file://` — under `file://` Chromium reports `window.location.origin === "null"`, which makes React Router 7 throw "Failed to construct 'URL': Invalid URL" inside `new URL(path, origin)`. `app://localhost` gives the renderer a real origin and the crash disappears.
+
+The main process holds a **single-instance lock** (a second launch focuses the existing window instead of racing to bind `:3001`), shows a frameless **splash** while the backend starts, reads `<userData>/config.json` on every launch, and spawns the backend as a child process (`ELECTRON_RUN_AS_NODE=1`, mirroring stdout/stderr to `<userData>/backend.log`).
 
 ### Renderer sandboxing
 
-The Electron `BrowserWindow` runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface — just `setTitleBarTheme(theme)` so the Windows-drawn min/max/close overlay can flip light↔dark with the in-app theme. A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out to the OS — it sees the same DOM a regular browser tab would see. The strict Helmet CSP on the backend and the `<meta http-equiv="Content-Security-Policy">` tag in [index.html](erp-frontend/public/index.html) (with `script-src 'self'`) further block dynamic script evaluation in the renderer.
+The Electron `BrowserWindow` runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface — just `setTitleBarTheme(theme)` so the Windows-drawn min/max/close overlay can flip light↔dark with the in-app theme. A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out — it sees the same DOM a regular browser tab would. The strict Helmet CSP on the backend and the `<meta http-equiv="Content-Security-Policy">` tag in [index.html](erp-frontend/public/index.html) (`script-src 'self'`) further block dynamic script evaluation.
 
 ### Window chrome (VS Code-style)
 
-The Electron window deliberately drops the native menu bar (`Menu.setApplicationMenu(null)`) and hides the native title bar (`titleBarStyle: 'hidden'`). Windows still draws the minimize / maximize / close controls in the top-right via `titleBarOverlay` (44 px tall, theme-aware). The in-app `.topbar` becomes the drag region (`-webkit-app-region: drag`), with `no-drag` opt-outs on every interactive child so buttons, the search box, and the user chip still receive clicks. A tiny [erp-desktop/src/preload.js](erp-desktop/src/preload.js) exposes `window.erpBridge.setTitleBarTheme(theme)` so the overlay colours flip light↔dark when the user toggles the theme.
+The window drops the native menu bar (`Menu.setApplicationMenu(null)`) and hides the native title bar (`titleBarStyle: 'hidden'`). Windows still draws minimize / maximize / close in the top-right via `titleBarOverlay` (44 px tall, theme-aware). The in-app `.topbar` becomes the drag region (`-webkit-app-region: drag`), with `no-drag` opt-outs on every interactive child. The preload's `setTitleBarTheme(theme)` flips the overlay colours with the app theme. (Note: there is no OS-accent-colour push — the accent is the fixed Windows blue.)
 
 ### Build the installer
 
 ```bash
 cd erp-desktop
 npm install
-npm run package:win        # → release/Hassan Electronics-Setup-1.0.0.exe   (NSIS installer, ~115 MB)
-                           # → release/Hassan Electronics-Portable-1.0.0.exe (single-file portable, ~115 MB)
+npm run package:win        # → release/Hassan Electronics-Setup-1.0.0.exe     (NSIS installer, ~115 MB)
+                           # → release/Hassan Electronics-Portable-1.0.0.exe  (single-file portable, ~115 MB)
 ```
 
-`package:win` chains `npm run prepackage` (build backend + frontend, stage a production-only backend tree, rebuild native deps for Electron) and `electron-builder --win --x64`. The Windows target produces **both** artifacts in one run — pick whichever matches the install context. On macOS / Linux:
+`package:win` chains `npm run prepackage` (build backend + frontend, stage a production-only backend tree, rebuild native deps for Electron) and `electron-builder --win --x64`. On macOS / Linux:
 
 ```bash
 npm run package:mac        # .dmg (universal arm64 + x64)
@@ -448,19 +626,17 @@ npm run package:linux      # AppImage (x64)
 npm run package            # current platform
 ```
 
-**App identity.** `build.productName` is **"Hassan Electronics"** (just the two words — the longer "ERP" form is gone from every user-facing surface: installer filename, shortcut name, Start Menu entry, Add/Remove Programs label, BrowserWindow title, .exe basename). The `package.json` `description` field is kept short ("Hassan Electronics") so the Windows Task Manager process tree shows a clean label instead of the full marketing blurb that electron-builder otherwise bakes into the .exe's `FileDescription` VersionInfo field. Task Manager groups Electron's 5 sub-processes (main + renderer + 3 utility) under that single label.
+**App identity.** `build.productName` is **"Hassan Electronics"** — used for the installer filename, shortcut, Start Menu entry, Add/Remove Programs label, BrowserWindow title, and `.exe` basename. `appId` is `com.hassanelectronics.erp`.
 
-**NSIS installer:** per-user (no admin needed), `oneClick: false` (user gets the Welcome → License → Install Location → Install flow), `allowToChangeInstallationDirectory: true`, `deleteAppDataOnUninstall: false` (SQLite database and backups under `%APPDATA%\Hassan Electronics` survive an uninstall). Creates Desktop + Start Menu shortcuts named "Hassan Electronics".
+**NSIS installer:** per-user (no admin needed), `oneClick: false` (Welcome → License → Install Location → Install), `allowToChangeInstallationDirectory: true`, `deleteAppDataOnUninstall: false` (the SQLite database and backups under `%APPDATA%\Hassan Electronics` survive an uninstall). Creates Desktop + Start Menu shortcuts named "Hassan Electronics". A custom NSIS include ([installer.nsh](erp-desktop/build-resources/installer.nsh)) keeps the details panel open and prints a per-step install/uninstall narrative (the uninstall narrative notes that SQLite + backups are intentionally preserved).
 
-The installer ships a custom NSIS include ([erp-desktop/build-resources/installer.nsh](erp-desktop/build-resources/installer.nsh)) that adds a per-module narrative to both install and uninstall. `ShowInstDetails show` + `ShowUnInstDetails show` keep the details panel open by default so the user sees lines such as *"[3/6] Installing frontend module (React UI)…"* and *"[4/6] Installing backend module (local NestJS server)…"* without having to click *Show details*. Uninstall shows a matching 5-step narrative noting that SQLite + backups are intentionally preserved. The hooks used are electron-builder's `customHeader`, `customInit`, `customInstall`, `customUnInit`, `customUnInstall`.
+**Portable .exe:** electron-builder's `target: portable` produces a single self-extracting `.exe` — no install, no admin, no Start Menu shortcut. SQLite + backups still land in `%APPDATA%\Hassan Electronics`, so data persists across portable launches and survives a switch between the portable and the installed build on the same machine.
 
-**Portable .exe:** electron-builder's `target: portable` produces a single self-extracting `.exe` that runs on the go — no install, no admin prompt, no Start Menu shortcut. On launch it unpacks itself to `%TEMP%\<app-id>` and starts. SQLite + backups still land in `%APPDATA%\Hassan Electronics`, so data persists across portable launches AND survives a switch between the portable and the installed build on the same machine.
+**Backend launch resilience.** First boot of a fresh SQLite install runs TypeORM `synchronize: true` across all entities and seeds the chart of accounts — slow on low-end hardware. The desktop wrapper polls the backend's `/api/health` for up to **5 minutes** (request timeout 1 s, retry every 500 ms), short-circuits the wait the instant the backend process dies (so you see a real error instead of staring at a timer), and mirrors backend stdout + stderr to `%APPDATA%\Hassan Electronics\backend.log`. Any "Backend did not become ready" / "Backend stopped" dialog points at the log path.
 
-**Backend launch resilience.** First boot of a fresh SQLite install runs TypeORM `synchronize: true` across 41 entities and `AccountsService.onModuleInit` seeds 14 chart-of-accounts rows (8 control + 6 system) — slow on low-end hardware. The desktop wrapper waits up to **90 s** for the backend's `/api/health` to come up (was 15 s — too tight for first boot), short-circuits the wait the instant the backend process dies (so you see a real error instead of staring at a 90-second timer), and mirrors the backend's stdout + stderr to `%APPDATA%\Hassan Electronics\backend.log`. Any "Backend did not become ready in time" / "Backend stopped" dialog now points at the log file path so you can read the actual stack trace.
+**Unsigned.** Windows SmartScreen warns on first run; click *More info → Run anyway*. To suppress, ship a code-signing certificate via electron-builder's `signtoolOptions`.
 
-**Unsigned.** Windows SmartScreen warns on first run; click *More info → Run anyway*. To suppress this, ship a code-signing certificate via electron-builder's `signtoolOptions`.
-
-> **Electron version pin.** `erp-desktop/package.json` pins `electron` to `^40.0.0`. better-sqlite3 v12.10 only publishes Electron prebuilts through ABI `electron-v145` (= Electron 40); newer Electron majors (41+) force a source compile via node-gyp which fails without MSVC Build Tools. If you bump Electron, either wait for a matching better-sqlite3 release or install "Build Tools for Visual Studio 2022" with the **Desktop development with C++** workload.
+> **Electron version pin.** `erp-desktop/package.json` pins `electron` to `^40.0.0`. better-sqlite3 v12.10 only publishes Electron prebuilts through ABI `electron-v145` (= Electron 40); newer majors force a source compile via node-gyp which fails without MSVC Build Tools. If you bump Electron, either wait for a matching better-sqlite3 release or install "Build Tools for Visual Studio 2022" with the **Desktop development with C++** workload.
 
 ### Wire the install to Supabase
 
@@ -470,7 +646,7 @@ After install (per user), drop a `config.json` at:
 - **macOS:** `~/Library/Application Support/Hassan Electronics/config.json`
 - **Linux:** `~/.config/Hassan Electronics/config.json`
 
-(The folder name follows `build.productName` from `erp-desktop/package.json`. Older installs of the same app may still write to `…\erp-desktop\` — copy `config.json` over after the first launch of the renamed build.)
+(The folder name follows `build.productName`. Older installs may still write to `…\erp-desktop\` — copy `config.json` over after the first launch of the renamed build.)
 
 ```json
 {
@@ -479,153 +655,132 @@ After install (per user), drop a `config.json` at:
 }
 ```
 
-- `cloudSyncUrl` set → local node pushes outbox events to your deployed cloud receiver every 30 s. The local SQLite remains authoritative; the cloud is eventually-consistent.
-- `databaseUrl` set → backend skips SQLite and runs **directly** against Supabase (useful for shop branches with reliable internet that want to bypass offline mode).
+- `cloudSyncUrl` set → local node pushes outbox events to your deployed cloud receiver **when the user clicks Sync**. The local SQLite remains authoritative; the cloud is eventually-consistent. (You also need `SHOP_ID` + `SHOP_SYNC_SECRET` configured on both ends.)
+- `databaseUrl` set → backend skips SQLite and runs **directly** against Supabase (for branches with reliable internet that want to bypass offline mode).
 - Both unset → app runs purely offline against local SQLite.
 
-The Electron main process reads `config.json` on every launch and injects the values as env vars into the spawned backend. No re-install needed when the cloud URL changes.
+The Electron main process reads `config.json` on every launch and injects the values as env vars into the spawned backend (`CLOUD_SYNC_URL`, `DATABASE_URL`, plus `DB_SSL`/`DB_SYNC` defaults when a database URL is present). No re-install needed when the cloud URL changes.
 
 ---
 
 ## Backups
 
-The backup is a full JSON snapshot of every business table (sales, purchases, payments, items, stock movements, cash sessions, fund transfers, incentives, outbox / sync queue, …). User tables (`users`, `user_access_requests`, `user_login_events`) are intentionally excluded so a snapshot never leaks credentials.
+The backup is a full JSON snapshot of every business table (sales, purchases, payments, items, stock movements, cash sessions, fund transfers, journals, incentives, outbox / sync queue, …) plus M2M join tables. User/auth tables (`users`, `user_access_requests`, `user_login_events`) and the `backups` table itself are intentionally excluded so a snapshot never leaks credentials, never injects a superuser, and never recurses.
 
-- **Scheduled** — an hourly `@Cron` runs and snapshots if today's scheduled hour has passed and no backup exists for today (default 20:00).
+- **Scheduled** — an hourly `@Cron` snapshots if today's scheduled hour has passed and no backup exists for today (default 20:00, configurable).
 - **Manual snapshot** — `System → Backups → Save backup now` writes a snapshot to disk on the server.
-- **Download snapshot** — `Download snapshot` streams an in-memory snapshot to the browser as a file download. No file persisted server-side (useful for USB-stick copies). A backup is a frozen-in-time copy of the whole business — every customer, supplier price, margin, salary, and owner-capital figure — so every download is recorded against the user, and a planned hardening pass adds SUPERUSER re-auth + IP + SHA-256 capture on top of that.
-- **Restore** — `Restore from file` accepts a JSON snapshot (any size up to 100 MB) and replaces the contents of every business table inside a single TypeORM transaction. Express body limit is bumped to 100 MB in `main.ts` for this.
-- **Storage** — defaults to `erp-backend/backups/` in dev; Electron forces `<userData>/backups` so backups survive uninstalls. Path shown in the Status card.
+- **Download snapshot** — streams an in-memory snapshot to the browser as a file download (no file persisted server-side; superuser-only). A backup is a frozen-in-time copy of the whole business, so downloads are restricted and recorded.
+- **Restore** — `Restore from file` (superuser + one-shot reauth + literal `RESTORE` confirmation) accepts a JSON snapshot up to 100 MB, takes a pre-restore safety snapshot, then wipes and replays every business table inside a single transaction.
+- **Storage** — defaults to `erp-backend/backups/` in dev; Electron forces `<userData>/backups` so backups survive uninstalls. Each row carries a `sha256` for verification.
 
 ---
 
 ## Testing
 
-Backend has 142 Jest tests across 14 spec files covering the high-value services:
+Backend has **157 Jest tests across 14 spec files**, covering the high-value services:
 
 ```bash
-cd erp-backend && npm test            # full suite, ~6 s
-cd erp-backend && npx jest --coverage # coverage report
+cd erp-backend && npm test            # full suite, ~14 s
+cd erp-backend && npx jest --coverage # coverage report (~32 s)
 ```
 
-Tests use an isolated in-memory SQLite TypeORM data source per spec ([src/testing/test-db.ts](erp-backend/src/testing/test-db.ts)) — no Supabase calls, no shared state. Coverage on the tested services: stock 100 %, pos 96 %, categories 93 %, sales 91 %, purchases 91 %, items 90 %, reports 88 %, sync 59 % (cron worker not exercised), outbox 75 %.
+Tests use an isolated in-memory SQLite TypeORM data source per spec ([src/testing/test-db.ts](erp-backend/src/testing/test-db.ts)) — no Supabase calls, no shared state. (The ERROR/WARN lines printed during the run — `SyncService … failed: boom`, `SyncSignatureGuard … rejected`, etc. — are intentional negative-path assertions inside passing tests, not failures.)
 
-**Untested (intentional):** `accounts`, `brands`, `customers`, `suppliers`, `stores`, `payments`, `returns` — thin CRUD wrappers identical in shape to the 93 %-covered `categories.service`.
+Spec files: `app.controller`, `categories.service`, `items.service`, `journals/journal.service`, `periods/periods.service`, `pos.service`, `purchases.service`, `reports.service`, `sales.service`, `sequences/sequence.service`, `stock.service`, `sync/hmac.util`, `sync/sync-signature.guard`, `sync/sync.service`.
+
+Per-service line coverage (real numbers): **stock 100 %**, **sequence 100 %**, **sync-signature.guard 100 %**, **periods 97.7 %**, **hmac.util 96.4 %**, **journal 92.2 %**, **pos 83.8 %**, **categories 83.7 %**, **purchases 74 %**, **items 71.4 %**, **sales 69.8 %**, **reports 54.5 %**, **outbox 47.4 %**, **sync 44.9 %** (push worker not exercised). Project-wide line coverage is ~29 % — most thin CRUD and operational modules are intentionally untested.
+
+**Untested (intentional):** `accounts`, `attendance`, `brands`, `customers`, `suppliers`, `stores`, `payments`, `returns`, `deliveries`, `service-tickets`, `item-serials`, `cash-register`, `fund-transfers`, `incentives`, `employee-incentives`, `purchase-orders`, `stock-transfers`, `damaged-goods`, `employees`, `users` — thin CRUD wrappers or operational modules in the same shape as the covered services.
 
 ---
 
 ## Project conventions
 
-- **Module-per-domain** — every backend domain owns its entities / DTOs / service / controller under `src/modules/`. New domain → new folder. New variant of an existing domain → new tab in the parent hub, not a new module.
-- **TypeORM columns** — snake_case in DB via `name: 'foo_bar'`, camelCase in entity. `.orderBy()` must use the camelCase property name.
-- **Dialect-portable date columns** — use `@Column({ type: Date, ... })` (the `Date` constructor), NOT `@Column({ type: 'timestamp' })` or `@Column({ type: 'datetime' })`. `Date` resolves to `datetime` on SQLite and `timestamp without time zone` on Postgres. The string `'timestamp'` is Postgres-only and crashes better-sqlite3 with `DataTypeNotSupportedError`; `'datetime'` is the reverse trap.
-- **Indexes** — 107 `@Index` decorators across 41 entities target the columns each service actually filters or sorts on. Composite indexes for filter + sort or filter + filter patterns. Same decorators auto-create in both SQLite and Supabase Postgres via `synchronize: true` on next boot.
+- **Module-per-domain** — every backend domain owns its entities / DTOs / service / controller under `src/modules/`. New domain → new folder. New variant of an existing domain → new tab in the parent hub, not a new sidebar entry.
+- **TypeORM columns** — snake_case in DB via `name: 'foo_bar'`, camelCase in entity. `.orderBy()` must use the camelCase property name (`.orderBy('m.createdAt')`, not `'m.created_at'`).
+- **Dialect-portable date columns** — use `@Column({ type: Date, ... })` (the `Date` constructor), NOT `@Column({ type: 'timestamp' })` or `@Column({ type: 'datetime' })`. `Date` resolves to `datetime` on SQLite and `timestamp without time zone` on Postgres. `'timestamp'` is Postgres-only and crashes better-sqlite3 with `DataTypeNotSupportedError`; `'datetime'` is the reverse trap. (`type: 'date'` for date-only string columns is fine on both.)
+- **Indexes** — 110+ `@Index` decorators across the 48 entities target the columns each service actually filters or sorts on. Composite indexes for filter + sort or filter + filter patterns. Same decorators auto-create in both SQLite and Postgres via `synchronize: true` on next boot.
 - **DTO validation** — every Create / Update DTO uses class-validator decorators. The global `ValidationPipe` has `whitelist`, `transform`, and `forbidNonWhitelisted` on — extra fields throw.
-- **Auto-generated voucher numbers** — `INV-NNNNNN`, `BILL-NNNNNN`, `SR-NNNNNN`, `PR-NNNNNN`, `RCT-NNNNNN`, `PMT-NNNNNN`, `TRF-NNNNNN`, `PO-NNNNNN`, `DMG-NNNNNN`, `STK-TRF-NNNNNN`, and master-data codes `CUST-`, `SUPP-`, `EMP-`, `ACC-`, plus employee-transaction prefixes (`SAL-`, `ADV-`, `RBT-`, …). Every prefix routes through `SequenceService.next(prefix, seedFromMax?)` which atomically increments a row in the `sequences` table (`prefix` PK, `nextValue` int). On Postgres the read is `SELECT … FOR UPDATE` to block concurrent allocators; on SQLite the single-writer connection serialises increments. Sequences are seeded on first call from `repo.count()` so a fresh install starts at 1 and an existing one resumes from the next available number. Numbers may have gaps from rolled-back transactions, but two distinct calls never produce the same value.
+- **Auto-generated voucher numbers** — `INV-`, `BILL-`, `SR-`, `PR-`, `RCT-`, `PMT-`, `TRF-`, `PO-`, `DMG-`, `STK-TRF-`, `JE-`, `SVC-`, `DLV-`, and master-data codes `CUST-`, `SUPP-`, `EMP-`, `ACC-`, plus per-type employee-transaction prefixes (`SALA-`, `SAL-`, `ADV-`, `RBT-`, `EXP-`, `INC-`, `ADJ-`). Every prefix routes through `SequenceService.next(prefix, seedFromMax?)`, which atomically increments a row in the `sequences` table (`prefix` PK, `nextValue` int, 6-digit zero-pad). On Postgres the read is `SELECT … FOR UPDATE`; on SQLite the single-writer connection serialises. Seeded on first call from a count callback. Numbers may have gaps from rolled-back transactions, but two distinct calls never collide.
 - **Quick-search bar everywhere** — `CrudPage` exposes `searchKeys={[...]}` so each list page controls which fields it searches over.
-- **Delete = safe** — every master-data delete is wrapped in `deleteOrConflict` ([erp-backend/src/common/delete-guard.ts](erp-backend/src/common/delete-guard.ts)) which catches DB foreign-key violations (Postgres `23503` / SQLite `FOREIGN KEY constraint failed`) and turns them into a friendly 409 telling the user to use Close instead.
+- **Delete = safe** — master-data deletes are wrapped in `deleteOrConflict` ([delete-guard.ts](erp-backend/src/common/delete-guard.ts)) which catches DB foreign-key violations (Postgres `23503` / SQLite `FOREIGN KEY constraint failed`) and turns them into a friendly 409 telling the user to use Close instead. (Categories rely on `onDelete: 'SET NULL'` for their self-ref children and aren't guarded; brands / stores / suppliers / customers / employees / accounts / items are.)
 - **Reports are read-only** — no writes allowed inside `ReportsService` or its controller.
 - **Outbox decouples sales from sync** — `OutboxService` is the only thing both sales / purchases / POS and the sync worker depend on. Do not make `SalesModule` import `SyncModule` (circular).
 - **HashRouter, not BrowserRouter** — required so the SPA fallback inside the `app://` protocol handler works on any sub-route.
-- **Renderer loads through `app://localhost`, never `file://`** — `file://` makes `window.location.origin === "null"` in Chromium, which crashes React Router 7's internal `new URL()` calls with "Failed to construct 'URL': Invalid URL".
+- **Renderer loads through `app://localhost`, never `file://`** — `file://` makes `window.location.origin === "null"` in Chromium, which crashes React Router 7's internal `new URL()` calls.
 - **Sync runs only on the user's command** — the topbar "Sync" button calls `POST /api/sync/flush`. There is no background cron; don't add one back without product agreement.
-- **No native menu bar** — `Menu.setApplicationMenu(null)` in the Electron main is deliberate. Surface new app-level actions inside the React topbar / sidebar instead.
+- **No native menu bar** — `Menu.setApplicationMenu(null)` in the Electron main is deliberate. Surface new app-level actions inside the React topbar / sidebar.
 - **Auth** — opaque server tokens (not JWT), 12-hour sliding window. `AuthGuard` is global; mark public endpoints with `@Public()`.
-- **No DB triggers** — cross-cutting concerns use TypeORM `EntitySubscriber` (already done for audit logs).
-- **No migrations yet** — `synchronize: true` on SQLite, gated by `DB_SYNC=true` on Postgres. Switch to migrations before treating Supabase as production.
+- **No DB triggers** — cross-cutting concerns use a TypeORM `EntitySubscriber` (already done for audit logs).
+- **COGS basis** — always `SaleItem.costAtSaleTime` (a snapshot of `Item.avgCost` at sale time). `Item.purchasePrice` is a UI-default reference only — never a COGS basis.
 - **Profit accounting** — `netIncome` is the trading result; `adjustedNetIncome = netIncome + incentive awards in period`. The Statement of Changes in Equity reconciles against `adjustedNetIncome`.
 
 See [CLAUDE.md](./CLAUDE.md) for the AI-assistant guide with the same conventions and the explicit "don'ts".
 
 ---
 
-## Planned hardening (Phase 4)
+## Roadmap — shipped & out of scope
 
 A directional roadmap, agreed for a single-shop install operated by the owner and one accountant. Items below are **scoped** to a 1-2 person shop — the enterprise patterns common in multi-cashier chains (granular role matrices, MFA, maker-checker chains) are deliberately out of scope; see the bottom of this section.
 
-**Status legend:** ✅ shipped · 🛠 in progress · 🔜 next up · ⏳ deferred (separate session)
+**Status legend:** ✅ shipped · 🔜 next up
 
 ### Security & data protection
 
-- ✅ **HMAC-signed sync** — `SyncSignatureGuard` validates `X-Shop-Id` / `X-Sync-Timestamp` / `X-Sync-Signature` on every `POST /api/sync/push`. Rejects on missing headers, shop-id mismatch, > 5 minute timestamp skew, or signature mismatch (constant-time compared). Local node refuses to push if `SHOP_ID` / `SHOP_SYNC_SECRET` are unset. See [erp-backend/src/modules/sync/sync-signature.guard.ts](erp-backend/src/modules/sync/sync-signature.guard.ts) + [erp-backend/src/modules/sync/hmac.util.ts](erp-backend/src/modules/sync/hmac.util.ts). 18 dedicated specs cover sign/verify and guard rejection cases.
-- ✅ **Body limit scoped** — `main.ts` sets the global Express body limit to `256kb`; `POST /api/backup/restore` gets a route-prefix `json({ limit: '100mb' })` registered before the global parser. body-parser's `req._body` guard makes the second middleware a no-op for the restore path, so the large body is only allowed for that one endpoint.
-- ✅ **Helmet + CORS allow-list** — `app.use(helmet({ contentSecurityPolicy: false }))` ships X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, etc. CORS is restricted to `app://localhost`, `http://localhost:{3000,3001}`, `http://127.0.0.1:{3000,3001}`, and private-network IPv4 LAN origins (10/8, 172.16/12, 192.168/16). All other origins are rejected. CSP is intentionally disabled for now until the inline theme-bootstrap script in `index.html` is extracted to an external file with a nonce — see deferred items.
-- ✅ **Electron sandbox** — `webPreferences` now has `contextIsolation: true` + `nodeIntegration: false` + `sandbox: true`. The renderer's V8 context cannot `require`, touch the filesystem, or shell out. The preload script exposes a tiny `window.erpBridge` IPC surface (currently only `setTitleBarTheme`).
-- ✅ **Sequence-table voucher numbers** — `sequences` table + global `SequenceService.next(prefix, seedFromMax?)` replaces every `count + 1` voucher generation. Postgres uses `SELECT … FOR UPDATE`; SQLite relies on its single-writer guarantee. 13 call sites migrated (`INV`, `BILL`, `SR`, `PR`, `RCT`, `PMT`, `TRF`, `PO`, `DMG`, `STK-TRF`, `CUST`, `SUPP`, `EMP`, `ACC`, plus per-type employee-transaction prefixes).
-- ❌ **At-rest encryption (SQLite + backups) — explicitly out of scope.** For this deployment, confidentiality is the lowest of the C-I-A trio: integrity and availability come first. Encryption would *hurt* availability (lose the key → lose every backup, brick the SQLite file) without addressing any threat that actually exists. The SQLite file lives on the same disk as the encrypted-only-in-name backups; anyone who can read one already has the other. Stays plaintext on purpose.
-- ✅ **Backup-restore hardening (integrity)** — `@SuperuserOnly()` on `/backup/restore`, `/backup/download-now`, and `/backup/:id/download`. `/backup/restore` requires either an `X-Reauth-Token` header (call `POST /auth/reauthenticate` first; one-shot, 60-second TTL) or the legacy `password` body field. This protects against a left-open session accidentally wiping the DB. Download endpoints carry the SUPERUSER guard but **no** reauth gate — they're read-only and confidentiality isn't the threat model. See [erp-backend/src/modules/users/reauth.service.ts](erp-backend/src/modules/users/reauth.service.ts).
-- ✅ **Strict CSP** — extracted the inline theme-bootstrap `<script>` in `public/index.html` to [erp-frontend/public/theme-bootstrap.js](erp-frontend/public/theme-bootstrap.js); added a `<meta http-equiv="Content-Security-Policy">` with `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; …`. Helmet's CSP is enabled on the backend with the same defaults for API responses (defense in depth).
-- ✅ **TypeORM migrations** — new [erp-backend/src/data-source.ts](erp-backend/src/data-source.ts) for the CLI. Scripts `db:migrate`, `db:migrate:revert`, `db:migrate:generate`, `db:migrate:create` in `erp-backend/package.json`. The main process applies pending migrations on launch when `DB_MIGRATE_ON_BOOT=true` (Electron desktop sets it automatically). `DB_SYNC` is unchanged for dev. To baseline production from the current Supabase schema: `cd erp-backend && npm run db:migrate:generate -- src/migrations/InitialSchema`, commit the result, flip `DB_SYNC=false`, and from then on every schema change ships as a migration. Until that baseline is generated, treat `DB_SYNC=true` against a populated Supabase DB as the per-deployment one-time first-run.
+- ✅ **HMAC-signed sync** — `SyncSignatureGuard` validates `X-Shop-Id` / `X-Sync-Timestamp` / `X-Sync-Signature` on every `POST /api/sync/push`. Rejects on missing headers, shop-id mismatch, > 5-minute timestamp skew, or signature mismatch (constant-time). Local node refuses to push if `SHOP_ID` / `SHOP_SYNC_SECRET` are unset; the receiver refuses to start without them. Dedicated specs cover sign/verify and every guard rejection case.
+- ✅ **Body limit scoped** — `main.ts` sets the global Express body limit to `256kb`; `POST /api/backup/restore` gets a route-prefix `json({ limit: '100mb' })` registered first (body-parser's `req._body` guard makes the global parser a no-op for that path).
+- ✅ **Helmet + CSP + CORS allow-list** — Helmet ships a strict CSP for API responses (`default-src 'self'`, `script-src 'self'`, …) plus the standard hardening headers; CORS is restricted to `app://localhost`, the localhost dev ports, and private-network IPv4 LAN origins. The renderer's script-governing CSP is a `<meta>` tag in `index.html` (the theme bootstrap was extracted to an external file so `script-src 'self'` holds).
+- ✅ **Electron sandbox** — `contextIsolation: true` + `nodeIntegration: false` + `sandbox: true`; the renderer can't `require`, touch the filesystem, or shell out. Preload exposes only `window.erpBridge.setTitleBarTheme`.
+- ✅ **Sequence-table voucher numbers** — `sequences` table + global `SequenceService` replaces every `count + 1` generation. Postgres uses `SELECT … FOR UPDATE`; SQLite relies on single-writer.
+- ✅ **Backup-restore hardening (integrity)** — `@SuperuserOnly()` on `/backup/restore`, `/backup/download-now`, `/backup/:id/download`. Restore additionally requires a one-shot `X-Reauth-Token` (from `POST /auth/reauthenticate`, 60-second TTL) or the legacy password — protects against a left-open session wiping the DB. Download endpoints are superuser-gated but un-reauthed (read-only; confidentiality isn't the threat model).
+- ✅ **TypeORM migrations infra** — standalone [data-source.ts](erp-backend/src/data-source.ts) + `db:migrate*` scripts; the main process applies pending migrations on launch when `DB_MIGRATE_ON_BOOT=true` (Electron sets it). Baseline + flip to `DB_SYNC=false` before treating Supabase as production.
+- ✅ **WAL checkpoint on shutdown** — `SqliteCheckpointService` runs `PRAGMA wal_checkpoint(TRUNCATE)` on graceful shutdown (self-disables on Postgres) so the next boot doesn't replay a large WAL after a crash.
+- ❌ **At-rest encryption (SQLite + backups) — explicitly out of scope.** Confidentiality is the lowest of the C-I-A trio for this deployment; encryption would *hurt* availability (lose the key → brick every backup) without addressing any real threat. Plaintext on purpose.
 
 ### Accounting integrity
 
-- ✅ **True double-entry journals (parallel ledger)** — new `journal_entries` + `journal_lines` tables. Every business write — sale, purchase, receipt, payment, fund transfer — routes through `JournalService.post()` in the same TypeORM transaction as the source row. The post is rejected if `SUM(debit) !== SUM(credit)`. Source-of-truth status: the journals are a **parallel ledger** today — postings happen on every write, but the four financial statements still derive from operational tables. A follow-up commit will flip reports to read from `journal_lines` once a daily reconciliation report proves parity. See [erp-backend/src/modules/journals/](erp-backend/src/modules/journals/). 9 dedicated specs cover balance invariants, period gating, and reversal posting.
-- ✅ **Full chart-of-accounts hierarchy** — `accounts` now carries `accountCategory` (ASSET / LIABILITY / EQUITY / INCOME / EXPENSE), `accountSubType` (CURRENT_ASSET / FIXED_ASSET / INVENTORY_ASSET / RECEIVABLE / CURRENT_LIABILITY / LONG_TERM_LIABILITY / PAYABLE / OWNERS_EQUITY / RETAINED_EARNINGS / OPERATING_INCOME / OTHER_INCOME / COGS / OPERATING_EXPENSE / OTHER_EXPENSE), `parentAccountId`, and `isControl`. Seeded on first boot: 8 control nodes (`1000 Assets`, `1100 Current Assets`, `1200 Fixed Assets`, `2000 Liabilities`, `3000 Equity`, `4000 Revenue`, `5000 COGS`, `6000 Operating Expenses`) plus 6 leaf system accounts (`1110 Cash on Hand`, `1140 Accounts Receivable`, `1150 Inventory`, `2100 Accounts Payable`, `4100 Sales Revenue`, `5100 Cost of Goods Sold`). `JournalService.post()` rejects lines whose `accountId` points to a control account. Existing user accounts are auto-classified (Cash/Bank/Wallet → ASSET, Capital → EQUITY, Credit → LIABILITY). System / control accounts cannot be deleted from the API.
-- ✅ **Accounting period locking** — `accounting_periods (name, startDate, endDate, status, closedAt, closedBy, closeReason)`. Status transitions: `OPEN → SOFT_CLOSED → HARD_CLOSED`, plus an explicit `reopen` action. `JournalService.post()` calls `PeriodsService.assertOpen(date)`: SOFT_CLOSED passes (UI shows a warning), HARD_CLOSED rejects. Endpoints `POST /periods`, `POST /periods/:id/{soft-close,hard-close,reopen}`, `GET /periods`. Coverage is "best effort by way of journals" — anything bypassing JournalService bypasses the period check, but every write in scope today posts through it. 9 dedicated specs.
-- ✅ **Reversal workflow (no hard delete on financial data)** — `POST /sales/:id/reverse`, `POST /purchases/:id/reverse`, `POST /payments/:id/reverse`, `POST /fund-transfers/:id/reverse`. Each one (a) finds the original journal entry, (b) posts a balancing reversal via `JournalService.reverse()` linked by `reverses_journal_entry_id`, (c) books an inverse stock movement (IN for a sale reversal, OUT for a purchase reversal, none for payments or transfers), (d) marks the original row `reversedAt` / `reversedBy` / `reversalReason`. Original rows stay visible with the reversal metadata. Idempotent — re-calling on an already-reversed row is a no-op. Reason text is required. 4 dedicated reversal specs in `sales.service.spec.ts`.
+- ✅ **True double-entry journals (parallel ledger)** — `journal_entries` + `journal_lines`. Every business write routes through `JournalService.post()` in the source row's transaction; unbalanced or control-account posts are rejected. Source-of-truth flip to journal-derived statements lands after a closing-cycle reconciliation. Dedicated specs cover balance invariants, period gating, and reversal posting.
+- ✅ **Full chart-of-accounts hierarchy** — `accounts` carries `accountCategory`, `accountSubType`, `parentAccountId`, `isControl`. Seeded on boot: 8 control nodes + 7 leaf system accounts (incl. `1145 Deferred Cash Receivables`). Posts to control accounts are rejected; system/control accounts can't be deleted.
+- ✅ **Accounting period locking** — `accounting_periods` with `OPEN → SOFT_CLOSED → HARD_CLOSED` (+ reopen). `JournalService.post()` calls `assertOpen(date)` — SOFT_CLOSED passes (UI warns), HARD_CLOSED rejects. A date with no covering period is OPEN. Dedicated specs.
+- ✅ **Reversal workflow (no hard delete on financial data)** — `POST /{sales,purchases,payments,fund-transfers}/:id/reverse`. Posts a balancing journal entry linked by `reverses_journal_entry_id`, books inverse stock movements where applicable, walks back serial state, and stamps `reversedAt`/`reversedBy`/`reversalReason`. Idempotent; reason required. Dedicated reversal specs.
 
-### Tax & Pakistan compliance
+### Appliance-specific features (shipped)
 
-- **GST / sales-tax engine** — settings-level `defaultGstRatePercent`, `sellerNtn`, `sellerStrn`, `taxInclusivePricing`. Per-item `gstRatePercent` + `taxCategory` (STANDARD / EXEMPT / ZERO_RATED). Lines carry `subtotal` / `gstRate` / `gstAmount` / `lineTotal`. Journal posting includes `Cr GST Payable` on sales / `Dr GST Input` on purchases.
-- **FBR-compliant tax invoice format** — seller name / STRN / NTN / address, buyer NTN (optional), item-wise breakdown with taxable value + tax amount, tax rate, total tax, grand total, payment mode. Reserve a placeholder for FBR invoice number + QR code.
-- **FBR POS real-time integration** — `fbr-pos-integration` module behind `FBR_POS_INTEGRATION=true`. After checkout, POST the invoice to the FBR POS API; persist FBR invoice number + QR data on the sale row. Failures queue in `fbr_pos_outbox` for retry — the shop never stops selling because the FBR API is down.
-- **Withholding tax on supplier payments** — supplier `withholdingTaxRatePercent` + `filerStatus`. On `PMT-…`, post `Dr A/P` / `Cr Bank` / `Cr WHT Payable`. Monthly WHT report for FBR filing.
+- ✅ **Hybrid serialised + bulk inventory** — `item_serials` with two independent flags `tracksSerials` + `serialRequiredOnSale`, supporting serialised+required (appliances), serialised+optional (gray-market), and bulk (accessories) modes. Serial uniqueness is global. Purchase intake accepts a per-line serial textarea; whatever isn't captured at purchase can be captured at sale.
+- ✅ **Warranty management** — per-item `hasWarranty` + `warrantyType ∈ { COMPANY, SHOP, CHECKING_ONLY, NONE }` + `warrantyDays`. The receipt prints a per-line warranty block; warranty fields **freeze on the serial row at sale time** so a later Item edit doesn't rewrite past promises. Public `GET /api/item-serials/warranty/:serial` returns non-PII data for a counter terminal; a Customer-hub `/warranty-lookup` tab wraps it.
+- ✅ **Model-only warranty (no serial)** — the warranty window is also frozen onto the **sale line** (`sale_items`) for every entry path, so it survives even when no serial exists. `/warranty-lookup` adds Receipt-no / Customer / Model+date resolve modes via `GET /api/sales/warranty/{by-invoice,by-customer,by-model}`.
+- ✅ **Booking-Hold state machine** — `ItemSerial.allocationStatus ∈ { AVAILABLE, BOOKED, DELIVERED }` orthogonal to physical `status`; partial-pay sales hold units BOOKED; Strict-Handover guard blocks DELIVERED while `dueAmount > 0`. See §4.
+- ✅ **Overdue Bookings dashboard** + **Booking Hold receipt** (`/print/booking-receipt/:id`) + **Box Hold Tag** (`/print/box-tag/:id`) + **local serial labels** (`/print/serial-label/:serial`).
+- ✅ **Delivery / dispatch tracking** (six-status) + **service / repair tickets** (seven-status), both with status tallies and funnel charts.
 
-### Appliance-specific features
+### Sales / inventory / reporting (next up)
 
-- ✅ **Hybrid serialised + bulk inventory** — `item_serials (serial UNIQUE, status, purchaseBillNo, purchasedAt, purchasePrice, currentStoreId, saleInvoiceNo, soldAt, soldToCustomerId, warrantyStartAt, warrantyDays, warrantyType, warrantyEndAt)`. Items have two independent flags: `tracksSerials` (capture per-unit serials) and `serialRequiredOnSale` (block POS checkout if missing). Three operating modes:
-  - **Serialised + required** (default) — appliances. Salesman must scan one serial per unit at POS or checkout blocks.
-  - **Serialised + optional** — gray-market imports. Capture the manufacturer serial if available, accept the sale if not.
-  - **Bulk** — accessories, cables, stands. Quantity-only; no serial UI ever shown.
-  Purchase form accepts an optional newline-separated serial textarea per `tracksSerials` line; whatever isn't captured at purchase can still be captured at sale time. Sale returns re-flag the serial as `RETURNED`; sale reversals re-flag every serial bound to the voided invoice.
-- ✅ **Warranty management** — per-item master switch `hasWarranty` + `warrantyType ∈ { COMPANY, SHOP, CHECKING_ONLY, NONE }` + `warrantyDays`. The receipt prints a per-line block:
-  - `hasWarranty=false` → "⚠ NO WARRANTY COVERAGE / SOLD AS-IS"
-  - `warrantyType=CHECKING_ONLY` → "No warranty. Item checked at time of sale."
-  - `warrantyType=NONE` → "No Warranty"
-  - `warrantyType=COMPANY|SHOP` → cover length + per-unit serial + expiry date (serialised), or cover length + expiry date (model-only)
-  Warranty fields freeze on the `item_serials` row at sale time, so a later edit to the Item template doesn't rewrite what was promised. Public `GET /api/item-serials/warranty/:serial` returns only non-PII data (model, status, sold date, expiry, active flag) — safe to expose to walk-in customers via a counter terminal. A Customer-hub tab `/warranty-lookup` wraps the endpoint with a counter-friendly UI.
-- ✅ **Model-only warranty (no serial)** — some appliances ship without a usable serial, so warranty has to ride on the stamped receipt instead of a per-unit record. At sale time the warranty window (`warrantyType`, `warrantyDays`, `warrantyStartAt`, `warrantyEndAt`) is also frozen onto the **sale line** (`sale_items`), for every entry path (POS, bill-book voucher, plain sale) and on the cloud receiver. The window starts on the sale date — a model-only item has no booking-hold mechanic, so the goods leave with the receipt. The `/warranty-lookup` tab gains three extra resolve modes that read this line snapshot via the `GET /api/sales/warranty/{by-invoice/:invoiceNo, by-customer/:customerId, by-model?itemId=&from=&to=}` family: **Receipt no.** (customer brought the stamped receipt), **Customer** (receipt lost — look the buyer up in our DB), and **Model + date** (buyer not in the system). The snapshot is also written for serialised lines as a detach-proof mirror, so the same lookups keep working after a return unbinds a serial.
-- ✅ **Booking-Hold state machine** — `ItemSerial.allocationStatus ∈ { AVAILABLE, BOOKED, DELIVERED }` orthogonal to the physical `status`. Partial-pay sales hold units BOOKED until the balance clears. Strict-handover guard on `DeliveriesService` prevents DELIVERED transitions while `dueAmount > 0`. See §4 Inventory.
-- ✅ **Overdue Bookings dashboard** (Sales hub) — Release-to-Floor cancels stuck bookings and reverts serials to AVAILABLE. Advance stays as customer credit (no auto-refund).
-- ✅ **Booking Hold customer receipt** (`/print/booking-receipt/:id`) — red "BALANCE PENDING" header banner, line-item table with serials, payment schedule, customer + cashier signature lines. Printed at POS checkout alongside the normal sale receipt for any partial-pay invoice.
-- ✅ **Box Hold Tag** (`/print/box-tag/:id`) — 4"×6" landscape layout with the customer name in bold + an oversized "DO NOT SELL" watermark + serials + balance due. Taped to the physical box on the warehouse floor.
-- ✅ **Local serial auto-generation** — `LOCAL-<CategoryCode>-<Year>-<seq>` for unbranded items. `POST /item-serials/generate-local`. Print route `/print/serial-label/:serial` for the 2"×1" sticker.
-- ✅ **Delivery / dispatch tracking** — `deliveries (saleId, address, phone, assignedTo, vehicle, status, scheduledFor, deliveredAt)`. Six-status workflow PENDING → OUT_FOR_DELIVERY → DELIVERED with installation branch. Sales-hub tab.
-- ✅ **Service / repair tickets** — seven-status workflow RECEIVED → SENT_TO_COMPANY → WAITING_PARTS → UNDER_REPAIR → READY_FOR_PICKUP → DELIVERED → UNREPAIRABLE. Optional serial link auto-pulls in-warranty flag; for model-only units a receipt-number lookup attaches the originating sale line (`saleItemId`) and auto-fills the in-warranty flag the same way. Customer-hub tab.
+- 🔜 **Quotation → Sales Order → Invoice flow** (`QUO-…` / `SO-…`, no journal/stock impact until converted).
+- 🔜 **Discount engine** — line + invoice discounts, `discount_schemes`, SUPERUSER-reauth over a threshold (the only same-person maker-checker kept).
+- 🔜 **Multi-UOM** (`units_of_measure` + per-item conversions).
+- 🔜 **Reorder-point suggestions** with one-click PO drafts per preferred supplier.
+- 🔜 **Physical stock take** (`stock_takes` + lines → reason-driven adjustments).
+- 🔜 **Barcode label printing** (real Code-128, A4 label sheets).
+- 🔜 **Z-report / X-report** end-of-session PDFs and **comparative Income Statement** columns.
+- ✅ already shipped here: **A/R + A/P aging**, **item profitability**, **slow-moving stock**, **margin analytics**, **trial balance**, **journal-driven Income Statement + Balance Sheet (parallel)**, **customer credit limit** (`creditEnabled` + `creditLimit`, enforced in `SalesService.create`).
 
-### Sales & inventory features
+### Tax & Pakistan compliance (planned)
 
-- 🔜 **Quotation → Sales Order → Invoice flow** — `quotations (QUO-…)` and `sales_orders (SO-…)`. No journal posting and no stock impact until converted to an invoice. "Convert to sale" button pre-fills the POS cart.
-- 🔜 **Discount engine** — line-level + invoice-level discounts. `discount_schemes` table for "buy N of X, get discount on Y" rules with date ranges and auto-application at POS. Discount over a configurable threshold requires SUPERUSER reauth (the only maker-checker pattern kept — it's a same-person reauth, not a second-person approval).
-- ✅ **Customer credit limit** — `creditLimit` + `creditEnabled` on `Customer`. `SalesService.create()` rejects any sale with `dueAmount > 0` when the customer has `creditEnabled === false` or when the projected outstanding would exceed `creditLimit`. Walk-in / no-customer sales are exempt. 5 dedicated specs in `sales.service.spec.ts > credit-limit gating`. SUPERUSER-reauth override token deferred to the discount engine pass.
-- 🔜 **Multi-UOM** — `units_of_measure` (PIECE / BOX / CARTON / DOZEN / …). Item has `baseUomId` + `item_uom_conversions` (1 CARTON = 6 PIECES). Lines store `qty` + `qtyInBaseUom`.
-- 🔜 **Reorder-point suggestions** — Item-level `reorderPoint`, `reorderQty`, `preferredSupplierId`, `leadTimeDays`. New `Stock → Reorder Suggestions` tab with one-click "Create PO" per preferred supplier (groups items by supplier into PO drafts).
-- 🔜 **Physical stock take** — `stock_takes` (DRAFT / COUNTING / REVIEW / POSTED) + `stock_take_lines`. SUPERUSER posts the variance; one reason-driven stock adjustment is produced per item.
-- 🔜 **Barcode label printing** — Code-128 internal barcodes for items without a manufacturer barcode. `Item → Print Labels` tab renders printable A4 of 3×8 labels.
-
-### Reporting
-
-- ✅ **A/R and A/P aging** — `GET /reports/ar-aging?asOf=…` and `GET /reports/ap-aging?asOf=…` → customer/supplier | 0-30 | 31-60 | 61-90 | 90+ | total. FIFO receipt allocation against the oldest unpaid sales; opening balance counted as oldest. See `ReportsService.arAging()` / `apAging()`. 4 dedicated specs in `reports.service.spec.ts`.
-- ✅ **Item profitability** — `GET /reports/item-margins?from=…&to=…` → item | qty sold | revenue | COGS | gross profit | margin %, sortable by gross profit. COGS uses current `item.purchasePrice` as the cost basis (refined to weighted-average when the journal layer ships per-batch cost tracking). 1 dedicated spec.
-- ✅ **Trial balance** — `GET /reports/trial-balance?asOf=…` derives totals from `journal_lines` aggregated by account; sets `balanced: false` if Dr / Cr totals diverge (which would indicate a posting got past `JournalService`'s balance invariant). 1 dedicated spec proves the seeded sales+purchase posts roll up to balanced totals.
-- ✅ **Journal-driven Income Statement + Balance Sheet (parallel)** — `GET /reports/income-statement-from-journals?from=…&to=…` aggregates INCOME-category credits and EXPENSE-category debits into `revenue / expense / netIncome`. `GET /reports/balance-sheet-from-journals?asOf=…` aggregates ASSET / LIABILITY / EQUITY balances with current-period earnings rolled in; sets `balanced: false` if `assets !== liabilities + equity + earnings`. Both ship **alongside** the existing operational-table reports so a reconciliation tool can diff them. The full read-side flip (replacing the operational reports with these) follows once the parity is observed in production over a closing cycle.
-- 🔜 **Z-report / X-report** — end-of-session PDF with cashier, open / close times, opening cash, expected closing, actual closing, variance, transaction count, totals by payment mode, top 10 items, refunds + voids counts.
-- 🔜 **Comparative Income Statement** — current period vs prior period vs prior-year columns.
-
-### Audit & observability
-
-- **Backup-grade audit on backup-download** — the existing `AuditSubscriber` already captures entity-write before/after diffs; planned: a `System → Audit` diff-view UI with user / module / record / date-range filters.
-- **Structured logging + health metrics** — JSON log lines from the backend; `/health` extended with sync queue depth, last-sync result, last-backup status.
+- 🔜 **GST / sales-tax engine** (settings-level NTN/STRN, per-item GST rate + tax category, `Cr GST Payable` / `Dr GST Input` journal lines).
+- 🔜 **FBR-compliant tax invoice format** + placeholder for FBR invoice number / QR.
+- 🔜 **FBR POS real-time integration** behind `FBR_POS_INTEGRATION=true`, with a retry outbox so the till never stops selling.
+- 🔜 **Withholding tax on supplier payments** + monthly WHT report.
 
 ### Explicitly out of scope (1-2 user shop)
 
-These were considered and dropped because the workload doesn't justify the friction or the engineering effort for an install operated by one or two trusted people on a single shop PC:
+Considered and dropped — the workload doesn't justify the friction for an install run by one or two trusted people on a single shop PC:
 
-- **Granular RBAC with 6 named roles + permission matrix** — the existing `SUPERUSER` / `USER` split is enough for owner + accountant.
-- **TOTP MFA mandatory on SUPERUSER** — adds login friction on a trusted machine the owner controls physically.
-- **Maker-checker approval workflows / `pending_approvals` table / multi-level approval chains** — there's no second human reviewer to approve.
-- **Brute-force lockout + per-username failure counter table** — the backend listens on localhost (and optional LAN); it's not internet-exposed.
-- **httpOnly-cookie sessions + CSRF double-submit** — current `Authorization: Bearer …` from localStorage is sufficient given the threat model (no XSS surface in a build of self-authored React with no user-generated content rendered as HTML).
-- **Code-signed installer** — kept on the list of "nice to have" but not in this pass; Windows SmartScreen warning is the cost.
+- **Granular RBAC with named roles + permission matrix** — the `SUPERUSER` / `USER` split is enough.
+- **TOTP MFA mandatory on SUPERUSER** — login friction on a machine the owner controls physically.
+- **Maker-checker / multi-level approval chains** — there's no second human reviewer.
+- **Brute-force lockout + failure-counter table** — the backend listens on localhost (and optional LAN); not internet-exposed.
+- **httpOnly-cookie sessions + CSRF double-submit** — `Authorization: Bearer …` from localStorage is sufficient given the threat model (no XSS surface in self-authored React with no user-generated HTML).
+- **At-rest encryption of SQLite / backups** — see Security section; integrity + availability come first.
+- **Code-signed installer** — nice-to-have; the SmartScreen warning is the cost for now.
 
 If the shop scales past two users or the install starts running on internet-exposed hardware, revisit this list — none of the dropped items are unreachable, just unjustified today.
