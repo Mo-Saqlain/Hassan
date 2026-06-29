@@ -5,6 +5,14 @@ import { Supplier } from './entities/supplier.entity';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import {
+  ImportResult,
+  bool,
+  num,
+  runImport,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
@@ -23,6 +31,23 @@ export class SuppliersService implements OnModuleInit {
     const entity = this.repo.create(dto);
     if (!entity.code) entity.code = await this.nextCode();
     return this.repo.save(entity);
+  }
+
+  /** Bulk-create from parsed CSV rows. See common/csv-import.ts. */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    return runImport(rows, async (raw) => {
+      const dto: CreateSupplierDto = {
+        code: str(raw.code),
+        name: str(raw.name) as string,
+        phone: str(raw.phone),
+        email: str(raw.email),
+        address: str(raw.address),
+        openingBalance: num(raw.openingBalance),
+        isActive: bool(raw.isActive),
+      };
+      await validateDto(CreateSupplierDto, dto);
+      await this.create(dto);
+    });
   }
 
   findAll() { return this.repo.find({ order: { name: 'ASC' } }); }

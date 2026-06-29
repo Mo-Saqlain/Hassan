@@ -12,6 +12,7 @@ import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { SalaryAccrualService } from './salary-accrual.service';
+import { ImportRowsDto } from '../../common/csv-import';
 
 @Controller('employees')
 export class EmployeesController {
@@ -21,6 +22,7 @@ export class EmployeesController {
   ) {}
 
   @Post() create(@Body() dto: CreateEmployeeDto) { return this.service.create(dto); }
+  @Post('import') importCsv(@Body() body: ImportRowsDto) { return this.service.importRows(body.rows); }
   @Get() findAll() { return this.service.findAll(); }
 
   /**

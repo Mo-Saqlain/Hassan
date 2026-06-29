@@ -4,6 +4,8 @@ import { api } from '../api/client';
 import CrudPage from '../components/CrudPage';
 import Icon from '../components/Icon';
 import ExportButtons from '../components/ExportButtons';
+import ImportCsv from '../components/ImportCsv';
+import { IMPORT_SCHEMAS } from '../utils/importSchemas';
 import ItemsPanel from '../components/master/ItemsPanel';
 import CategoriesPanel from '../components/master/CategoriesPanel';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
@@ -176,6 +178,7 @@ function BrandsPanel() {
     <CrudPage
       title="Brands"
       path="/brands"
+      importSchema={IMPORT_SCHEMAS.brands}
       searchKeys={['name', 'description']}
       columns={[
         { key: 'name', label: 'Name' },
@@ -206,6 +209,7 @@ function CustomersPanel() {
       basePath="/customers"
       balancesPath="/reports/customer-balances"
       ledgerRoute="customer-ledger"
+      importSchema={IMPORT_SCHEMAS.customers}
       balanceLabel={(b) =>
         b > 0 ? 'Owes us' : b < 0 ? 'We owe them' : 'Settled'
       }
@@ -220,6 +224,7 @@ function SuppliersPanel() {
       basePath="/suppliers"
       balancesPath="/reports/supplier-balances"
       ledgerRoute="supplier-ledger"
+      importSchema={IMPORT_SCHEMAS.suppliers}
       balanceLabel={(b) =>
         b > 0 ? 'We owe them' : b < 0 ? 'They owe us' : 'Settled'
       }
@@ -232,6 +237,7 @@ function StoresPanel() {
     <CrudPage
       title="Stores / Branches"
       path="/stores"
+      importSchema={IMPORT_SCHEMAS.stores}
       searchKeys={['name', 'location']}
       columns={[
         { key: 'name', label: 'Name' },
@@ -418,6 +424,7 @@ function EmployeesPanel() {
             ]}
             rows={filtered}
           />
+          <ImportCsv schema={IMPORT_SCHEMAS.employees} onDone={reload} />
           <button
             className="btn btn-sm"
             title="Post any due monthly-salary accruals now (idempotent)"
@@ -715,6 +722,7 @@ function AccountsPanel() {
     <CrudPage
       title="Accounts (Cash / Bank / Wallet / Capital / Credit)"
       path="/accounts"
+      importSchema={IMPORT_SCHEMAS.accounts}
       searchKeys={['code', 'name', 'type', 'bank', 'accountNumber']}
       columns={[
         { key: 'code', label: 'Code' },
@@ -754,7 +762,7 @@ function AccountsPanel() {
  * Customer/Supplier panel — fetches the list with computed balances and links
  * each row to its ledger. CRUD operations hit the basic /customers (or /suppliers) endpoint.
  */
-function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }) {
+function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel, importSchema }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -907,6 +915,7 @@ function PartyPanel({ title, basePath, balancesPath, ledgerRoute, balanceLabel }
             ]}
             rows={filtered}
           />
+          {importSchema && <ImportCsv schema={importSchema} onDone={reload} />}
           <button className="btn btn-primary" onClick={startAdd}>
             + Add {title.replace(/s$/, '')}
           </button>

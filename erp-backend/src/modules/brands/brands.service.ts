@@ -5,6 +5,13 @@ import { Brand } from './entities/brand.entity';
 import { CreateBrandDto } from './dto/create-brand.dto';
 import { UpdateBrandDto } from './dto/update-brand.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import {
+  ImportResult,
+  bool,
+  runImport,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 
 @Injectable()
 export class BrandsService {
@@ -16,6 +23,19 @@ export class BrandsService {
   create(dto: CreateBrandDto) {
     const brand = this.repo.create(dto);
     return this.repo.save(brand);
+  }
+
+  /** Bulk-create from parsed CSV rows. See common/csv-import.ts. */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    return runImport(rows, async (raw) => {
+      const dto: CreateBrandDto = {
+        name: str(raw.name) as string,
+        description: str(raw.description),
+        isActive: bool(raw.isActive),
+      };
+      await validateDto(CreateBrandDto, dto);
+      await this.create(dto);
+    });
   }
 
   findAll() {

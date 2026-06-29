@@ -3,6 +3,8 @@ import { api } from '../../api/client';
 import { useResource } from '../../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../ExportButtons';
+import ImportCsv from '../ImportCsv';
+import { IMPORT_SCHEMAS } from '../../utils/importSchemas';
 
 const empty = {
   name: '',
@@ -107,6 +109,7 @@ export default function CategoriesPanel() {
             ]}
             rows={filteredFlat}
           />
+          <ImportCsv schema={IMPORT_SCHEMAS.categories} onDone={reload} />
           <button className="btn btn-primary" onClick={() => open(null)}>
             + Add Category
           </button>

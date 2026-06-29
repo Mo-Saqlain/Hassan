@@ -9,6 +9,13 @@ import { Not, Repository } from 'typeorm';
 import { Category } from './entities/category.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import {
+  ImportResult,
+  bool,
+  runImport,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 
 @Injectable()
 export class CategoriesService {
@@ -21,6 +28,41 @@ export class CategoriesService {
     if (dto.parentId) await this.ensureExists(dto.parentId);
     if (dto.code) await this.ensureCodeUnique(dto.code);
     return this.repo.save(this.repo.create(dto));
+  }
+
+  /**
+   * Bulk-create from parsed CSV rows. The CSV references a parent by NAME (the
+   * `parent` column), not UUID — resolved against existing categories plus any
+   * created earlier in the same import. So list a parent category on a line
+   * above its children. See common/csv-import.ts.
+   */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    const existing = await this.repo.find();
+    const idByName = new Map<string, string>(
+      existing.map((c) => [c.name.trim().toLowerCase(), c.id]),
+    );
+    return runImport(rows, async (raw) => {
+      let parentId: string | undefined;
+      const parentName = str(raw.parent) ?? str(raw.parentName);
+      if (parentName) {
+        parentId = idByName.get(parentName.toLowerCase());
+        if (!parentId) {
+          throw new Error(
+            `Parent category "${parentName}" not found — list it above this row or create it first`,
+          );
+        }
+      }
+      const dto: CreateCategoryDto = {
+        name: str(raw.name) as string,
+        code: str(raw.code)?.toUpperCase(),
+        description: str(raw.description),
+        parentId,
+        isActive: bool(raw.isActive),
+      };
+      await validateDto(CreateCategoryDto, dto);
+      const created = await this.create(dto);
+      idByName.set(created.name.trim().toLowerCase(), created.id);
+    });
   }
 
   findAll() {

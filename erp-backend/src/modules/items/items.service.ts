@@ -2,8 +2,17 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository } from 'typeorm';
 import { deleteOrConflict } from '../../common/delete-guard';
+import {
+  ImportResult,
+  bool,
+  num,
+  runImport,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 import { Item } from './entities/item.entity';
 import { Category } from '../categories/entities/category.entity';
+import { Brand } from '../brands/entities/brand.entity';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 
@@ -14,7 +23,75 @@ export class ItemsService {
     private readonly repo: Repository<Item>,
     @InjectRepository(Category)
     private readonly categoryRepo: Repository<Category>,
+    @InjectRepository(Brand)
+    private readonly brandRepo: Repository<Brand>,
   ) {}
+
+  /**
+   * Bulk-create from parsed CSV rows. The CSV references brand and categories
+   * by NAME (not UUID): the `brand` column matches an existing brand, and the
+   * `categories` column is a semicolon-separated list of category names. Both
+   * must already exist — import Brands and Categories first. See
+   * common/csv-import.ts.
+   */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    const brands = await this.brandRepo.find();
+    const brandIdByName = new Map<string, string>(
+      brands.map((b) => [b.name.trim().toLowerCase(), b.id]),
+    );
+    const cats = await this.categoryRepo.find();
+    const catIdByName = new Map<string, string>(
+      cats.map((c) => [c.name.trim().toLowerCase(), c.id]),
+    );
+    return runImport(rows, async (raw) => {
+      let brandId: string | undefined;
+      const brandName = str(raw.brand) ?? str(raw.brandName);
+      if (brandName) {
+        brandId = brandIdByName.get(brandName.toLowerCase());
+        if (!brandId) {
+          throw new Error(`Brand "${brandName}" not found — import/create it first`);
+        }
+      }
+      let categoryIds: string[] | undefined;
+      const catRaw = str(raw.categories) ?? str(raw.category);
+      if (catRaw) {
+        const names = catRaw
+          .split(/[;|]/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        categoryIds = names.map((n) => {
+          const id = catIdByName.get(n.toLowerCase());
+          if (!id) throw new Error(`Category "${n}" not found — import/create it first`);
+          return id;
+        });
+      }
+      const warranty = str(raw.warrantyType)?.toUpperCase();
+      const dto: CreateItemDto = {
+        modelNo: str(raw.modelNo),
+        name: str(raw.name),
+        sku: str(raw.sku),
+        barcode: str(raw.barcode),
+        brandId,
+        categoryIds,
+        purchasePrice: num(raw.purchasePrice),
+        salePrice: num(raw.salePrice),
+        unit: str(raw.unit),
+        minStockLevel: num(raw.minStockLevel),
+        isActive: bool(raw.isActive),
+        tracksSerials: bool(raw.tracksSerials),
+        serialRequiredOnSale: bool(raw.serialRequiredOnSale),
+        hasWarranty: bool(raw.hasWarranty),
+        warrantyType: warranty as CreateItemDto['warrantyType'],
+        warrantyDays: num(raw.warrantyDays),
+        isInternalGenerated: bool(raw.isInternalGenerated),
+      };
+      if (!dto.modelNo && !dto.name) {
+        throw new Error('Either modelNo or name is required');
+      }
+      await validateDto(CreateItemDto, dto);
+      await this.create(dto);
+    });
+  }
 
   async create(dto: CreateItemDto) {
     // The shop uses Model No. as the item's name. Auto-derive name + sku

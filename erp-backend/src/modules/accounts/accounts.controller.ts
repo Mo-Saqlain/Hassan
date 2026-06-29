@@ -11,12 +11,14 @@ import {
 import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
+import { ImportRowsDto } from '../../common/csv-import';
 
 @Controller('accounts')
 export class AccountsController {
   constructor(private readonly service: AccountsService) {}
 
   @Post() create(@Body() dto: CreateAccountDto) { return this.service.create(dto); }
+  @Post('import') importCsv(@Body() body: ImportRowsDto) { return this.service.importRows(body.rows); }
   @Get() findAll() { return this.service.findAll(); }
   @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { return this.service.findOne(id); }
   @Patch(':id') update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAccountDto) {

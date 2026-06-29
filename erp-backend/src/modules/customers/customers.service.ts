@@ -5,6 +5,14 @@ import { Customer } from './entities/customer.entity';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import {
+  ImportResult,
+  bool,
+  num,
+  runImport,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
@@ -23,6 +31,25 @@ export class CustomersService implements OnModuleInit {
     const entity = this.repo.create(dto);
     if (!entity.code) entity.code = await this.nextCode();
     return this.repo.save(entity);
+  }
+
+  /** Bulk-create from parsed CSV rows. See common/csv-import.ts. */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    return runImport(rows, async (raw) => {
+      const dto: CreateCustomerDto = {
+        code: str(raw.code),
+        name: str(raw.name) as string,
+        phone: str(raw.phone),
+        email: str(raw.email),
+        address: str(raw.address),
+        openingBalance: num(raw.openingBalance),
+        creditLimit: num(raw.creditLimit),
+        creditEnabled: bool(raw.creditEnabled),
+        isActive: bool(raw.isActive),
+      };
+      await validateDto(CreateCustomerDto, dto);
+      await this.create(dto);
+    });
   }
 
   findAll() {

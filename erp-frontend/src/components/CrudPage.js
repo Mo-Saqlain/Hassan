@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ExportButtons from './ExportButtons';
+import ImportCsv from './ImportCsv';
 
 /**
  * Generic CRUD page. Columns declare display only;
@@ -22,6 +23,7 @@ export default function CrudPage({
   columns,
   formFields,
   searchKeys = ['name'],
+  importSchema,
 }) {
   const { data, loading, error, reload } = useResource(path);
   const [editing, setEditing] = useState(null);
@@ -90,6 +92,7 @@ export default function CrudPage({
             rows={filtered}
             size="sm"
           />
+          {importSchema && <ImportCsv schema={importSchema} onDone={reload} />}
           <button className="btn btn-primary" onClick={startAdd}>
             + Add {title.replace(/s$/, '')}
           </button>

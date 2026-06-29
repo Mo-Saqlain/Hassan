@@ -12,6 +12,7 @@ import {
 import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
+import { ImportRowsDto } from '../../common/csv-import';
 
 @Controller('items')
 export class ItemsController {
@@ -20,6 +21,11 @@ export class ItemsController {
   @Post()
   create(@Body() dto: CreateItemDto) {
     return this.service.create(dto);
+  }
+
+  @Post('import')
+  importCsv(@Body() body: ImportRowsDto) {
+    return this.service.importRows(body.rows);
   }
 
   @Get()

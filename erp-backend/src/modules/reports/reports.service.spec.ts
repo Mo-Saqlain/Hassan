@@ -74,7 +74,7 @@ describe('ReportsService', () => {
           ]),
         ),
         TypeOrmModule.forFeature([
-          Item, Category, Customer, Supplier, Account,
+          Item, Brand, Category, Customer, Supplier, Account,
           StockMovement, Sale, SaleItem, Purchase, PurchaseItem,
           SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
           Payment, SyncQueueEntry, IncentiveTarget, IncentiveAward,

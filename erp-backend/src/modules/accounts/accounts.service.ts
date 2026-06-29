@@ -5,6 +5,14 @@ import { Account, AccountCategory, AccountSubType, AccountType } from './entitie
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import {
+  ImportResult,
+  bool,
+  num,
+  runImport,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 import { SequenceService } from '../sequences/sequence.service';
 
 /**
@@ -118,6 +126,25 @@ export class AccountsService implements OnModuleInit {
       entity.accountCategory = categoryForType(entity.type ?? 'CASH');
     }
     return this.repo.save(entity);
+  }
+
+  /** Bulk-create from parsed CSV rows. See common/csv-import.ts. Only the five
+   *  user-flavour types (CASH/BANK/WALLET/CAPITAL/CREDIT) are importable —
+   *  system accounts are seeded on boot, not imported. */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    return runImport(rows, async (raw) => {
+      const dto: CreateAccountDto = {
+        code: str(raw.code),
+        name: str(raw.name) as string,
+        type: str(raw.type)?.toUpperCase() as CreateAccountDto['type'],
+        bank: str(raw.bank),
+        accountNumber: str(raw.accountNumber),
+        openingBalance: num(raw.openingBalance),
+        isActive: bool(raw.isActive),
+      };
+      await validateDto(CreateAccountDto, dto);
+      await this.create(dto);
+    });
   }
 
   findAll() {

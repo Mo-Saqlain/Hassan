@@ -52,7 +52,7 @@ describe('PosService', () => {
           ]),
         ),
         TypeOrmModule.forFeature([
-          Item, Category, StockMovement, Sale, SaleItem,
+          Item, Brand, Category, StockMovement, Sale, SaleItem,
           PosSession, PosCartItem, SyncQueueEntry, Sequence,
           Account, JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
         ]),

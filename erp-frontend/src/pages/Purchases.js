@@ -3,6 +3,8 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from '../components/ReverseAction';
+import ImportCsv from '../components/ImportCsv';
+import { IMPORT_SCHEMAS } from '../utils/importSchemas';
 
 const emptyLine = () => ({
   itemId: '',
@@ -195,9 +197,18 @@ export default function Purchases() {
     <>
       <div className="page-header">
         <h2>Purchases</h2>
-        <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-          + New Purchase
-        </button>
+        <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+          <ImportCsv
+            schema={IMPORT_SCHEMAS.purchases}
+            onDone={() => {
+              reload();
+              reloadItems();
+            }}
+          />
+          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+            + New Purchase
+          </button>
+        </div>
       </div>
 
       <div className="chip chip-info" style={{ marginBottom: 12 }}>

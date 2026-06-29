@@ -11,12 +11,14 @@ import {
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
+import { ImportRowsDto } from '../../common/csv-import';
 
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private readonly service: SuppliersService) {}
 
   @Post() create(@Body() dto: CreateSupplierDto) { return this.service.create(dto); }
+  @Post('import') importCsv(@Body() body: ImportRowsDto) { return this.service.importRows(body.rows); }
   @Get() findAll() { return this.service.findAll(); }
   @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { return this.service.findOne(id); }
   @Patch(':id') update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSupplierDto) {

@@ -6,6 +6,14 @@ import { PurchaseItem } from './entities/purchase-item.entity';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { StockService } from '../stock/stock.service';
 import { Item } from '../items/entities/item.entity';
+import { Supplier } from '../suppliers/entities/supplier.entity';
+import { Store } from '../stores/entities/store.entity';
+import {
+  ImportResult,
+  num,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 import { OutboxService } from '../outbox/outbox.service';
 import { SequenceService } from '../sequences/sequence.service';
 import { JournalService } from '../journals/journal.service';
@@ -202,6 +210,138 @@ export class PurchasesService {
     }
 
     return saved;
+  }
+
+  /**
+   * Bulk-import purchase bills from parsed CSV rows — the supported way to load
+   * opening stock without hand-entering a bill per item.
+   *
+   * The CSV is **one row per line item**. Rows sharing a non-blank `billNo`
+   * collapse into a single multi-line bill (header fields — supplier, store,
+   * discount, paidAmount, paymentMethod, notes — are read from that bill's
+   * first row). A blank `billNo` makes the row its own single-line bill with an
+   * auto `BILL-…` number. Supplier, store and item are referenced BY NAME, not
+   * UUID:
+   *   - `item`  → matched against SKU, then barcode, then model no, then name
+   *   - `store` → store name (per line; falls back to the bill's header store)
+   *   - `supplier` → supplier name (or code)
+   *
+   * Each bill is created through the normal transactional `create()`, so it
+   * books the stock IN movement, rolls up weighted-average cost, captures any
+   * serials, and posts the balanced journal — exactly like a hand-entered bill.
+   * Failures are isolated per bill. Note: imported bills are dated now (the
+   * Purchase entity has no historical-date field); fine for opening stock.
+   */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    const list = Array.isArray(rows) ? rows : [];
+
+    // Name/code → id lookups, loaded once.
+    const itemRows = await this.dataSource.getRepository(Item).find();
+    const resolveItem = (ref: string): string | undefined => {
+      const l = ref.toLowerCase();
+      return (
+        itemRows.find((it) => it.sku?.toLowerCase() === l)?.id ??
+        itemRows.find((it) => it.barcode?.toLowerCase() === l)?.id ??
+        itemRows.find((it) => it.modelNo?.toLowerCase() === l)?.id ??
+        itemRows.find((it) => it.name?.toLowerCase() === l)?.id
+      );
+    };
+    const supplierRows = await this.dataSource.getRepository(Supplier).find();
+    const resolveSupplier = (ref: string): string | undefined => {
+      const l = ref.toLowerCase();
+      return (
+        supplierRows.find((s) => s.name.toLowerCase() === l)?.id ??
+        supplierRows.find((s) => s.code?.toLowerCase() === l)?.id
+      );
+    };
+    const storeRows = await this.dataSource.getRepository(Store).find();
+    const resolveStore = (ref: string): string | undefined =>
+      storeRows.find((s) => s.name.toLowerCase() === ref.toLowerCase())?.id;
+
+    // Group rows into bills, preserving the CSV line number of each.
+    const groups = new Map<
+      string,
+      { billNo?: string; firstLine: number; rows: { raw: Record<string, unknown>; line: number }[] }
+    >();
+    let blankSeq = 0;
+    list.forEach((raw, i) => {
+      const line = i + 2; // header is line 1
+      const billNo = str(raw.billNo);
+      const key = billNo ? billNo.toLowerCase() : `__auto_${blankSeq++}`;
+      if (!groups.has(key)) groups.set(key, { billNo, firstLine: line, rows: [] });
+      groups.get(key)!.rows.push({ raw, line });
+    });
+
+    const result: ImportResult = { total: groups.size, created: 0, failed: [] };
+
+    for (const g of groups.values()) {
+      try {
+        const head = g.rows[0].raw;
+
+        let supplierId: string | undefined;
+        const supplierName = str(head.supplier) ?? str(head.supplierName);
+        if (supplierName) {
+          supplierId = resolveSupplier(supplierName);
+          if (!supplierId) throw new Error(`Supplier "${supplierName}" not found — import/create it first`);
+        }
+
+        let headerStoreId: string | undefined;
+        const headStore = str(head.store);
+        if (headStore) {
+          headerStoreId = resolveStore(headStore);
+          if (!headerStoreId) throw new Error(`Store "${headStore}" not found — import/create it first`);
+        }
+
+        const lines = g.rows.map(({ raw, line }) => {
+          const itemRef = str(raw.item) ?? str(raw.sku) ?? str(raw.modelNo) ?? str(raw.barcode);
+          if (!itemRef) throw new Error(`Line ${line}: "item" is required`);
+          const itemId = resolveItem(itemRef);
+          if (!itemId) throw new Error(`Line ${line}: item "${itemRef}" not found — import/create it first`);
+
+          let storeId = headerStoreId;
+          const storeRef = str(raw.store);
+          if (storeRef) {
+            storeId = resolveStore(storeRef);
+            if (!storeId) throw new Error(`Line ${line}: store "${storeRef}" not found`);
+          }
+
+          const serialsRaw = str(raw.serials);
+          const serials = serialsRaw
+            ? serialsRaw.split(/[;|\n]/).map((s) => s.trim()).filter(Boolean)
+            : undefined;
+
+          return {
+            itemId,
+            storeId,
+            quantity: num(raw.quantity) as number,
+            unitPrice: (num(raw.unitPrice) ?? num(raw.cost) ?? num(raw.price)) as number,
+            serials,
+          };
+        });
+
+        const dto: CreatePurchaseDto = {
+          billNo: g.billNo,
+          supplierId,
+          storeId: headerStoreId,
+          discount: num(head.discount),
+          paidAmount: num(head.paidAmount),
+          paymentMethod: str(head.paymentMethod),
+          notes: str(head.notes),
+          lines,
+        };
+        await validateDto(CreatePurchaseDto, dto);
+        await this.create(dto);
+        result.created++;
+      } catch (e) {
+        result.failed.push({
+          row: g.firstLine,
+          label: g.billNo ?? '(auto bill)',
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    return result;
   }
 
   private async nextBillNo(repo: Repository<Purchase>): Promise<string> {

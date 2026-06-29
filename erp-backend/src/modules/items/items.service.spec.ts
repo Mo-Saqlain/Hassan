@@ -16,7 +16,7 @@ describe('ItemsService', () => {
     const module = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot(inMemoryTypeOrm([Item, Brand, Category])),
-        TypeOrmModule.forFeature([Item, Category]),
+        TypeOrmModule.forFeature([Item, Brand, Category]),
       ],
       providers: [ItemsService],
     }).compile();

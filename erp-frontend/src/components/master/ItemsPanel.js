@@ -3,6 +3,8 @@ import { api } from '../../api/client';
 import { useResource } from '../../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../ExportButtons';
+import ImportCsv from '../ImportCsv';
+import { IMPORT_SCHEMAS } from '../../utils/importSchemas';
 
 const empty = {
   modelNo: '',
@@ -192,6 +194,7 @@ export default function ItemsPanel() {
             ]}
             rows={filtered}
           />
+          <ImportCsv schema={IMPORT_SCHEMAS.items} onDone={reload} />
           <button className="btn btn-primary" onClick={() => open(null)}>
             + Add Item
           </button>

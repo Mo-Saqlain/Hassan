@@ -5,6 +5,14 @@ import { Employee } from './entities/employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { deleteOrConflict } from '../../common/delete-guard';
+import {
+  ImportResult,
+  bool,
+  num,
+  runImport,
+  str,
+  validateDto,
+} from '../../common/csv-import';
 import { SequenceService } from '../sequences/sequence.service';
 
 @Injectable()
@@ -22,6 +30,29 @@ export class EmployeesService implements OnModuleInit {
     const entity = this.repo.create(dto);
     if (!entity.code) entity.code = await this.nextCode();
     return this.repo.save(entity);
+  }
+
+  /** Bulk-create from parsed CSV rows. See common/csv-import.ts. */
+  async importRows(rows: Record<string, unknown>[]): Promise<ImportResult> {
+    return runImport(rows, async (raw) => {
+      const dto: CreateEmployeeDto = {
+        code: str(raw.code),
+        name: str(raw.name) as string,
+        role: str(raw.role),
+        phone: str(raw.phone),
+        email: str(raw.email),
+        address: str(raw.address),
+        monthlySalary: num(raw.monthlySalary),
+        openingBalance: num(raw.openingBalance),
+        joinedAt: str(raw.joinedAt),
+        salaryDay: num(raw.salaryDay),
+        firstSalaryInAdvance: bool(raw.firstSalaryInAdvance),
+        notes: str(raw.notes),
+        isActive: bool(raw.isActive),
+      };
+      await validateDto(CreateEmployeeDto, dto);
+      await this.create(dto);
+    });
   }
 
   findAll() {

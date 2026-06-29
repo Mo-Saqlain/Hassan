@@ -11,6 +11,7 @@ import {
 import { BrandsService } from './brands.service';
 import { CreateBrandDto } from './dto/create-brand.dto';
 import { UpdateBrandDto } from './dto/update-brand.dto';
+import { ImportRowsDto } from '../../common/csv-import';
 
 @Controller('brands')
 export class BrandsController {
@@ -19,6 +20,11 @@ export class BrandsController {
   @Post()
   create(@Body() dto: CreateBrandDto) {
     return this.service.create(dto);
+  }
+
+  @Post('import')
+  importCsv(@Body() body: ImportRowsDto) {
+    return this.service.importRows(body.rows);
   }
 
   @Get()
