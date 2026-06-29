@@ -1,11 +1,14 @@
 #requires -Version 5.1
-# One-shot converter: erp-frontend/logo.jpeg -> resized PNGs + a Windows .ico,
-# with the JPEG's black background keyed out to alpha so the marks are
-# transparent for use as favicon, taskbar icon, etc.
+# One-shot converter: a source logo -> resized PNGs + a Windows .ico for use as
+# favicon, taskbar icon, electron app icon, and the login-screen brand mark.
 #
-# The in-app brand mark wraps the image in a dark chip (see app.css `.app-logo`)
-# so the white "H" keeps its contrast on light-themed surfaces; this script
-# only concerns itself with producing the transparent assets.
+# Source selection (first match wins):
+#   1. erp-frontend/logo.png   — an already-transparent PNG. Used as-is; the
+#                                 black chroma-key is SKIPPED (it would eat the
+#                                 logo's own dark tones and there's no black
+#                                 backdrop to remove).
+#   2. erp-frontend/logo.jpeg  — legacy JPEG with a black backdrop. The
+#                                 backdrop is keyed out to alpha (luminance key).
 #
 # Outputs:
 #   erp-frontend/public/logo192.png
@@ -65,6 +68,19 @@ public static class LogoProc {
         }
     }
 
+    /// <summary>Loads an image into a 32bpp ARGB bitmap, preserving its existing alpha.</summary>
+    public static Bitmap LoadArgb(string srcPath) {
+        using (Image src = Image.FromFile(srcPath)) {
+            Bitmap bmp = new Bitmap(src.Width, src.Height, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(bmp)) {
+                g.InterpolationMode  = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode    = PixelOffsetMode.HighQuality;
+                g.DrawImage(src, 0, 0, src.Width, src.Height);
+            }
+            return bmp;
+        }
+    }
+
     public static Bitmap Resize(Bitmap src, int size) {
         Bitmap dst = new Bitmap(size, size, PixelFormat.Format32bppArgb);
         using (Graphics g = Graphics.FromImage(dst)) {
@@ -81,19 +97,27 @@ public static class LogoProc {
 '@
 Add-Type -TypeDefinition $csharp -ReferencedAssemblies System.Drawing -ErrorAction SilentlyContinue
 
-$root = Split-Path -Parent $PSScriptRoot
-$src  = Join-Path $root 'erp-frontend\logo.jpeg'
-$pub  = Join-Path $root 'erp-frontend\public'
-$des  = Join-Path $root 'erp-desktop\build-resources'
+$root    = Split-Path -Parent $PSScriptRoot
+$srcPng  = Join-Path $root 'erp-frontend\logo.png'
+$srcJpeg = Join-Path $root 'erp-frontend\logo.jpeg'
+$pub     = Join-Path $root 'erp-frontend\public'
+$des     = Join-Path $root 'erp-desktop\build-resources'
 
-if (-not (Test-Path $src)) { throw "Source logo not found at $src" }
 if (-not (Test-Path $des)) { New-Item -ItemType Directory -Path $des -Force | Out-Null }
 
-# Threshold tuned for the source JPEG: corners are ~(0,0,0); the white H
-# starts around (240,240,240); the blue E peaks around (10,120,255).
-# darkThreshold=24 keeps the darkest blue tones; featherEnd=72 smooths
-# anti-aliased edges.
-$keyed = [LogoProc]::KeyOutBlack($src, 24, 72)
+if (Test-Path $srcPng) {
+    # Already-transparent PNG: load as-is, no chroma-key.
+    Write-Output ("Source: " + $srcPng + " (transparent PNG, no key)")
+    $keyed = [LogoProc]::LoadArgb($srcPng)
+} elseif (Test-Path $srcJpeg) {
+    # Legacy JPEG: key out the black backdrop. Threshold tuned for that file —
+    # corners ~(0,0,0), white H ~(240,240,240), blue E peaks ~(10,120,255);
+    # darkThreshold=24 keeps the darkest blue, featherEnd=72 smooths edges.
+    Write-Output ("Source: " + $srcJpeg + " (JPEG, black-key)")
+    $keyed = [LogoProc]::KeyOutBlack($srcJpeg, 24, 72)
+} else {
+    throw "Source logo not found at $srcPng or $srcJpeg"
+}
 try {
     function Save-Png { param([int]$size, [string]$outPath)
         $r = [LogoProc]::Resize($keyed, $size)
