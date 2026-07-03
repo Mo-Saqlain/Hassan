@@ -4,8 +4,11 @@
 -- Run this ONCE in the Supabase SQL editor (logged in as the project owner /
 -- postgres role). It:
 --   1. Grants the `anon` role SELECT on the business tables the mobile app
---      reads directly (history lists). The mobile app authenticates with the
---      public anon key only, and is strictly read-only.
+--      reads directly (history lists), plus a read-only RLS policy per table so
+--      those reads work under row-level security while writes stay blocked.
+--      (Supabase enables RLS and grants anon broad privileges by default: a bare
+--      grant reads back empty, and leaving RLS off would let the anon key WRITE.)
+--      The mobile app authenticates with the public anon key only, read-only.
 --   2. Creates aggregate VIEWS for figures that are NOT stored in any column
 --      and must be computed: on-hand stock, customer A/R, supplier A/P, and a
 --      one-row KPI summary. The formulas mirror the desktop ReportsService
@@ -29,6 +32,28 @@ grant select on
   customers, suppliers,
   stores
 to anon;
+
+-- ── 1b. RLS read-only policies (REQUIRED on RLS-enabled projects) ────────────
+-- On a Supabase project with RLS enabled, the grant above is NOT enough: with
+-- RLS on and no policy every row is filtered out, so the mobile History list and
+-- dashboard revenue tiles come back empty. Add a SELECT-only policy per table so
+-- anon can read, and deliberately add NO write policy so INSERT/UPDATE/DELETE
+-- stay blocked (Supabase's defaults otherwise grant anon those privileges too —
+-- enabling RLS here is what neutralises them). The backend connects as the
+-- table-owning postgres role, which bypasses RLS, so it is unaffected.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'sales','sale_items','purchases','purchase_items','items',
+    'brands','categories','item_categories','customers','suppliers','stores'
+  ]
+  loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists mobile_anon_read on %I', t);
+    execute format('create policy mobile_anon_read on %I for select to anon using (true)', t);
+  end loop;
+end $$;
 
 -- ── 2. On-hand stock view ───────────────────────────────────────────────────
 -- On-hand is NEVER stored; it is the running sum of stock_movements

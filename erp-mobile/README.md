@@ -24,9 +24,12 @@ The mobile app reads with the **anon** key, and some figures (on-hand stock,
 balances) are not stored — they're computed by SQL views. Run
 [`supabase/setup.sql`](supabase/setup.sql) once in the Supabase SQL editor
 (logged in as the project owner). It grants the anon role SELECT on the business
-tables and creates `mobile_item_stock`, `mobile_customer_balance`,
-`mobile_supplier_balance`, and `mobile_kpis`. It deliberately does **not**
-expose users/auth, settings, audit/error logs, or the sync queue.
+tables, adds a **read-only RLS policy** per table (Supabase runs row-level
+security, so a bare grant reads back empty; the policy allows SELECT while
+INSERT/UPDATE/DELETE stay blocked), and creates `mobile_item_stock`,
+`mobile_customer_balance`, `mobile_supplier_balance`, and `mobile_kpis`. It
+deliberately does **not** expose users/auth, settings, audit/error logs, or the
+sync queue.
 
 ### 2. Configure the connection
 
