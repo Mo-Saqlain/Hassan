@@ -132,7 +132,16 @@ export default function Connection() {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <h3 style={{ margin: 0 }}>Cloud sync</h3>
-          <button className="btn btn-primary" onClick={syncNow} disabled={syncing}>
+          <button
+            className="btn btn-primary"
+            onClick={syncNow}
+            disabled={syncing || (status != null && !status.cloudConfigured)}
+            title={
+              status != null && !status.cloudConfigured
+                ? 'Not applicable — this install writes directly to its database, so there is no outbox to push.'
+                : 'Push any queued offline changes to the cloud now'
+            }
+          >
             {syncing ? 'Syncing…' : 'Sync now'}
           </button>
         </div>
