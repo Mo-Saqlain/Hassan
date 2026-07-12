@@ -1,8 +1,10 @@
 # Codebase Map — Hassan Electronics ERP
 
-> **What this is:** a module-and-key-files index so the codebase doesn't have to be re-read from scratch each session. For architecture, conventions, run instructions, and the domain model, read [CLAUDE.md](CLAUDE.md) and [README.md](README.md) first — this file is the "where does X live" companion to them.
+> **What this is:** a module-and-key-files index so the codebase doesn't have to be re-read from scratch each session. For architecture, conventions, run instructions, and the domain model, read [CLAUDE.md](../CLAUDE.md) and [README.md](../README.md) first — this file is the "where does X live" companion to them.
 >
-> **Freshness:** regenerated against commit `0782938` on 2026-06-16. A `SessionStart` hook checks whether any source file changed since this file was last written and reminds Claude to regenerate it. To refresh manually, just say "refresh the codebase map". When you regenerate, update the commit/date stamp above.
+> **⚠ STALE — structure moved.** The repo was reorganized into a monorepo: the four projects now live under `apps/` (e.g. `apps/erp-backend/`, `apps/erp-frontend/`), dev docs under `docs/`, and this file lists pre-move paths below. Prefix the `erp-*/` paths in this document with `apps/`. Regenerate this map against a working checkout ("refresh the codebase map") to fully resync.
+>
+> **Freshness:** regenerated against commit `0782938` on 2026-06-16 (pre-monorepo-move). A `SessionStart` hook checks whether any source file changed since this file was last written and reminds Claude to regenerate it. To refresh manually, just say "refresh the codebase map". When you regenerate, update the commit/date stamp above.
 >
 > **Counts (verified):** 36 NestJS feature modules under `src/modules/` (one `.module.ts` per folder; all 36 imported in `app.module.ts`) · 48 domain entities + a `settings` table (50 `*.entity.ts` files; `base.entity.ts` is the abstract `BaseEntity`) · 14 Jest spec files / 157 passing tests.
 
@@ -11,7 +13,7 @@
 ## Layout
 
 ```
-erp-backend/    NestJS 11 + TypeORM 0.3 — 36 feature modules under src/modules/, one folder per module
+apps/erp-backend/    NestJS 11 + TypeORM 0.3 — 36 feature modules under src/modules/, one folder per module
                 (entities/, dto/, <name>.service.ts, <name>.controller.ts, <name>.module.ts).
                 src/main.ts (bootstrap: scoped body-limits, Helmet CSP, CORS allowlist, global
                 ValidationPipe + ErrorLogFilter, migrate-on-boot), src/app.module.ts (DB dialect switch +
@@ -19,13 +21,17 @@ erp-backend/    NestJS 11 + TypeORM 0.3 — 36 feature modules under src/modules
                 seeder), src/data-source.ts (TypeORM CLI DataSource), src/common/ (BaseEntity, Setting,
                 delete-guard, sqlite-checkpoint), src/testing/test-db.ts (in-memory SQLite for specs),
                 src/migrations/ (TypeORM migrations — infra present, no files yet).
-erp-frontend/   React 19 + HashRouter + axios. src/pages/, src/components/, src/hooks/, src/api/client.js,
+apps/erp-frontend/   React 19 + HashRouter + axios. src/pages/, src/components/, src/hooks/, src/api/client.js,
                 src/nav/hubs.js, src/theme/, src/utils/exporters.js, src/styles/ (tokens.css + app.css),
                 public/ (index.html, theme-bootstrap.js, manifest.json, icons).
-erp-desktop/    Electron 40 wrapper. src/main.js, src/preload.js, scripts/ (prepare-resources, rebuild-native,
+apps/erp-desktop/    Electron 40 wrapper. src/main.js, src/preload.js, scripts/ (prepare-resources, rebuild-native,
                 postinstall), build-resources/ (icon.ico, installer.nsh, config.example.json).
-scripts/        make-icons.ps1.
-package.json    Root manifest — minimal, NOT an npm workspace (no `workspaces`); each project builds independently.
+apps/erp-mobile/     Expo SDK 57 / React Native read-only Android companion (App.js, src/, supabase/setup.sql).
+packages/       Reserved for shared code across apps (empty placeholder).
+scripts/        make-icons.ps1 (run from repo root).
+docs/           CODEBASE_MAP.md (this file), design.md, handoff.md, Manual.txt (gitignored).
+local/          GITIGNORED working data: secrets, mobile-signing keystore, live db, backups, repo bundles.
+package.json    Monorepo root — orchestration scripts (`npm run dev:backend` / `build:web` / …). NOT npm-workspaces (no `workspaces`); each app installs independently.
 ```
 
 Cross-cutting conventions (don't re-derive — see CLAUDE.md): global `AuthGuard` (opaque bearer tokens, `@Public()` exempts, `@SuperuserOnly()` gates); snake_case DB columns via `name:`; `@Column({ type: Date })` not `'timestamp'`/`'datetime'` (`'date'` string columns are OK on both dialects); voucher numbers via `SequenceService` (`PREFIX-000123`, count-seeded, not gap-free); audit via `AuditSubscriber`; errors captured by `ErrorLogFilter`; double-entry journals posted inside each service's own transaction; module dependency on `OutboxService` (never `SyncModule`) to avoid circular deps.

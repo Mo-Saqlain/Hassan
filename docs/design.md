@@ -1,8 +1,10 @@
 # Hassan Electronics ERP — Design Reference
 
-This is the **on-screen text + UI element catalogue** for the Hassan Electronics ERP / POS frontend. It documents — exhaustively, per page — every page heading, subtitle, button, input label, placeholder, table column, status chip, tab, modal, banner, validation message, and icon the user sees. Pair it with [README.md](./README.md) (functional / technical overview) and [CLAUDE.md](./CLAUDE.md) (project guide for contributors).
+This is the **on-screen text + UI element catalogue** for the Hassan Electronics ERP / POS frontend. It documents — exhaustively, per page — every page heading, subtitle, button, input label, placeholder, table column, status chip, tab, modal, banner, validation message, and icon the user sees. Pair it with [README.md](../README.md) (functional / technical overview) and [CLAUDE.md](../CLAUDE.md) (project guide for contributors).
 
-> **Source of truth.** Every quoted string in this document is lifted from the JSX in [erp-frontend/src/](erp-frontend/src/) and the hub definitions in [erp-frontend/src/nav/hubs.js](erp-frontend/src/nav/hubs.js). When the code and this file disagree, the code wins — update this file in the same commit that touches the JSX.
+> **Layout note:** this doc now lives in `docs/`. The frontend source lives under `apps/erp-frontend/src/`; the links below are written relative to `docs/` (i.e. `../apps/…`).
+
+> **Source of truth.** Every quoted string in this document is lifted from the JSX in [erp-frontend/src/](../apps/erp-frontend/src/) and the hub definitions in [erp-frontend/src/nav/hubs.js](../apps/erp-frontend/src/nav/hubs.js). When the code and this file disagree, the code wins — update this file in the same commit that touches the JSX.
 
 ---
 
@@ -12,7 +14,7 @@ This is the **on-screen text + UI element catalogue** for the Hassan Electronics
 
 | Trait | Value |
 |---|---|
-| Corner radius | `0` on every chrome element. All `--radius*` tokens in [tokens.css](erp-frontend/src/styles/tokens.css) resolve to `0`. |
+| Corner radius | `0` on every chrome element. All `--radius*` tokens in [tokens.css](../apps/erp-frontend/src/styles/tokens.css) resolve to `0`. |
 | Backdrop filter | `none` everywhere (`.card`, `.btn`, `.input`, `.modal-backdrop`, `.topbar`, `.sidebar`, `.search-results`, `.table-wrap`). |
 | Aurora layer | Disabled: `body::before { display: none !important; }`. `--bg-aurora-1..4` all `transparent`. `--aurora-strength: 0`, `--glass-strength: 1`. |
 | Gradients | None on chrome. `--gradient-primary`, `--gradient-accent`, `--gradient-warm` resolve to solid colors (no-op placeholders). `.btn-primary::after` / `.card::before` are suppressed (`content: none`). |
@@ -23,11 +25,11 @@ This is the **on-screen text + UI element catalogue** for the Hassan Electronics
 | Heading sizes | `h1` 22 px · `h2` 18 px · `h3` 15 px. Body 14 px. Labels 11–13 px. |
 | Spacing | Grid/flex gaps 6–14 px. Card padding 8–28 px. |
 
-> **Two stylesheets, layered.** [App.css](erp-frontend/src/App.css) loads first (legacy + domain rules: badges, modals, print, login, reports, tile colors, sidebar legacy tokens, the `-soft`/`-fg` semantic variants), then [tokens.css](erp-frontend/src/styles/tokens.css) overrides shared token names with the Win10 palette, then [app.css](erp-frontend/src/styles/app.css) provides the flat shell layout (sidebar/topbar/hub/grids/POS/charts/responsive). For any token defined in both files **tokens.css wins** (loaded later); App.css remains the sole source for `--success-soft`/`-fg`, `--danger-soft`/`-fg`, tile colors, and all print styles. [index.css](erp-frontend/src/index.css) only sets a legacy `code` mono stack.
+> **Two stylesheets, layered.** [App.css](../apps/erp-frontend/src/App.css) loads first (legacy + domain rules: badges, modals, print, login, reports, tile colors, sidebar legacy tokens, the `-soft`/`-fg` semantic variants), then [tokens.css](../apps/erp-frontend/src/styles/tokens.css) overrides shared token names with the Win10 palette, then [app.css](../apps/erp-frontend/src/styles/app.css) provides the flat shell layout (sidebar/topbar/hub/grids/POS/charts/responsive). For any token defined in both files **tokens.css wins** (loaded later); App.css remains the sole source for `--success-soft`/`-fg`, `--danger-soft`/`-fg`, tile colors, and all print styles. [index.css](../apps/erp-frontend/src/index.css) only sets a legacy `code` mono stack.
 
 ### Sidebar color tokens
 
-Each sidebar entry carries its own hue used only for the 24×24 icon chip (tinted background `color-mix(in srgb, var(--nav-c) 16%, transparent)` + matching 22% border) and the 3 px left strip on the active row. The tokens in [tokens.css](erp-frontend/src/styles/tokens.css):
+Each sidebar entry carries its own hue used only for the 24×24 icon chip (tinted background `color-mix(in srgb, var(--nav-c) 16%, transparent)` + matching 22% border) and the 3 px left strip on the active row. The tokens in [tokens.css](../apps/erp-frontend/src/styles/tokens.css):
 
 | Token | Hue | Used by |
 |---|---|---|
@@ -62,7 +64,7 @@ Chip variants: `.chip-success`, `.chip-warn`, `.chip-danger`, `.chip-info`, `.ch
 
 ### Theme
 
-Light + dark, persisted as `data-theme="light"|"dark"` on `<html>`. Storage key `hassan-theme` ([ThemeContext.js](erp-frontend/src/theme/ThemeContext.js)). The bootstrap IIFE [public/theme-bootstrap.js](erp-frontend/public/theme-bootstrap.js) (loaded synchronously in `<head>` before the React bundle) reads the saved theme — falling back to `prefers-color-scheme` — and sets `data-theme` so there is **no flash**. It is a separate file specifically so the page CSP can stay `script-src 'self'` (no `'unsafe-inline'`). On Electron, a theme change additionally IPCs the title-bar overlay color via `window.erpBridge.setTitleBarTheme(theme)` so the Windows-drawn min/max/close area flips with the renderer.
+Light + dark, persisted as `data-theme="light"|"dark"` on `<html>`. Storage key `hassan-theme` ([ThemeContext.js](../apps/erp-frontend/src/theme/ThemeContext.js)). The bootstrap IIFE [public/theme-bootstrap.js](../apps/erp-frontend/public/theme-bootstrap.js) (loaded synchronously in `<head>` before the React bundle) reads the saved theme — falling back to `prefers-color-scheme` — and sets `data-theme` so there is **no flash**. It is a separate file specifically so the page CSP can stay `script-src 'self'` (no `'unsafe-inline'`). On Electron, a theme change additionally IPCs the title-bar overlay color via `window.erpBridge.setTitleBarTheme(theme)` so the Windows-drawn min/max/close area flips with the renderer.
 
 `color-scheme: light|dark` is set per theme. Key surface tokens: light `--bg #f3f3f3`, `--surface #fff`, `--surface-elev #fafafa`, `--border #d1d1d1`, `--text #1f1f1f`; dark `--bg #1f1f1f`, `--surface #2c2c2c`, `--surface-elev #333`, `--border #404040`, `--text #f5f5f5`. The dark surface-elev (`#333`) must match the Electron title-bar overlay color or a seam shows.
 
@@ -70,7 +72,7 @@ Light + dark, persisted as `data-theme="light"|"dark"` on `<html>`. Storage key 
 
 ## 2. Icon catalogue
 
-Single source: [erp-frontend/src/components/Icon.js](erp-frontend/src/components/Icon.js). All icons are stroke-based SVG (`viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, 1.75 px stroke, round caps/joins, `aria-hidden`). Used as `<Icon name="…" size={…}/>`. Unknown names render `null`.
+Single source: [erp-frontend/src/components/Icon.js](../apps/erp-frontend/src/components/Icon.js). All icons are stroke-based SVG (`viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, 1.75 px stroke, round caps/joins, `aria-hidden`). Used as `<Icon name="…" size={…}/>`. Unknown names render `null`.
 
 | Group | Names |
 |---|---|
@@ -81,13 +83,13 @@ Single source: [erp-frontend/src/components/Icon.js](erp-frontend/src/components
 
 Duplicate-glyph aliases are kept for backwards compatibility: `boxes`↔`stock`, `book`↔`ledger`, `box`↔`package`, `swap`↔`transfer`.
 
-**Logo treatment.** The `<Logo>` component ([components/Logo.js](erp-frontend/src/components/Logo.js)) renders `logo192.png` (the HE monogram — white H + half-white E) as a plain `<img>` with **no chip / no backdrop wrapper** anywhere (`draggable=false`, `userSelect: none`). The logo appears only on `/login` (and the in-place `/request-access` mode). The wordmark "Hassan Electronics" appears in the sidebar brand block.
+**Logo treatment.** The `<Logo>` component ([components/Logo.js](../apps/erp-frontend/src/components/Logo.js)) renders `logo192.png` (the HE monogram — white H + half-white E) as a plain `<img>` with **no chip / no backdrop wrapper** anywhere (`draggable=false`, `userSelect: none`). The logo appears only on `/login` (and the in-place `/request-access` mode). The wordmark "Hassan Electronics" appears in the sidebar brand block.
 
 ---
 
 ## 3. Application shell
 
-The shell is rendered by [components/Layout.js](erp-frontend/src/components/Layout.js). CSS grid: sidebar (240 px, or 56 px rail) + main column (1fr). Topbar is sticky at 44 px. Provider nesting is `<ThemeProvider>` (outside the router) → `<HashRouter>` → `<AuthProvider>` → routes; the shell uses **HashRouter** so the build works under Electron `app://`.
+The shell is rendered by [components/Layout.js](../apps/erp-frontend/src/components/Layout.js). CSS grid: sidebar (240 px, or 56 px rail) + main column (1fr). Topbar is sticky at 44 px. Provider nesting is `<ThemeProvider>` (outside the router) → `<HashRouter>` → `<AuthProvider>` → routes; the shell uses **HashRouter** so the build works under Electron `app://`.
 
 ```
 ┌──────────────┬────────────────────────────────────────────────┐
@@ -108,7 +110,7 @@ Auth gating: while `loading` the shell shows a `login-shell` "Loading…"; if `!
 
 ### 3.1 Sidebar
 
-Defined in [nav/hubs.js](erp-frontend/src/nav/hubs.js) (`SIDEBAR` array, built from `HUBS`). Rendered by [components/Layout.js](erp-frontend/src/components/Layout.js); the brand block uses [components/Brand.js](erp-frontend/src/components/Brand.js).
+Defined in [nav/hubs.js](../apps/erp-frontend/src/nav/hubs.js) (`SIDEBAR` array, built from `HUBS`). Rendered by [components/Layout.js](../apps/erp-frontend/src/components/Layout.js); the brand block uses [components/Brand.js](../apps/erp-frontend/src/components/Brand.js).
 
 **Brand block** — top of sidebar, 44 px tall, no border-bottom (the Electron title-bar overlay can't paint over a border, so the seam would look broken; the sidebar right-edge + bg contrast supply separation instead).
 
@@ -176,7 +178,7 @@ Mounted in `<Layout>`, polls `GET /backup/status` on mount + every 5 minutes. Re
 
 ### 3.4 HubFrame (title + tab strip)
 
-Wrapper for every hub. File [components/HubFrame.js](erp-frontend/src/components/HubFrame.js). Renders:
+Wrapper for every hub. File [components/HubFrame.js](../apps/erp-frontend/src/components/HubFrame.js). Renders:
 
 ```html
 <header class="hub-head">
@@ -189,11 +191,11 @@ Wrapper for every hub. File [components/HubFrame.js](erp-frontend/src/components
 <div class="hub-body"><Outlet/></div>
 ```
 
-Tabs are `<NavLink>` (partial-prefix match, so `/customer-ledger` stays active on `/customer-ledger/:id`). Tabs marked `superuserOnly` in [nav/hubs.js](erp-frontend/src/nav/hubs.js) are filtered out for regular users (UI hint only — the backend re-enforces). The `hub-body` CSS suppresses the sub-page's own `<h1>`/single-child `page-head` so the hub title + active tab aren't duplicated; standalone routes (e.g. `/master`) keep their heading.
+Tabs are `<NavLink>` (partial-prefix match, so `/customer-ledger` stays active on `/customer-ledger/:id`). Tabs marked `superuserOnly` in [nav/hubs.js](../apps/erp-frontend/src/nav/hubs.js) are filtered out for regular users (UI hint only — the backend re-enforces). The `hub-body` CSS suppresses the sub-page's own `<h1>`/single-child `page-head` so the hub title + active tab aren't duplicated; standalone routes (e.g. `/master`) keep their heading.
 
 ### 3.5 Unsaved-changes guard
 
-Hook: [hooks/useUnsavedChangesPrompt.js](erp-frontend/src/hooks/useUnsavedChangesPrompt.js). Guards both tab-close/refresh (`beforeunload`, sets `e.returnValue=''`) and in-app navigation while a form is dirty. Because the app uses `<HashRouter>` (not a data router, so RR7 `useBlocker` is unavailable), in-app nav is intercepted by a **document-level capture-phase `click` listener** that walks up to the nearest `<a>`, only intercepts hash-route links, skips modifier-clicks/same-route, and calls `window.confirm`. Programmatic navigation is intentionally **not** blocked. Default message:
+Hook: [hooks/useUnsavedChangesPrompt.js](../apps/erp-frontend/src/hooks/useUnsavedChangesPrompt.js). Guards both tab-close/refresh (`beforeunload`, sets `e.returnValue=''`) and in-app navigation while a form is dirty. Because the app uses `<HashRouter>` (not a data router, so RR7 `useBlocker` is unavailable), in-app nav is intercepted by a **document-level capture-phase `click` listener** that walks up to the nearest `<a>`, only intercepts hash-route links, skips modifier-clicks/same-route, and calls `window.confirm`. Programmatic navigation is intentionally **not** blocked. Default message:
 
 > "You have unsaved changes. Leave this page and discard them?"
 
@@ -205,7 +207,7 @@ Every form-bearing page wires `useUnsavedChangesPrompt(isDirty)` where `isDirty`
 
 ### 4.1 Sign in — `/login`
 
-File [pages/Login.js](erp-frontend/src/pages/Login.js). Single card with a `mode` state (`'login'` / `'request'`), `min(420px, 96vw)`, 1 px solid `--border-strong` border, `--shadow-lg` shadow. Background `--bg`.
+File [pages/Login.js](../apps/erp-frontend/src/pages/Login.js). Single card with a `mode` state (`'login'` / `'request'`), `min(420px, 96vw)`, 1 px solid `--border-strong` border, `--shadow-lg` shadow. Background `--bg`.
 
 - **Theme toggle** at top-right (`<ThemeToggle>`).
 - **Logo** centered, `<Logo size={72}>` transparent monogram, no chip.
@@ -248,7 +250,7 @@ The sections below walk through every page in sidebar order. Each hub is rendere
 
 ### 5.1 Dashboard — `/`
 
-File [pages/Dashboard.js](erp-frontend/src/pages/Dashboard.js). On mount it fires 14 parallel reads (cash-register day, stock summary, income statement MTD, customer/supplier balances, AR/AP aging, slow-moving stock, sales, purchases, payments, fund-transfers, incentive progress, deferred upcoming).
+File [pages/Dashboard.js](../apps/erp-frontend/src/pages/Dashboard.js). On mount it fires 14 parallel reads (cash-register day, stock summary, income statement MTD, customer/supplier balances, AR/AP aging, slow-moving stock, sales, purchases, payments, fund-transfers, incentive progress, deferred upcoming).
 
 **Header**
 
@@ -285,7 +287,7 @@ File [pages/Dashboard.js](erp-frontend/src/pages/Dashboard.js). On mount it fire
 
 ### 5.2 POS Terminal — `/pos` (no sidebar entry; URL-only)
 
-File [pages/POS.js](erp-frontend/src/pages/POS.js). Server-side session state (`pos_sessions` + `pos_cart_items`). **Keyboard shortcuts** (unmodified): **F2** focus+select scan input, **F4** focus customer picker, **F8** checkout, **F9** clear cart.
+File [pages/POS.js](../apps/erp-frontend/src/pages/POS.js). Server-side session state (`pos_sessions` + `pos_cart_items`). **Keyboard shortcuts** (unmodified): **F2** focus+select scan input, **F4** focus customer picker, **F8** checkout, **F9** clear cart.
 
 **No-session state**
 
@@ -330,7 +332,7 @@ Serial validation mirrors the backend (required → exactly `qty`; optional → 
 
 ### 5.3 Cash Book — `/cash-register`
 
-File [pages/CashRegister.js](erp-frontend/src/pages/CashRegister.js). One session per shop-day; variance recorded numerically (no journal posting).
+File [pages/CashRegister.js](../apps/erp-frontend/src/pages/CashRegister.js). One session per shop-day; variance recorded numerically (no journal posting).
 
 **Header** — title `"Cash book — {date}"`, subtitle `"Session-based daily till · running balance per row"`. Conditional right buttons: `"▶ Open Today's Register"` (no session, today), `"■ Close Register"` (open session), `"+ New Entry"` (session exists; disabled+titled `"Register is closed for this date"` when closed).
 
@@ -372,7 +374,7 @@ Hub title `"Customers"` · subtitle `"Customer info, receipts received, ledger, 
 
 #### Tab — Info (`/customers`)
 
-`CustomersPanel` in [pages/MasterData.js](erp-frontend/src/pages/MasterData.js) (a `PartyPanel` loading computed balances from `/reports/customer-balances`).
+`CustomersPanel` in [pages/MasterData.js](../apps/erp-frontend/src/pages/MasterData.js) (a `PartyPanel` loading computed balances from `/reports/customer-balances`).
 
 - Panel heading `"Customers"`. Toolbar `<ExportButtons>` + `"+ Add Customer"`.
 - Search label `"Quick search"`, placeholder `"Type code, name, phone, email, or address…"`. Summary `"{filtered} of {total}"`.
@@ -387,11 +389,11 @@ Table columns: `"Code"` · `"Name"` · `"Phone"` · `"Email"` · `"Opening"` · 
 
 #### Tab — Ledger (`/customer-ledger`, `/customer-ledger/:id`)
 
-File [pages/CustomerLedger.js](erp-frontend/src/pages/CustomerLedger.js). Picker `"— Select customer —"` (auto-selects first). Selected card: name + contact line. When AR-aging detail exists, an `<AgingPanel title="Outstanding invoices" numKey="invoiceNo" showPromiseColumn>` renders above the ledger. Body is `<LedgerView>` (see §6.8). Empty `"Select a customer to view their ledger."`.
+File [pages/CustomerLedger.js](../apps/erp-frontend/src/pages/CustomerLedger.js). Picker `"— Select customer —"` (auto-selects first). Selected card: name + contact line. When AR-aging detail exists, an `<AgingPanel title="Outstanding invoices" numKey="invoiceNo" showPromiseColumn>` renders above the ledger. Body is `<LedgerView>` (see §6.8). Empty `"Select a customer to view their ledger."`.
 
 #### Tab — Warranty (`/warranty-lookup`)
 
-File [pages/WarrantyLookup.js](erp-frontend/src/pages/WarrantyLookup.js). Counter warranty lookup with a `.tab-strip` of 4 modes:
+File [pages/WarrantyLookup.js](../apps/erp-frontend/src/pages/WarrantyLookup.js). Counter warranty lookup with a `.tab-strip` of 4 modes:
 
 | Mode | Label | Endpoint |
 |---|---|---|
@@ -409,7 +411,7 @@ File [pages/WarrantyLookup.js](erp-frontend/src/pages/WarrantyLookup.js). Counte
 
 #### Tab — Service (`/service-tickets`)
 
-File [pages/ServiceTickets.js](erp-frontend/src/pages/ServiceTickets.js). Repair/warranty-claim workflow. Statuses (chip): `RECEIVED` (info), `SENT_TO_COMPANY` (info), `WAITING_PARTS` (warn), `UNDER_REPAIR` (warn), `READY_FOR_PICKUP` (success), `DELIVERED` (success), `UNREPAIRABLE` (danger).
+File [pages/ServiceTickets.js](../apps/erp-frontend/src/pages/ServiceTickets.js). Repair/warranty-claim workflow. Statuses (chip): `RECEIVED` (info), `SENT_TO_COMPANY` (info), `WAITING_PARTS` (warn), `UNDER_REPAIR` (warn), `READY_FOR_PICKUP` (success), `DELIVERED` (success), `UNREPAIRABLE` (danger).
 
 - Header + `"+ New ticket"`. A `.grid-stat` of per-status stat tiles (count from `GET /service-tickets/tally`). A `FunnelStages` pipeline card (eyebrow notes a bloated "Sent to Company" = manufacturer dragging warranty claims).
 - Form offers three warranty-resolution paths feeding one ticket:
@@ -427,7 +429,7 @@ Hub title `"Sales"` · subtitle `"Bill-book voucher entry, posted invoices, retu
 
 #### Tab — New Voucher (`/sales-voucher`)
 
-File [pages/SalesVoucher.js](erp-frontend/src/pages/SalesVoucher.js). The whole submission is built client-side and posted atomically to `POST /sales/voucher` (`SalesService.createFromVoucher`) — one Sale + N receipt splits, rolled back fully if any split fails. **Keyboard:** F2 focus scan, Ctrl/Cmd+Enter submit.
+File [pages/SalesVoucher.js](../apps/erp-frontend/src/pages/SalesVoucher.js). The whole submission is built client-side and posted atomically to `POST /sales/voucher` (`SalesService.createFromVoucher`) — one Sale + N receipt splits, rolled back fully if any split fails. **Keyboard:** F2 focus scan, Ctrl/Cmd+Enter submit.
 
 - Header `"Sales Voucher"` + sub `"Bill-book entry · multi-tender · atomic"`.
 - **Customer section** — eyebrow with `"+ New customer"` / `"Close"` toggle (inline create card: `"Name *"` / `"Phone"` / `"Address"`, `"Save & select"` / `"Cancel"`). Customer select shows a balance tail per option (`"— owes X"` / `"— credit X"`) and a note of open A/R or held credit below.
@@ -440,7 +442,7 @@ File [pages/SalesVoucher.js](erp-frontend/src/pages/SalesVoucher.js). The whole 
 
 #### Tab — History (`/sales`)
 
-File [pages/Sales.js](erp-frontend/src/pages/Sales.js). Read-only.
+File [pages/Sales.js](../apps/erp-frontend/src/pages/Sales.js). Read-only.
 
 - Heading `"Sales History"`, search placeholder `"Search invoice, customer, method..."`.
 - Info banner: sales are created at POS / via the voucher; this page is read-only history; points to Customer → Receipts for collections and the Customer Ledger tab for net A/R.
@@ -451,11 +453,11 @@ File [pages/Sales.js](erp-frontend/src/pages/Sales.js). Read-only.
 
 #### Tab — Returns (`/sale-returns`)
 
-File [pages/SaleReturns.js](erp-frontend/src/pages/SaleReturns.js). Goods returned by a customer (stock IN). Heading `"Sale Returns"`, button `"+ New Sale Return"`. Form `"New Sale Return"`: `"Customer"` (`"— None —"`), `"Store"` (`"— Default —"`), `"Reason"`, line items (`"Item"` `"— Select —"` + an inline mono serial input below the select for serial-tracked items, `"Qty"`, `"Unit Price"`, `"Line Total"`, `×`), `"+ Add Line"`, `"Total Returned"`. Buttons `"Save Return"` / `"Cancel"`. Unit price prefills from item `salePrice`. List columns `"Return #"` · `"Date"` · `"Customer"` · `"Total"` · `"Reason"`. No reverse/delete from this page (history is immutable here). Note: `saleId` is in the payload but has no form control — returns are unlinked to their origin voucher from this page.
+File [pages/SaleReturns.js](../apps/erp-frontend/src/pages/SaleReturns.js). Goods returned by a customer (stock IN). Heading `"Sale Returns"`, button `"+ New Sale Return"`. Form `"New Sale Return"`: `"Customer"` (`"— None —"`), `"Store"` (`"— Default —"`), `"Reason"`, line items (`"Item"` `"— Select —"` + an inline mono serial input below the select for serial-tracked items, `"Qty"`, `"Unit Price"`, `"Line Total"`, `×`), `"+ Add Line"`, `"Total Returned"`. Buttons `"Save Return"` / `"Cancel"`. Unit price prefills from item `salePrice`. List columns `"Return #"` · `"Date"` · `"Customer"` · `"Total"` · `"Reason"`. No reverse/delete from this page (history is immutable here). Note: `saleId` is in the payload but has no form control — returns are unlinked to their origin voucher from this page.
 
 #### Tab — Deliveries (`/deliveries`)
 
-File [pages/Deliveries.js](erp-frontend/src/pages/Deliveries.js). Operational handover tracking (stock already deducted at sale time; the only inventory effect is the `Item.reservedQty` overlay). Statuses (chip): `PENDING` (info), `OUT_FOR_DELIVERY` (warn), `DELIVERED` (success), `INSTALLATION_PENDING` (warn), `INSTALLED` (success), `CANCELLED` (danger). The first three reserve inventory.
+File [pages/Deliveries.js](../apps/erp-frontend/src/pages/Deliveries.js). Operational handover tracking (stock already deducted at sale time; the only inventory effect is the `Item.reservedQty` overlay). Statuses (chip): `PENDING` (info), `OUT_FOR_DELIVERY` (warn), `DELIVERED` (success), `INSTALLATION_PENDING` (warn), `INSTALLED` (success), `CANCELLED` (danger). The first three reserve inventory.
 
 - Heading `"Deliveries"`, `"+ New delivery"`.
 - A `FunnelStages` **delivery pipeline** card (tally computed from loaded rows; bloated stages = transport backed up).
@@ -465,7 +467,7 @@ File [pages/Deliveries.js](erp-frontend/src/pages/Deliveries.js). Operational ha
 
 #### Tab — Overdue Bookings (`/overdue-bookings`)
 
-File [pages/OverdueBookings.js](erp-frontend/src/pages/OverdueBookings.js). Surfaces sales where the customer paid an advance, the unit is still BOOKED, and the booking is older than `minDays`.
+File [pages/OverdueBookings.js](../apps/erp-frontend/src/pages/OverdueBookings.js). Surfaces sales where the customer paid an advance, the unit is still BOOKED, and the booking is older than `minDays`.
 
 - Heading `"Overdue Bookings"`. Toolbar: `"Show bookings older than … days"` number (default 7) + `"Refresh"`.
 - Persistent info alert explaining Release-to-Floor flips serials BOOKED→AVAILABLE and the advance stays as customer credit (not auto-refunded).
@@ -493,7 +495,7 @@ Same `PartyPanel` shape as Customer → Info, loading `/reports/supplier-balance
 
 #### Tab — Incentives (`/incentives`)
 
-File [pages/Incentives.js](erp-frontend/src/pages/Incentives.js). Manufacturer/brand **quantity** targets (distinct from employee commission). `report-tabs` strip with three sub-tabs: **Targets & Progress · Manage Targets · Booked Awards**.
+File [pages/Incentives.js](../apps/erp-frontend/src/pages/Incentives.js). Manufacturer/brand **quantity** targets (distinct from employee commission). `report-tabs` strip with three sub-tabs: **Targets & Progress · Manage Targets · Booked Awards**.
 
 **Targets & Progress** — columns `"Target"` · `"Basis"` · `"Period"` · `"Target Qty"` · `"Net Sold"` · `"Progress"` (a `Bullet` with `threshold` + `"{progressPct}%"`) · `"Incentive"` · `"Status"`. Status badge `"✔ Achieved"` (green) / `"N to go"` (gray).
 
@@ -503,7 +505,7 @@ File [pages/Incentives.js](erp-frontend/src/pages/Incentives.js). Manufacturer/b
 
 #### Tab — Ledger (`/supplier-ledger`, `/supplier-ledger/:id`)
 
-File [pages/SupplierLedger.js](erp-frontend/src/pages/SupplierLedger.js). Mirror of Customer Ledger; picker `"— Select supplier —"`. AP-aging detail renders `<AgingPanel title="Outstanding bills" numKey="billNo">` (no promise column). Body `<LedgerView>`.
+File [pages/SupplierLedger.js](../apps/erp-frontend/src/pages/SupplierLedger.js). Mirror of Customer Ledger; picker `"— Select supplier —"`. AP-aging detail renders `<AgingPanel title="Outstanding bills" numKey="billNo">` (no promise column). Body `<LedgerView>`.
 
 ---
 
@@ -513,7 +515,7 @@ Hub title `"Purchases"` · subtitle `"Orders raised, bills posted, and purchase 
 
 #### Tab — Orders (`/purchase-orders`)
 
-File [pages/PurchaseOrders.js](erp-frontend/src/pages/PurchaseOrders.js). Uses the newer `.page-head` / `.input` / `.t` style with `<h1>` + subtitle.
+File [pages/PurchaseOrders.js](../apps/erp-frontend/src/pages/PurchaseOrders.js). Uses the newer `.page-head` / `.input` / `.t` style with `<h1>` + subtitle.
 
 - Title `"Purchase orders"`, subtitle `"Orders placed with suppliers — Draft → Sent → Received."`. Toolbar `<ExportButtons>` + `"+ New purchase order"`.
 - Form `"New purchase order"`: `"Supplier *"`, `"Order date *"`, `"Expected delivery"`, `"Status"` (`"Draft"` / `"Sent to supplier"` / `"Received"` / `"Cancelled"`); line table `"Item"` / `"Qty"` / `"Expected unit cost"` / `"Line total"` / `×`, `"+ Add line"`, `"Total: Rs {value}"`, `"Notes"`. Buttons `"Save PO"` / `"Cancel"`.
@@ -521,7 +523,7 @@ File [pages/PurchaseOrders.js](erp-frontend/src/pages/PurchaseOrders.js). Uses t
 
 #### Tab — Bills (`/purchases`)
 
-File [pages/Purchases.js](erp-frontend/src/pages/Purchases.js). Inbound goods (purchase + stock IN + weighted-avg cost roll-up + serial intake).
+File [pages/Purchases.js](../apps/erp-frontend/src/pages/Purchases.js). Inbound goods (purchase + stock IN + weighted-avg cost roll-up + serial intake).
 
 - Heading `"Purchases"`, button `"+ New Purchase"`.
 - Info banner: `"Bills aren't paid one-for-one. To pay suppliers, use the Payments tab — the Supplier Ledger tab shows the net balance you owe."`
@@ -531,7 +533,7 @@ File [pages/Purchases.js](erp-frontend/src/pages/Purchases.js). Inbound goods (p
 
 #### Tab — Returns (`/purchase-returns`)
 
-File [pages/PurchaseReturns.js](erp-frontend/src/pages/PurchaseReturns.js). Goods returned to supplier (stock OUT). Heading `"Purchase Returns"`, button `"+ New Purchase Return"`. Form mirrors Sale Returns but **no serial capture** and unit price prefills from item `purchasePrice`: `"Supplier"`, `"Store"`, `"Reason"`, lines `"Item"` / `"Qty"` / `"Unit Price"` / `"Line Total"`, `"+ Add Line"`, `"Total Returned"`. List columns `"Return #"` · `"Date"` · `"Supplier"` · `"Total"` · `"Reason"`. No reverse/delete from this page.
+File [pages/PurchaseReturns.js](../apps/erp-frontend/src/pages/PurchaseReturns.js). Goods returned to supplier (stock OUT). Heading `"Purchase Returns"`, button `"+ New Purchase Return"`. Form mirrors Sale Returns but **no serial capture** and unit price prefills from item `purchasePrice`: `"Supplier"`, `"Store"`, `"Reason"`, lines `"Item"` / `"Qty"` / `"Unit Price"` / `"Line Total"`, `"+ Add Line"`, `"Total Returned"`. List columns `"Return #"` · `"Date"` · `"Supplier"` · `"Total"` · `"Reason"`. No reverse/delete from this page.
 
 ---
 
@@ -541,7 +543,7 @@ Hub title `"Items"` · subtitle `"Item catalogue and category tree."` Tabs: **Ca
 
 #### Tab — Catalogue (`/items`)
 
-[components/master/ItemsPanel.js](erp-frontend/src/components/master/ItemsPanel.js).
+[components/master/ItemsPanel.js](../apps/erp-frontend/src/components/master/ItemsPanel.js).
 
 - Panel heading `"Items"`. Toolbar `<ExportButtons>` + `"+ Add Item"`. Quick search (autoFocus, backed by a `<datalist>`), placeholder mentions model/name/SKU/barcode/brand.
 
@@ -569,7 +571,7 @@ Table columns: `"Model No."` · `"Brand"` · `"Categories"` (gray badges) · `"P
 
 #### Tab — Categories (`/categories`)
 
-[components/master/CategoriesPanel.js](erp-frontend/src/components/master/CategoriesPanel.js).
+[components/master/CategoriesPanel.js](../apps/erp-frontend/src/components/master/CategoriesPanel.js).
 
 - Panel heading `"Categories"`, search placeholder over name/description, button `"+ Add Category"`.
 - Form `"New Category"` / `"Edit Category"`: `"Name"` (required), `"Code"` (maxLength 8, forced UPPERCASE `[A-Z0-9]`, mono, placeholder `"e.g. COOLER, FAN, STAND"`, tooltip about `LOCAL-{code}-{year}-{seq}` serials), `"Parent Category"` (`"— Top Level —"`, options indented with `"› "` prefix; the dropdown excludes self + descendants to block cycles), `"Active"`, `"Description"` (textarea).
@@ -584,7 +586,7 @@ Hub title `"Stock"` · subtitle `"On-hand summary, movement history, transfers, 
 
 #### Tab — Summary (`/stock`)
 
-File [pages/Stock.js](erp-frontend/src/pages/Stock.js).
+File [pages/Stock.js](../apps/erp-frontend/src/pages/Stock.js).
 
 - Title `"Stock summary"`, subtitle `"On-hand vs minimum per item · low-stock alerts highlighted"`. Toolbar quick search + `<ExportButtons>` (file `stock_summary`) + `"+ Adjust Stock"`.
 - Table columns (with header tooltips): `"Item"` · `"SKU"` · `"On Hand"` · `"Reserved"` (amber if >0, _"Promised to pending deliveries / sales orders."_) · `"Available"` (bold, _"onHand − reserved … sellable right now."_) · `"Min Level"` · `"Avg cost"` (mono, _"Weighted-average unit cost (running). Updated by purchases."_) · `"Value"` (mono, _"onHand × avg cost — money locked in inventory."_) · `"Status"` (`"Low"` red when `available < minStockLevel`, else `"OK"` green).
@@ -597,15 +599,15 @@ File [pages/Stock.js](erp-frontend/src/pages/Stock.js).
 
 #### Tab — Ledger (`/stock-ledger`)
 
-File [pages/StockLedger.js](erp-frontend/src/pages/StockLedger.js). Title `"Stock Ledger"` (`page-header` h2), export file `stock_ledger`, subtitle `"Total IN {x} · Total OUT {y} · Net {z}"`. Filter row `"Item"`/`"Category"`/`"Brand"`/`"Supplier"` (all `"— Any —"`), `"From"`, `"To"`, buttons `"Apply Filters"` / `"Reset"`. Summary stats `.ledger-summary`: Total IN (success) / Total OUT (danger) / Net Change / Movements count. Table `"Date"` · `"Item"` · `"SKU"` · `"Store"` · `"Type"` (IN green / OUT red badge) · `"Qty"` · `"Reference"` · `"Running"`.
+File [pages/StockLedger.js](../apps/erp-frontend/src/pages/StockLedger.js). Title `"Stock Ledger"` (`page-header` h2), export file `stock_ledger`, subtitle `"Total IN {x} · Total OUT {y} · Net {z}"`. Filter row `"Item"`/`"Category"`/`"Brand"`/`"Supplier"` (all `"— Any —"`), `"From"`, `"To"`, buttons `"Apply Filters"` / `"Reset"`. Summary stats `.ledger-summary`: Total IN (success) / Total OUT (danger) / Net Change / Movements count. Table `"Date"` · `"Item"` · `"SKU"` · `"Store"` · `"Type"` (IN green / OUT red badge) · `"Qty"` · `"Reference"` · `"Running"`.
 
 #### Tab — Transfers (`/stock-transfers`)
 
-File [pages/StockTransfers.js](erp-frontend/src/pages/StockTransfers.js). Title `"Stock transfers"`, subtitle `"Move inventory between stores. Each transfer is atomic — OUT from source, IN to destination, or nothing."`. Button `"+ New transfer"` (disabled when < 2 stores; warning chip). Form `"From store *"` / `"To store *"` (`"— Select —"`), `"Date"`, item lines (`"Item"` + `"Quantity"` + remove), `"+ Add line"`, `"Notes"`. Validation: from ≠ to, ≥1 valid line. List columns `"Transfer #"` · `"Date"` · `"From"` · `"To"` · `"Items"` · `"Notes"`.
+File [pages/StockTransfers.js](../apps/erp-frontend/src/pages/StockTransfers.js). Title `"Stock transfers"`, subtitle `"Move inventory between stores. Each transfer is atomic — OUT from source, IN to destination, or nothing."`. Button `"+ New transfer"` (disabled when < 2 stores; warning chip). Form `"From store *"` / `"To store *"` (`"— Select —"`), `"Date"`, item lines (`"Item"` + `"Quantity"` + remove), `"+ Add line"`, `"Notes"`. Validation: from ≠ to, ≥1 valid line. List columns `"Transfer #"` · `"Date"` · `"From"` · `"To"` · `"Items"` · `"Notes"`.
 
 #### Tab — Damaged (`/damaged-goods`)
 
-File [pages/DamagedGoods.js](erp-frontend/src/pages/DamagedGoods.js). Title `"Damaged goods"`, subtitle `"Track stock removed from sellable inventory — damaged, in repair, written off, or restored."`. Button `"+ Report damage"`. A `.grid-stat` of per-status tiles (`"Damaged"` / `"In repair"` / `"Write-off"` / `"Repaired (returned to stock)"`). Form `"Item *"`, `"Store"` (`"— Any —"`), `"Quantity *"`, `"Initial status *"` (only `DAMAGED` / `IN_REPAIR` / `WRITE_OFF` selectable at create), `"Reported on"`, `"Reason"`, `"Notes"`, plus a warning that reporting immediately removes stock. Row actions are status-conditional: `"Send to repair"` (DAMAGED→IN_REPAIR), `"Mark repaired"` + `"Write-off"` (DAMAGED/IN_REPAIR), `"Delete"` (REPAIRED). Columns `"Voucher"` · `"Reported"` · `"Item"` · `"Store"` · `"Qty"` · `"Status"` (chip per status) · `"Reason"` · `"Actions"`.
+File [pages/DamagedGoods.js](../apps/erp-frontend/src/pages/DamagedGoods.js). Title `"Damaged goods"`, subtitle `"Track stock removed from sellable inventory — damaged, in repair, written off, or restored."`. Button `"+ Report damage"`. A `.grid-stat` of per-status tiles (`"Damaged"` / `"In repair"` / `"Write-off"` / `"Repaired (returned to stock)"`). Form `"Item *"`, `"Store"` (`"— Any —"`), `"Quantity *"`, `"Initial status *"` (only `DAMAGED` / `IN_REPAIR` / `WRITE_OFF` selectable at create), `"Reported on"`, `"Reason"`, `"Notes"`, plus a warning that reporting immediately removes stock. Row actions are status-conditional: `"Send to repair"` (DAMAGED→IN_REPAIR), `"Mark repaired"` + `"Write-off"` (DAMAGED/IN_REPAIR), `"Delete"` (REPAIRED). Columns `"Voucher"` · `"Reported"` · `"Item"` · `"Store"` · `"Qty"` · `"Status"` (chip per status) · `"Reason"` · `"Actions"`.
 
 ---
 
@@ -623,19 +625,19 @@ Hub title `"Employees"` · subtitle `"Staff roster, attendance, payments, incent
 
 #### Tab — Attendance (`/attendance`)
 
-File [pages/Attendance.js](erp-frontend/src/pages/Attendance.js). Title `"Attendance · {date}"`. Date input + `"Refresh"`. Tally chips `"✓ Present"` (success), `"½ Half day"` (warn), `"○ Leave"` (info), `"✕ Absent"` (danger). Table `"Employee"` · `"Role"` · `"Current status"` (chip or `"— not marked —"`) · `"Mark"` (four buttons; current highlighted). Only active employees listed. Empty `"No active employees yet. Add employees first under Catalogue → Employees."`.
+File [pages/Attendance.js](../apps/erp-frontend/src/pages/Attendance.js). Title `"Attendance · {date}"`. Date input + `"Refresh"`. Tally chips `"✓ Present"` (success), `"½ Half day"` (warn), `"○ Leave"` (info), `"✕ Absent"` (danger). Table `"Employee"` · `"Role"` · `"Current status"` (chip or `"— not marked —"`) · `"Mark"` (four buttons; current highlighted). Only active employees listed. Empty `"No active employees yet. Add employees first under Catalogue → Employees."`.
 
 #### Tab — Payments (`/employee-payments`)
 
-File [pages/EmployeePayments.js](erp-frontend/src/pages/EmployeePayments.js). Title `"Employee payments"`, subtitle `"Salary, advances, reimbursements, expenses, incentive payouts."`. Export file `employee_payments`. Button `"+ New entry"`. Form `"New employee transaction"`: `"Employee *"`, `"Type *"` (`"Salary"`, `"Advance (employee borrows)"`, `"Reimbursement (employee paid expense)"`, `"Shop expense paid by employee"`, `"Incentive payout"`, `"Adjustment"`), `"Date *"`, `"Amount *"`, `"Account (for cash/bank flow)"` (`"— None / out-of-pocket —"`), `"Description"`, `"Notes"`. Columns `"Date"` · `"Voucher"` · `"Employee"` · `"Type"` (chip) · `"Description"` · `"Account"` · `"Amount"` · `"Actions"` (Delete).
+File [pages/EmployeePayments.js](../apps/erp-frontend/src/pages/EmployeePayments.js). Title `"Employee payments"`, subtitle `"Salary, advances, reimbursements, expenses, incentive payouts."`. Export file `employee_payments`. Button `"+ New entry"`. Form `"New employee transaction"`: `"Employee *"`, `"Type *"` (`"Salary"`, `"Advance (employee borrows)"`, `"Reimbursement (employee paid expense)"`, `"Shop expense paid by employee"`, `"Incentive payout"`, `"Adjustment"`), `"Date *"`, `"Amount *"`, `"Account (for cash/bank flow)"` (`"— None / out-of-pocket —"`), `"Description"`, `"Notes"`. Columns `"Date"` · `"Voucher"` · `"Employee"` · `"Type"` (chip) · `"Description"` · `"Account"` · `"Amount"` · `"Actions"` (Delete).
 
 #### Tab — Incentive Rules (`/employee-incentive-rules`)
 
-File [pages/EmployeeIncentiveRules.js](erp-frontend/src/pages/EmployeeIncentiveRules.js). Title `"Employee incentive rules"`, subtitle about stacking. Button `"+ New rule"`. Form: `"Employee *"`, `"Applies to *"` (`"All sales"` / `"Sales of a category"` / `"Sales of a specific item"` / `"Sales of a brand"`), conditional `"Category *"` / `"Item *"` / `"Brand *"`, `"Percentage of sale *"` (max 100), `"Starts on"`, `"Ends on"`, `"Notes"`, `"Active"`. Columns `"Employee"` · `"Applies to"` · `"Reference"` · `"Percentage"` · `"Period"` (`"{startsOn} → {endsOn}"` or `"always"`) · `"Status"` · `"Actions"`. Confirm delete `"Delete this rule?"`.
+File [pages/EmployeeIncentiveRules.js](../apps/erp-frontend/src/pages/EmployeeIncentiveRules.js). Title `"Employee incentive rules"`, subtitle about stacking. Button `"+ New rule"`. Form: `"Employee *"`, `"Applies to *"` (`"All sales"` / `"Sales of a category"` / `"Sales of a specific item"` / `"Sales of a brand"`), conditional `"Category *"` / `"Item *"` / `"Brand *"`, `"Percentage of sale *"` (max 100), `"Starts on"`, `"Ends on"`, `"Notes"`, `"Active"`. Columns `"Employee"` · `"Applies to"` · `"Reference"` · `"Percentage"` · `"Period"` (`"{startsOn} → {endsOn}"` or `"always"`) · `"Status"` · `"Actions"`. Confirm delete `"Delete this rule?"`.
 
 #### Tab — Ledger (`/employee-ledger`, `/employee-ledger/:id`)
 
-File [pages/EmployeeLedger.js](erp-frontend/src/pages/EmployeeLedger.js). Has its own inline table (debit/credit relabeled `"Earned"`/`"Paid"`) — does **not** use `<LedgerView>`. Title `"Employee ledger"`. Picker `"— Select employee —"` (`"{name} · {role}"`), `"From"`/`"To"` dates. Summary stripe `"Opening balance"`, `"Incentives earned · this period"` (gradient text), `"Current balance · {status}"` (`"we owe employee"` / `"employee owes us"` / `"settled"`). Table `"Date"` · `"Ref"` · `"Type"` · `"Description"` · `"Earned"` · `"Paid"` · `"Balance"`. `<ExportButtons>` (file `employee_ledger_{name}`).
+File [pages/EmployeeLedger.js](../apps/erp-frontend/src/pages/EmployeeLedger.js). Has its own inline table (debit/credit relabeled `"Earned"`/`"Paid"`) — does **not** use `<LedgerView>`. Title `"Employee ledger"`. Picker `"— Select employee —"` (`"{name} · {role}"`), `"From"`/`"To"` dates. Summary stripe `"Opening balance"`, `"Incentives earned · this period"` (gradient text), `"Current balance · {status}"` (`"we owe employee"` / `"employee owes us"` / `"settled"`). Table `"Date"` · `"Ref"` · `"Type"` · `"Description"` · `"Earned"` · `"Paid"` · `"Balance"`. `<ExportButtons>` (file `employee_ledger_{name}`).
 
 ---
 
@@ -649,11 +651,11 @@ Hub title `"Accounts"` · subtitle `"Cash, bank, wallet, capital, and credit acc
 
 #### Tab — Transfers (`/fund-transfers`)
 
-File [pages/FundTransfers.js](erp-frontend/src/pages/FundTransfers.js). Heading `"Fund Transfers"`, button `"+ New Transfer"`. Info: `"Move money between your own accounts (Capital → Cash, Cash → Bank, Bank → Credit Card, etc.). Customer/supplier payments belong on the Receipts / Payments pages."`. Form `"Date"`, `"From Account"` / `"To Account"`, `"Amount"`, `"Notes"`. Validation `"Source and destination must differ"`. Columns `"Transfer #"` · `"Date"` · `"From"` (name + type) · `"To"` · `"Amount"` · `"Notes"` · `"Actions"` (`<ReverseAction endpoint="/fund-transfers">`).
+File [pages/FundTransfers.js](../apps/erp-frontend/src/pages/FundTransfers.js). Heading `"Fund Transfers"`, button `"+ New Transfer"`. Info: `"Move money between your own accounts (Capital → Cash, Cash → Bank, Bank → Credit Card, etc.). Customer/supplier payments belong on the Receipts / Payments pages."`. Form `"Date"`, `"From Account"` / `"To Account"`, `"Amount"`, `"Notes"`. Validation `"Source and destination must differ"`. Columns `"Transfer #"` · `"Date"` · `"From"` (name + type) · `"To"` · `"Amount"` · `"Notes"` · `"Actions"` (`<ReverseAction endpoint="/fund-transfers">`).
 
 #### Tab — Ledger (`/account-ledger`, `/account-ledger/:id`)
 
-File [pages/AccountLedger.js](erp-frontend/src/pages/AccountLedger.js). Picker `"— Select account —"` grouped by type (`<optgroup>` CASH / BANK / WALLET / CAPITAL / CREDIT), option `"{name} ({balance})"`. Card shows name + type badge + bank/account-number lines. Body `<LedgerView>`. Empty `"All Bank, Wallet, Cash, Capital and Credit accounts are listed."`.
+File [pages/AccountLedger.js](../apps/erp-frontend/src/pages/AccountLedger.js). Picker `"— Select account —"` grouped by type (`<optgroup>` CASH / BANK / WALLET / CAPITAL / CREDIT), option `"{name} ({balance})"`. Card shows name + type badge + bank/account-number lines. Body `<LedgerView>`. Empty `"All Bank, Wallet, Cash, Capital and Credit accounts are listed."`.
 
 ---
 
@@ -670,23 +672,23 @@ Hub title `"Users"` · subtitle `"User accounts, access requests, sign-in histor
 
 Superuser routes are wrapped in `<RequireSuperuser>` (the only client-side RBAC; the backend re-enforces). A non-superuser hitting one is redirected to `/users-change-password` (or `/backup`).
 
-#### Tab — Info (superuser) — [pages/users/UsersInfo.js](erp-frontend/src/pages/users/UsersInfo.js)
+#### Tab — Info (superuser) — [pages/users/UsersInfo.js](../apps/erp-frontend/src/pages/users/UsersInfo.js)
 
 - Heading `"Users"`, button `"+ Add user"`.
 - **Create user modal** `"Create user"`: `"Username *"` (minLength 2), `"Password *"` (minLength 6), `"Full name"`, `"Role"` (`"USER (regular)"` / `"SUPERUSER (admin)"`).
 - Table: `"Username"` (`"(you)"` on your row) · `"Full name"` · `"Role"` (`"SUPERUSER"` green / `"USER"` gray) · `"Status"` (`"Active"` green / `"Disabled"` red) · `"Last login"` · `"Created"` · `"Actions"` (`"Disable"`/`"Enable"`, `"Delete"` — both disabled on your own row).
 
-#### Tab — Allow Access (superuser) — [pages/users/UsersAllowAccess.js](erp-frontend/src/pages/users/UsersAllowAccess.js)
+#### Tab — Allow Access (superuser) — [pages/users/UsersAllowAccess.js](../apps/erp-frontend/src/pages/users/UsersAllowAccess.js)
 
 - Heading `"Access requests"`. Status filter `"Pending"` / `"Approved"` / `"Rejected"`.
 - **Approve modal** `"Approve {fullName}'s access request"` — fields `"Username *"`, `"Initial password *"`, `"Full name"`; body notes the user is created as a regular USER. Button `"Approve & create user"`.
 - Table `"Submitted"` · `"Requested username"` · `"Full name"` · `"Contact"` · `"Reason"` · `"Status"` (PENDING gray / APPROVED green / REJECTED red) · `"Actions"` (Approve/Reject for PENDING, Delete otherwise).
 
-#### Tab — Recent Login (superuser) — [pages/users/UsersRecentLogin.js](erp-frontend/src/pages/users/UsersRecentLogin.js)
+#### Tab — Recent Login (superuser) — [pages/users/UsersRecentLogin.js](../apps/erp-frontend/src/pages/users/UsersRecentLogin.js)
 
 Heading `"Recent logins"`, button `"Refresh"`. Loads `GET /users/login-events?limit=200` then fire-and-forget `POST /users/login-events/mark-seen`. Columns `"When"` · `"Username"` (green `"new"` badge while unseen) · `"IP"` · `"User agent"`. Empty `"No logins recorded yet."`.
 
-#### Tab — Change Password (everyone) — [pages/users/UsersChangePassword.js](erp-frontend/src/pages/users/UsersChangePassword.js)
+#### Tab — Change Password (everyone) — [pages/users/UsersChangePassword.js](../apps/erp-frontend/src/pages/users/UsersChangePassword.js)
 
 - **My password card** `"My password — {username}"`: `"Current password"`, `"New password"` (≥6), `"Confirm new password"`. Errors `"New password must be at least 6 characters."`, `"New password and confirmation do not match."`. Success `"Password changed. Please sign in again with the new password."` (changing your own password rotates the session token → forced re-login). Button `"Save new password"`.
 - **Admin reset card (superuser only)** `"Reset another user's password"`: `"User *"` (`"— pick a user —"`, label `"{username} ({fullName}) · admin|disabled"`, your own row excluded), `"New password *"`, `"Confirm new password *"`. Success `"Password updated…"` (signs that user out everywhere). Button `"Reset password"`.
@@ -695,7 +697,7 @@ Heading `"Recent logins"`, button `"Refresh"`. Loads `GET /users/login-events?li
 
 ### 5.13 Reports — `/financials`
 
-File [pages/Financials.js](erp-frontend/src/pages/Financials.js). Single route, no HubFrame strip.
+File [pages/Financials.js](../apps/erp-frontend/src/pages/Financials.js). Single route, no HubFrame strip.
 
 - Title `"Financial statements"`. Subtitle: Balance Sheet → `"As of {asOf} · incentives applied to adjusted net income"`; others → `"{from} → {to} · incentives applied to adjusted net income"`.
 - Date inputs (Balance Sheet shows a single `asOf`; others show `from`+`to`) + button `"Apply"` (busy → `"Loading…"`). `<ExportButtons>` (file `financials_{tab}`).
@@ -727,7 +729,7 @@ Hub title `"System"` · subtitle `"Backups, audit trail, and runtime error log."
 
 #### Tab — Backups (`/backup`)
 
-File [pages/Backup.js](erp-frontend/src/pages/Backup.js).
+File [pages/Backup.js](../apps/erp-frontend/src/pages/Backup.js).
 
 - Heading `"Backups"`. Buttons `"⬇ Download snapshot"` (in-memory snapshot blob download, no server-side row; routed through an authed axios blob fetch + synthetic anchor since a raw GET would lack the auth header) and `"💾 Save backup now"` (POST `/backup`).
 - Overdue warning when applicable, naming the scheduled hour.
@@ -736,11 +738,11 @@ File [pages/Backup.js](erp-frontend/src/pages/Backup.js).
 - **Restore card** `"🔥 Restore from backup"` (red-bordered, `--danger-fg` title) with a destructive-warning alert (wipes business tables, replays the snapshot, auto-saves a **Pre-restore safety snapshot**, keeps the Backups history). Fields `"Backup file (.json)"` (file picker, parsed client-side; requires `parsed.data`), `"Type RESTORE to confirm"`, `"Your account password"`. Button `"Restore now"`. Success line reports rows/tables restored + the pre-restore snapshot filename.
 - **History section** `"History"`: columns `"Created"` · `"File"` · `"Source"` (`"AUTO"` gray / `"MANUAL"` green) · `"Size"` · `"Notes"` · `"Actions"` (Download / Delete, confirm `"Delete backup {fileName}? This removes the file from disk."`). Per-row Verify re-hashes the file (SHA-256).
 
-#### Tab — Audit (`/audit-log`, superuser) — [pages/AuditLog.js](erp-frontend/src/pages/AuditLog.js)
+#### Tab — Audit (`/audit-log`, superuser) — [pages/AuditLog.js](../apps/erp-frontend/src/pages/AuditLog.js)
 
 Heading `"Audit log"`. Buttons `"Refresh"` + `<ExportButtons>` (file `audit_log`). Filters `"Entity type"` (`"All"` + dynamic), `"Action"` (`"All"`/`"CREATE"`/`"UPDATE"`/`"DELETE"`), `"From"`, `"To"`, `"Limit"` (default 500, 50–5000 step 50), plus a client-side quick search. (A `_ts` query param defeats the axios request-dedup cache so Refresh always re-fetches.) Table `"When"` · `"Action"` (badge CREATE green / UPDATE blue / DELETE red) · `"Entity"` · `"Summary"` · `"Source"` · `"Changes"` (collapsible JSON `<details>`).
 
-#### Tab — Errors (`/error-log`, superuser) — [pages/ErrorLog.js](erp-frontend/src/pages/ErrorLog.js)
+#### Tab — Errors (`/error-log`, superuser) — [pages/ErrorLog.js](../apps/erp-frontend/src/pages/ErrorLog.js)
 
 Heading `"Errors & exceptions"`. Buttons `"Refresh"`, `"Clear all"` (DELETE `/error-logs`, confirm `"Wipe the error log? This cannot be undone."`), `<ExportButtons>` (file `error_log`). Filters `"Level"` (`"All"`/`"ERROR"`/`"WARN"`), `"Source"`, `"From"`, `"To"`, `"Limit"`, quick search. Table `"When"` · `"Level"` (ERROR red / WARN yellow) · `"Status"` · `"Method"` · `"Path"` · `"Message"` · `"Source"` · `"Detail"` (collapsible stack + context). Empty `"No errors logged. Nice."`.
 
@@ -750,22 +752,22 @@ Heading `"Errors & exceptions"`. Buttons `"Refresh"`, `"Clear all"` (DELETE `/er
 
 ### 6.1 ExportButtons
 
-File [components/ExportButtons.js](erp-frontend/src/components/ExportButtons.js). Props `{ filename, title, subtitle?, columns, rows, footer?, disabled?, size='sm' }`.
+File [components/ExportButtons.js](../apps/erp-frontend/src/components/ExportButtons.js). Props `{ filename, title, subtitle?, columns, rows, footer?, disabled?, size='sm' }`.
 
 | Button | Text | Title |
 |---|---|---|
 | CSV | `"CSV"` | `"Download as CSV (opens in Excel / Google Sheets)"` |
 | PDF | `"PDF"` | `"Open print view — choose 'Save as PDF' as the destination"` |
 
-Both disabled when `disabled || empty`. CSV is built client-side with a UTF-8 BOM (so Excel detects encoding) via [utils/exporters.js](erp-frontend/src/utils/exporters.js); booleans render `"Yes"`/`"No"`. PDF opens a print-friendly tab (system letterhead + timestamp) and auto-runs `window.print()` so the user picks "Save as PDF" (no backend PDF library). Columns are `{ key, label, value?: row=>…, align? }`.
+Both disabled when `disabled || empty`. CSV is built client-side with a UTF-8 BOM (so Excel detects encoding) via [utils/exporters.js](../apps/erp-frontend/src/utils/exporters.js); booleans render `"Yes"`/`"No"`. PDF opens a print-friendly tab (system letterhead + timestamp) and auto-runs `window.print()` so the user picks "Save as PDF" (no backend PDF library). Columns are `{ key, label, value?: row=>…, align? }`.
 
 ### 6.2 CrudPage scaffold
 
-File [components/CrudPage.js](erp-frontend/src/components/CrudPage.js). Generic master-data scaffold used by Brands, Stores, Accounts. Field types `text` / `number` / `email` / `checkbox` / `textarea` / `select`. Required fields suffixed ` *`. Select placeholders `"— Select —"` / `"— None —"`. Standard error `"Save failed"`. Delete confirm `Delete "{row.name ?? row.id}"?`. States `"Loading…"`, `"No records yet."` / `"No matches."`. Submit button `"Create"` / `"Update"`.
+File [components/CrudPage.js](../apps/erp-frontend/src/components/CrudPage.js). Generic master-data scaffold used by Brands, Stores, Accounts. Field types `text` / `number` / `email` / `checkbox` / `textarea` / `select`. Required fields suffixed ` *`. Select placeholders `"— Select —"` / `"— None —"`. Standard error `"Save failed"`. Delete confirm `Delete "{row.name ?? row.id}"?`. States `"Loading…"`, `"No records yet."` / `"No matches."`. Submit button `"Create"` / `"Update"`.
 
 ### 6.3 VoucherPage (shared by Receipts + Payments)
 
-File [components/VoucherPage.js](erp-frontend/src/components/VoucherPage.js). Direction-driven text:
+File [components/VoucherPage.js](../apps/erp-frontend/src/components/VoucherPage.js). Direction-driven text:
 
 | Element | IN (Receipt) | OUT (Payment) |
 |---|---|---|
@@ -820,17 +822,17 @@ Backdrop `rgba(0,0,0,0.45)` light / `rgba(0,0,0,0.6)` dark, z-index 100, **no bl
 
 ### 6.7 GlobalSearch
 
-File [components/GlobalSearch.js](erp-frontend/src/components/GlobalSearch.js). Topbar omnibox; lazy-loads `/customers`, `/suppliers`, `/employees`, `/accounts`, `/items` on first focus. Result kinds + destinations: Customer → `/customer-ledger/:id`, Supplier → `/supplier-ledger/:id`, Employee → `/employee-ledger/:id`, Account → `/account-ledger/:id`, Item → `/items` (tile, not a per-item page). Placeholder `"Search by code, name, phone, SKU…"`. Popover states `"Loading…"`, `"No matches."`, max 8 hits. Auto-generated codes (CUST-/SUPP-/EMP-/ACC-) make code search reliable.
+File [components/GlobalSearch.js](../apps/erp-frontend/src/components/GlobalSearch.js). Topbar omnibox; lazy-loads `/customers`, `/suppliers`, `/employees`, `/accounts`, `/items` on first focus. Result kinds + destinations: Customer → `/customer-ledger/:id`, Supplier → `/supplier-ledger/:id`, Employee → `/employee-ledger/:id`, Account → `/account-ledger/:id`, Item → `/items` (tile, not a per-item page). Placeholder `"Search by code, name, phone, SKU…"`. Popover states `"Loading…"`, `"No matches."`, max 8 hits. Auto-generated codes (CUST-/SUPP-/EMP-/ACC-) make code search reliable.
 
 ### 6.8 LedgerView, AgingPanel, ReverseAction (shared)
 
-- **`<LedgerView title party ledger>`** ([components/LedgerView.js](erp-frontend/src/components/LedgerView.js)) — read-only running-balance renderer used by Customer / Supplier / Account ledgers. A `panel-stripe` of Opening balance + Current balance (tone label `"owes you"` / `"in credit"` / `"settled"` for AR-style; supplier/account vary). Table `"Date"` · `"Ref #"` · `"Type"` (chip) · `"Description"` · `"Debit"` · `"Credit"` (green) · `"Balance"`. Has its own `<ExportButtons>`. Empty `"No transactions yet."`.
-- **`<AgingPanel title lines numKey showPromiseColumn?>`** ([components/AgingPanel.js](erp-frontend/src/components/AgingPanel.js)) — per-document aging detail above a ledger. Columns: invoice/bill number (mono) · Date · Net · Residual (mono bold) · `"Days Elapsed"` (color-graded: ≥30 danger, ≥15 warning, else muted) · and (AR only, `showPromiseColumn`) a `"Past Promise"` column: `chip-danger "Nd"` when a promise lapsed, `chip-info "promised"` when a future promise exists, else `"—"`.
-- **`<ReverseAction endpoint row label onDone>`** ([components/ReverseAction.js](erp-frontend/src/components/ReverseAction.js)) — row-level reversal for `/sales` | `/purchases` | `/payments` | `/fund-transfers`. Already-reversed rows render a `chip-warn "Reversed"` (title = reason). Otherwise a `btn-warn "Reverse"` opens a modal requiring a non-empty reason (`"A reason is required."`), explaining the balancing entry / Reversed chip / netting / idempotency, then `POST {endpoint}/:id/reverse {reason}` and calls `onDone()` (reload).
+- **`<LedgerView title party ledger>`** ([components/LedgerView.js](../apps/erp-frontend/src/components/LedgerView.js)) — read-only running-balance renderer used by Customer / Supplier / Account ledgers. A `panel-stripe` of Opening balance + Current balance (tone label `"owes you"` / `"in credit"` / `"settled"` for AR-style; supplier/account vary). Table `"Date"` · `"Ref #"` · `"Type"` (chip) · `"Description"` · `"Debit"` · `"Credit"` (green) · `"Balance"`. Has its own `<ExportButtons>`. Empty `"No transactions yet."`.
+- **`<AgingPanel title lines numKey showPromiseColumn?>`** ([components/AgingPanel.js](../apps/erp-frontend/src/components/AgingPanel.js)) — per-document aging detail above a ledger. Columns: invoice/bill number (mono) · Date · Net · Residual (mono bold) · `"Days Elapsed"` (color-graded: ≥30 danger, ≥15 warning, else muted) · and (AR only, `showPromiseColumn`) a `"Past Promise"` column: `chip-danger "Nd"` when a promise lapsed, `chip-info "promised"` when a future promise exists, else `"—"`.
+- **`<ReverseAction endpoint row label onDone>`** ([components/ReverseAction.js](../apps/erp-frontend/src/components/ReverseAction.js)) — row-level reversal for `/sales` | `/purchases` | `/payments` | `/fund-transfers`. Already-reversed rows render a `chip-warn "Reversed"` (title = reason). Otherwise a `btn-warn "Reverse"` opens a modal requiring a non-empty reason (`"A reason is required."`), explaining the balancing entry / Reversed chip / netting / idempotency, then `POST {endpoint}/:id/reverse {reason}` and calls `onDone()` (reload).
 
 ### 6.9 MiniCharts
 
-File [components/MiniCharts.js](erp-frontend/src/components/MiniCharts.js) — hand-rolled inline SVG (no chart library, flat Win10 look). Exports: `StackedBar` (AR/AP aging proportions; empty → `"Nothing outstanding."`), `Donut` (Cash Trap inventory aging share; empty → dashed circle), `Bullet` (incentive progress vs target + threshold marker), `HorizontalBars` (margin insights ranking; empty → `"No data in this period."`), `FunnelStages` (delivery / service pipelines as honest stacked bars; empty → `"No active tickets in the pipeline."`), `MiniLine` (cash-register variance line with zero baseline).
+File [components/MiniCharts.js](../apps/erp-frontend/src/components/MiniCharts.js) — hand-rolled inline SVG (no chart library, flat Win10 look). Exports: `StackedBar` (AR/AP aging proportions; empty → `"Nothing outstanding."`), `Donut` (Cash Trap inventory aging share; empty → dashed circle), `Bullet` (incentive progress vs target + threshold marker), `HorizontalBars` (margin insights ranking; empty → `"No data in this period."`), `FunnelStages` (delivery / service pipelines as honest stacked bars; empty → `"No active tickets in the pipeline."`), `MiniLine` (cash-register variance line with zero baseline).
 
 ---
 
@@ -840,7 +842,7 @@ Top-level routes **outside** the Layout (no auth gate), each fetches on mount an
 
 ### 7.1 Invoice print — `/print/sale/:id`, `/print/purchase/:id`
 
-File [pages/InvoicePrint.js](erp-frontend/src/pages/InvoicePrint.js). Used for both sales (`type="sale"`) and purchases. Sale-only second fetch of serials by `saleInvoiceNo`.
+File [pages/InvoicePrint.js](../apps/erp-frontend/src/pages/InvoicePrint.js). Used for both sales (`type="sale"`) and purchases. Sale-only second fetch of serials by `saleInvoiceNo`.
 
 - Top `.booking-banner` only when `data.dueAmount > 0.005` on a sale: `"BALANCE PENDING — DO NOT RELEASE GOODS UNTIL FINAL PAYMENT"`.
 - Title `"SALES INVOICE"` / `"SALES INVOICE · BOOKING HOLD"` / `"PURCHASE BILL"`.
@@ -849,21 +851,21 @@ File [pages/InvoicePrint.js](erp-frontend/src/pages/InvoicePrint.js). Used for b
 
 ### 7.2 Booking receipt — `/print/booking-receipt/:id`
 
-File [pages/BookingReceiptPrint.js](erp-frontend/src/pages/BookingReceiptPrint.js). Heavy red banner `"⚠ BOOKING HOLD — BALANCE PENDING ⚠ / DO NOT ALLOW OUT OF THE SHOP UNTIL FINAL PAYMENT"`. Title `"BOOKING RECEIPT"`. Per-line table with a `"Serial(s)"` (mono) column. Totals with the `"BALANCE PENDING"` row in `#c50f1f`. Payment-schedule table (`"Due Date"` / `"Expected"` / `"Paid"` / `"Status"`) when commitments exist. Two signature lines (`"Customer signature"`, `"Cashier signature"`). Footer instructs the customer to bring the receipt + clear the balance before delivery.
+File [pages/BookingReceiptPrint.js](../apps/erp-frontend/src/pages/BookingReceiptPrint.js). Heavy red banner `"⚠ BOOKING HOLD — BALANCE PENDING ⚠ / DO NOT ALLOW OUT OF THE SHOP UNTIL FINAL PAYMENT"`. Title `"BOOKING RECEIPT"`. Per-line table with a `"Serial(s)"` (mono) column. Totals with the `"BALANCE PENDING"` row in `#c50f1f`. Payment-schedule table (`"Due Date"` / `"Expected"` / `"Paid"` / `"Status"`) when commitments exist. Two signature lines (`"Customer signature"`, `"Cashier signature"`). Footer instructs the customer to bring the receipt + clear the balance before delivery.
 
 ### 7.3 Box hold tag — `/print/box-tag/:id`
 
-File [pages/BoxTagPrint.js](erp-frontend/src/pages/BoxTagPrint.js). 4"×6" landscape (`@page { size: 6in 4in landscape; margin: 0 }`). 4 px red border + rotated `"DO NOT SELL"` watermark at 8% opacity. Header `"⚠ RESERVED ITEM — DO NOT SELL ⚠"` (red 18 pt). 2-column grid: Customer (large bold), Phone, Invoice #, Booked, Hold until, Balance due (red 18 pt). Per-serial `model · serial` rows (mono). Footer `"TAPE THIS SLIP DIRECTLY TO THE BOX · CHECK WITH OFFICE BEFORE SELLING ANY UNIT WITH A TAG"`.
+File [pages/BoxTagPrint.js](../apps/erp-frontend/src/pages/BoxTagPrint.js). 4"×6" landscape (`@page { size: 6in 4in landscape; margin: 0 }`). 4 px red border + rotated `"DO NOT SELL"` watermark at 8% opacity. Header `"⚠ RESERVED ITEM — DO NOT SELL ⚠"` (red 18 pt). 2-column grid: Customer (large bold), Phone, Invoice #, Booked, Hold until, Balance due (red 18 pt). Per-serial `model · serial` rows (mono). Footer `"TAPE THIS SLIP DIRECTLY TO THE BOX · CHECK WITH OFFICE BEFORE SELLING ANY UNIT WITH A TAG"`.
 
 ### 7.4 Serial label — `/print/serial-label/:serial`
 
-File [pages/SerialLabelPrint.js](erp-frontend/src/pages/SerialLabelPrint.js). 2"×1" thermal-sticker (`@page { size: 2in 1in; margin: 0 }`). Stack: shop branding (`"HASSAN ELECTRONICS"`) → fake barcode bars synthesized from the serial chars → mono serial text → item model. Fetches `GET /item-serials/warranty/<serial>`.
+File [pages/SerialLabelPrint.js](../apps/erp-frontend/src/pages/SerialLabelPrint.js). 2"×1" thermal-sticker (`@page { size: 2in 1in; margin: 0 }`). Stack: shop branding (`"HASSAN ELECTRONICS"`) → fake barcode bars synthesized from the serial chars → mono serial text → item model. Fetches `GET /item-serials/warranty/<serial>`.
 
 ---
 
 ## 8. Electron shell
 
-The renderer runs inside an Electron 40 wrapper ([erp-desktop/src/main.js](erp-desktop/src/main.js) — source of truth). Notable native chrome:
+The renderer runs inside an Electron 40 wrapper ([erp-desktop/src/main.js](../apps/erp-desktop/src/main.js) — source of truth). Notable native chrome:
 
 - **Custom `app://` protocol** — renderer loaded as `app://localhost/index.html` (registered privileged: standard/secure/supportFetchAPI/stream). Loading via `file://` is forbidden (it makes `location.origin === "null"`, breaking React Router 7 / axios `new URL(...)`).
 - **Title-bar overlay** — `titleBarStyle: 'hidden'` + `titleBarOverlay` paints the Windows min/max/close controls on the right at 44 px tall. Colors: light `{ color: '#fafafa', symbolColor: '#1f1f1f' }`, dark `{ color: '#333333', symbolColor: '#f5f5f5' }` (must match `--surface-elev`). The in-app `.topbar` is the drag region; flipped via `window.erpBridge.setTitleBarTheme(theme)` IPC. Renderer is sandboxed (`sandbox: true`, `contextIsolation: true`).
@@ -879,62 +881,62 @@ The renderer runs inside an Electron 40 wrapper ([erp-desktop/src/main.js](erp-d
 
 | Page | File |
 |---|---|
-| App shell | [components/Layout.js](erp-frontend/src/components/Layout.js) |
-| HubFrame | [components/HubFrame.js](erp-frontend/src/components/HubFrame.js) |
-| Brand | [components/Brand.js](erp-frontend/src/components/Brand.js) |
-| Logo | [components/Logo.js](erp-frontend/src/components/Logo.js) |
-| Icons | [components/Icon.js](erp-frontend/src/components/Icon.js) |
-| ThemeToggle | [components/ThemeToggle.js](erp-frontend/src/components/ThemeToggle.js) |
-| SyncButton | [components/SyncButton.js](erp-frontend/src/components/SyncButton.js) |
-| GlobalSearch | [components/GlobalSearch.js](erp-frontend/src/components/GlobalSearch.js) |
-| ExportButtons | [components/ExportButtons.js](erp-frontend/src/components/ExportButtons.js) |
-| CrudPage | [components/CrudPage.js](erp-frontend/src/components/CrudPage.js) |
-| VoucherPage (Receipts + Payments) | [components/VoucherPage.js](erp-frontend/src/components/VoucherPage.js) |
-| LedgerView (shared) | [components/LedgerView.js](erp-frontend/src/components/LedgerView.js) |
-| AgingPanel (shared) | [components/AgingPanel.js](erp-frontend/src/components/AgingPanel.js) |
-| ReverseAction (shared) | [components/ReverseAction.js](erp-frontend/src/components/ReverseAction.js) |
-| MiniCharts (shared) | [components/MiniCharts.js](erp-frontend/src/components/MiniCharts.js) |
-| Items panel | [components/master/ItemsPanel.js](erp-frontend/src/components/master/ItemsPanel.js) |
-| Categories panel | [components/master/CategoriesPanel.js](erp-frontend/src/components/master/CategoriesPanel.js) |
-| Login / Request access | [pages/Login.js](erp-frontend/src/pages/Login.js) |
-| Dashboard | [pages/Dashboard.js](erp-frontend/src/pages/Dashboard.js) |
-| POS Terminal | [pages/POS.js](erp-frontend/src/pages/POS.js) |
-| Cash Book | [pages/CashRegister.js](erp-frontend/src/pages/CashRegister.js) |
-| Master Data (Customer / Supplier / Brands / Stores / Accounts / Employees panels) | [pages/MasterData.js](erp-frontend/src/pages/MasterData.js) |
-| Sales Voucher | [pages/SalesVoucher.js](erp-frontend/src/pages/SalesVoucher.js) |
-| Sales History | [pages/Sales.js](erp-frontend/src/pages/Sales.js) |
-| Sale Returns | [pages/SaleReturns.js](erp-frontend/src/pages/SaleReturns.js) |
-| Deliveries | [pages/Deliveries.js](erp-frontend/src/pages/Deliveries.js) |
-| Overdue Bookings | [pages/OverdueBookings.js](erp-frontend/src/pages/OverdueBookings.js) |
-| Service Tickets | [pages/ServiceTickets.js](erp-frontend/src/pages/ServiceTickets.js) |
-| Warranty Lookup | [pages/WarrantyLookup.js](erp-frontend/src/pages/WarrantyLookup.js) |
-| Transactions hub landing | [pages/Transactions.js](erp-frontend/src/pages/Transactions.js) |
-| Invoice print | [pages/InvoicePrint.js](erp-frontend/src/pages/InvoicePrint.js) |
-| Booking Receipt print | [pages/BookingReceiptPrint.js](erp-frontend/src/pages/BookingReceiptPrint.js) |
-| Box Tag print | [pages/BoxTagPrint.js](erp-frontend/src/pages/BoxTagPrint.js) |
-| Serial Label print | [pages/SerialLabelPrint.js](erp-frontend/src/pages/SerialLabelPrint.js) |
-| Purchase Orders | [pages/PurchaseOrders.js](erp-frontend/src/pages/PurchaseOrders.js) |
-| Purchases | [pages/Purchases.js](erp-frontend/src/pages/Purchases.js) |
-| Purchase Returns | [pages/PurchaseReturns.js](erp-frontend/src/pages/PurchaseReturns.js) |
-| Incentives | [pages/Incentives.js](erp-frontend/src/pages/Incentives.js) |
-| Customer / Supplier Ledger | [pages/CustomerLedger.js](erp-frontend/src/pages/CustomerLedger.js), [pages/SupplierLedger.js](erp-frontend/src/pages/SupplierLedger.js) |
-| Stock | [pages/Stock.js](erp-frontend/src/pages/Stock.js) |
-| Stock Ledger | [pages/StockLedger.js](erp-frontend/src/pages/StockLedger.js) |
-| Stock Transfers | [pages/StockTransfers.js](erp-frontend/src/pages/StockTransfers.js) |
-| Damaged Goods | [pages/DamagedGoods.js](erp-frontend/src/pages/DamagedGoods.js) |
-| Attendance | [pages/Attendance.js](erp-frontend/src/pages/Attendance.js) |
-| Employee Payments | [pages/EmployeePayments.js](erp-frontend/src/pages/EmployeePayments.js) |
-| Employee Incentive Rules | [pages/EmployeeIncentiveRules.js](erp-frontend/src/pages/EmployeeIncentiveRules.js) |
-| Employee Ledger | [pages/EmployeeLedger.js](erp-frontend/src/pages/EmployeeLedger.js) |
-| Fund Transfers | [pages/FundTransfers.js](erp-frontend/src/pages/FundTransfers.js) |
-| Account Ledger | [pages/AccountLedger.js](erp-frontend/src/pages/AccountLedger.js) |
-| Users — Info / Allow Access / Recent Login / Change Password | [pages/users/](erp-frontend/src/pages/users/) |
-| Financials | [pages/Financials.js](erp-frontend/src/pages/Financials.js) |
-| Backups | [pages/Backup.js](erp-frontend/src/pages/Backup.js) |
-| Audit log | [pages/AuditLog.js](erp-frontend/src/pages/AuditLog.js) |
-| Error log | [pages/ErrorLog.js](erp-frontend/src/pages/ErrorLog.js) |
-| Auth context / superuser guard | [auth/AuthContext.js](erp-frontend/src/auth/AuthContext.js), [auth/RequireSuperuser.js](erp-frontend/src/auth/RequireSuperuser.js) |
-| API client | [api/client.js](erp-frontend/src/api/client.js) |
-| Tokens / theme | [styles/tokens.css](erp-frontend/src/styles/tokens.css), [styles/app.css](erp-frontend/src/styles/app.css), [App.css](erp-frontend/src/App.css), [theme/ThemeContext.js](erp-frontend/src/theme/ThemeContext.js), [public/theme-bootstrap.js](erp-frontend/public/theme-bootstrap.js) |
-| Hubs / Sidebar | [nav/hubs.js](erp-frontend/src/nav/hubs.js) |
-| Electron shell | [erp-desktop/src/main.js](erp-desktop/src/main.js) |
+| App shell | [components/Layout.js](../apps/erp-frontend/src/components/Layout.js) |
+| HubFrame | [components/HubFrame.js](../apps/erp-frontend/src/components/HubFrame.js) |
+| Brand | [components/Brand.js](../apps/erp-frontend/src/components/Brand.js) |
+| Logo | [components/Logo.js](../apps/erp-frontend/src/components/Logo.js) |
+| Icons | [components/Icon.js](../apps/erp-frontend/src/components/Icon.js) |
+| ThemeToggle | [components/ThemeToggle.js](../apps/erp-frontend/src/components/ThemeToggle.js) |
+| SyncButton | [components/SyncButton.js](../apps/erp-frontend/src/components/SyncButton.js) |
+| GlobalSearch | [components/GlobalSearch.js](../apps/erp-frontend/src/components/GlobalSearch.js) |
+| ExportButtons | [components/ExportButtons.js](../apps/erp-frontend/src/components/ExportButtons.js) |
+| CrudPage | [components/CrudPage.js](../apps/erp-frontend/src/components/CrudPage.js) |
+| VoucherPage (Receipts + Payments) | [components/VoucherPage.js](../apps/erp-frontend/src/components/VoucherPage.js) |
+| LedgerView (shared) | [components/LedgerView.js](../apps/erp-frontend/src/components/LedgerView.js) |
+| AgingPanel (shared) | [components/AgingPanel.js](../apps/erp-frontend/src/components/AgingPanel.js) |
+| ReverseAction (shared) | [components/ReverseAction.js](../apps/erp-frontend/src/components/ReverseAction.js) |
+| MiniCharts (shared) | [components/MiniCharts.js](../apps/erp-frontend/src/components/MiniCharts.js) |
+| Items panel | [components/master/ItemsPanel.js](../apps/erp-frontend/src/components/master/ItemsPanel.js) |
+| Categories panel | [components/master/CategoriesPanel.js](../apps/erp-frontend/src/components/master/CategoriesPanel.js) |
+| Login / Request access | [pages/Login.js](../apps/erp-frontend/src/pages/Login.js) |
+| Dashboard | [pages/Dashboard.js](../apps/erp-frontend/src/pages/Dashboard.js) |
+| POS Terminal | [pages/POS.js](../apps/erp-frontend/src/pages/POS.js) |
+| Cash Book | [pages/CashRegister.js](../apps/erp-frontend/src/pages/CashRegister.js) |
+| Master Data (Customer / Supplier / Brands / Stores / Accounts / Employees panels) | [pages/MasterData.js](../apps/erp-frontend/src/pages/MasterData.js) |
+| Sales Voucher | [pages/SalesVoucher.js](../apps/erp-frontend/src/pages/SalesVoucher.js) |
+| Sales History | [pages/Sales.js](../apps/erp-frontend/src/pages/Sales.js) |
+| Sale Returns | [pages/SaleReturns.js](../apps/erp-frontend/src/pages/SaleReturns.js) |
+| Deliveries | [pages/Deliveries.js](../apps/erp-frontend/src/pages/Deliveries.js) |
+| Overdue Bookings | [pages/OverdueBookings.js](../apps/erp-frontend/src/pages/OverdueBookings.js) |
+| Service Tickets | [pages/ServiceTickets.js](../apps/erp-frontend/src/pages/ServiceTickets.js) |
+| Warranty Lookup | [pages/WarrantyLookup.js](../apps/erp-frontend/src/pages/WarrantyLookup.js) |
+| Transactions hub landing | [pages/Transactions.js](../apps/erp-frontend/src/pages/Transactions.js) |
+| Invoice print | [pages/InvoicePrint.js](../apps/erp-frontend/src/pages/InvoicePrint.js) |
+| Booking Receipt print | [pages/BookingReceiptPrint.js](../apps/erp-frontend/src/pages/BookingReceiptPrint.js) |
+| Box Tag print | [pages/BoxTagPrint.js](../apps/erp-frontend/src/pages/BoxTagPrint.js) |
+| Serial Label print | [pages/SerialLabelPrint.js](../apps/erp-frontend/src/pages/SerialLabelPrint.js) |
+| Purchase Orders | [pages/PurchaseOrders.js](../apps/erp-frontend/src/pages/PurchaseOrders.js) |
+| Purchases | [pages/Purchases.js](../apps/erp-frontend/src/pages/Purchases.js) |
+| Purchase Returns | [pages/PurchaseReturns.js](../apps/erp-frontend/src/pages/PurchaseReturns.js) |
+| Incentives | [pages/Incentives.js](../apps/erp-frontend/src/pages/Incentives.js) |
+| Customer / Supplier Ledger | [pages/CustomerLedger.js](../apps/erp-frontend/src/pages/CustomerLedger.js), [pages/SupplierLedger.js](../apps/erp-frontend/src/pages/SupplierLedger.js) |
+| Stock | [pages/Stock.js](../apps/erp-frontend/src/pages/Stock.js) |
+| Stock Ledger | [pages/StockLedger.js](../apps/erp-frontend/src/pages/StockLedger.js) |
+| Stock Transfers | [pages/StockTransfers.js](../apps/erp-frontend/src/pages/StockTransfers.js) |
+| Damaged Goods | [pages/DamagedGoods.js](../apps/erp-frontend/src/pages/DamagedGoods.js) |
+| Attendance | [pages/Attendance.js](../apps/erp-frontend/src/pages/Attendance.js) |
+| Employee Payments | [pages/EmployeePayments.js](../apps/erp-frontend/src/pages/EmployeePayments.js) |
+| Employee Incentive Rules | [pages/EmployeeIncentiveRules.js](../apps/erp-frontend/src/pages/EmployeeIncentiveRules.js) |
+| Employee Ledger | [pages/EmployeeLedger.js](../apps/erp-frontend/src/pages/EmployeeLedger.js) |
+| Fund Transfers | [pages/FundTransfers.js](../apps/erp-frontend/src/pages/FundTransfers.js) |
+| Account Ledger | [pages/AccountLedger.js](../apps/erp-frontend/src/pages/AccountLedger.js) |
+| Users — Info / Allow Access / Recent Login / Change Password | [pages/users/](../apps/erp-frontend/src/pages/users/) |
+| Financials | [pages/Financials.js](../apps/erp-frontend/src/pages/Financials.js) |
+| Backups | [pages/Backup.js](../apps/erp-frontend/src/pages/Backup.js) |
+| Audit log | [pages/AuditLog.js](../apps/erp-frontend/src/pages/AuditLog.js) |
+| Error log | [pages/ErrorLog.js](../apps/erp-frontend/src/pages/ErrorLog.js) |
+| Auth context / superuser guard | [auth/AuthContext.js](../apps/erp-frontend/src/auth/AuthContext.js), [auth/RequireSuperuser.js](../apps/erp-frontend/src/auth/RequireSuperuser.js) |
+| API client | [api/client.js](../apps/erp-frontend/src/api/client.js) |
+| Tokens / theme | [styles/tokens.css](../apps/erp-frontend/src/styles/tokens.css), [styles/app.css](../apps/erp-frontend/src/styles/app.css), [App.css](../apps/erp-frontend/src/App.css), [theme/ThemeContext.js](../apps/erp-frontend/src/theme/ThemeContext.js), [public/theme-bootstrap.js](../apps/erp-frontend/public/theme-bootstrap.js) |
+| Hubs / Sidebar | [nav/hubs.js](../apps/erp-frontend/src/nav/hubs.js) |
+| Electron shell | [erp-desktop/src/main.js](../apps/erp-desktop/src/main.js) |

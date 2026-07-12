@@ -188,7 +188,7 @@ Both incentive engines are pure read-derivation off Sales / Returns / Items — 
 - **Manual snapshot** — `System → Backups → Save backup now` (`POST /backup`) writes a snapshot to disk; `Download snapshot` (`GET /backup/download-now`, superuser-only) streams an in-memory snapshot to the browser as a download (no file persisted server-side — useful for USB-stick copies). The frontend downloads through an authed axios blob fetch (not `window.location`, which would lack the auth header and 401).
 - **Restore from JSON** — `POST /backup/restore` (superuser + reauth) accepts a multi-megabyte JSON body (Express body limit bumped to 100 MB for this route only). It first takes a **pre-restore safety snapshot**, then wipes and replays every business table inside one transaction with FK enforcement toggled off for the duration. Requires the literal text `RESTORE` plus a one-shot `X-Reauth-Token` (or legacy password).
 - **Scheduled daily snapshot** — a `@Cron` runs hourly and snapshots if the configured hour has passed and no backup exists for today (default 20:00, configurable via `POST /backup/schedule`, stored in the `settings` table). Polling hourly (rather than a precise cron) lets the hour change via API without a restart.
-- **Storage** — defaults to `erp-backend/backups/` in dev; Electron forces `<userData>/backups`. Tracked in a `backups` table with file path, size, trigger (AUTO / MANUAL), and `sha256`.
+- **Storage** — defaults to `apps/erp-backend/backups/` in dev; Electron forces `<userData>/backups`. Tracked in a `backups` table with file path, size, trigger (AUTO / MANUAL), and `sha256`.
 - **Integrity verification** — every snapshot row stores a `sha256` hash of the file's bytes at write time. `POST /backup/:id/verify` (superuser-only) re-hashes the file on disk and compares; mismatch surfaces as a red badge on the History page (disk corruption, tampering, edited file). The restore flow runs a verify pass first so a corrupted snapshot never wipes the live DB. Legacy rows written before the column existed get backfilled on the first verify.
 
 ### 11. Access control
@@ -220,7 +220,7 @@ Both incentive engines are pure read-derivation off Sales / Returns / Items — 
 ### 13. UX / UI
 - **Branded** — "Hassan Electronics · Home Appliances". The HE monogram (gold "H" + blue "E", house roof + spark; source: `erp-frontend/logo.png`, an already-transparent PNG) is the application icon — browser favicon, Windows Start Menu / Taskbar / Explorer thumbnail, and electron-builder app/installer icon. [scripts/make-icons.ps1](scripts/make-icons.ps1) uses the PNG source as-is (no chroma-key — that step only applied to the legacy `logo.jpeg` black backdrop) and emits the PNG set (192 / 512 / 1024) + a multi-resolution Windows `.ico` (16–256) into `public/` and `erp-desktop/build-resources/icon.ico`. The logo is rendered **only** on the Sign in and Request access screens (transparent, no chip backdrop). The in-app chrome shows the wordmark, not the logo.
 - **Light & Dark theme** — toggle in the topbar; preference persisted in `localStorage` under `hassan-theme`. Initial theme honours `prefers-color-scheme`. No flash on load (an external `theme-bootstrap.js` runs in `<head>` before React — extracted from inline so the strict `script-src 'self'` CSP holds). A theme toggle also sits in the top-right of the login card.
-- **Flat Windows 10 design** — [tokens.css](erp-frontend/src/styles/tokens.css) + [app.css](erp-frontend/src/styles/app.css) hold the variables (with [App.css](erp-frontend/src/App.css) carrying legacy + print/modal/login rules; tokens.css loads last and wins on shared names). Solid surfaces, sharp 90° corners (zero border-radius), 1px borders, no glass / blur / aurora / glow / animation. Lightweight `color` / `background` / `border` transitions only. `content-visibility: auto` on long tables. Built for low-end hardware.
+- **Flat Windows 10 design** — [tokens.css](apps/erp-frontend/src/styles/tokens.css) + [app.css](apps/erp-frontend/src/styles/app.css) hold the variables (with [App.css](apps/erp-frontend/src/App.css) carrying legacy + print/modal/login rules; tokens.css loads last and wins on shared names). Solid surfaces, sharp 90° corners (zero border-radius), 1px borders, no glass / blur / aurora / glow / animation. Lightweight `color` / `background` / `border` transitions only. `content-visibility: auto` on long tables. Built for low-end hardware.
 - **Fonts** — Segoe UI Variable / Segoe UI system stack for text; Cascadia Code / Consolas for numbers, voucher refs, SKUs. (`public/index.html` still links Google Fonts as a leftover, but the CSS token stack is system-only.)
 - **Coloured sidebar icons** — every nav item gets a tinted square chip in its own `--nav-c` token. The sidebar has **13 entries** (POS Terminal was removed when Sales Voucher became the default Sales tab; `/pos` is URL-reachable): Dashboard (blue), Cash Book (forest-green), Customer (teal), Sales (magenta), Supplier (burnt-orange), Purchase (lavender), Item (sky-blue), Stock (moss-green), Employee (indigo), Account (amber), Users (cyan), Reports (deep-purple), System (grey). Active item paints a 3px accent strip on the left edge.
 - **Global search** — topbar search lazy-loads customers / suppliers / employees / accounts / items on first focus and routes hits to the matching ledger / catalogue page. Auto-generated codes (`CUST-`, `SUPP-`, `EMP-`, `ACC-`) make code-search reliable.
@@ -228,8 +228,8 @@ Both incentive engines are pure read-derivation off Sales / Returns / Items — 
 - **Collapsible sidebar rail** — the brand chip at the top of the sidebar doubles as the rail toggle: click it to collapse the desktop sidebar to a 56 px icon-only rail; click again to expand. State persists in `localStorage` (`hassan-sidebar-rail`). On mobile (≤ 860 px) the off-canvas drawer pattern is used instead.
 - **Hand-rolled SVG charts** — `MiniCharts` (StackedBar, Donut, Bullet, HorizontalBars, FunnelStages, MiniLine) — no charting library, flat Win10 aesthetic, fixed pixel heights to reserve layout.
 - **Status chips** — semantic-color filled rectangles for payment states, low-stock badges, session status, sync-queue status, warranty status.
-- **WhatsApp share** — a "Send on WhatsApp" button on the sales invoice, booking receipt, warranty lookup cards, and customer ledger (balance reminder). It opens a free `wa.me` deep link (WhatsApp Web/Desktop on a PC, the app on mobile) with the customer's number and a prefilled text message — no backend, no API token, no per-message cost. Phone numbers are normalised to international form for `wa.me` ([`utils/whatsapp.js`](erp-frontend/src/utils/whatsapp.js)); a missing number opens the contact picker instead. The printed PDF (Print → Save as PDF in the browser dialog) is attached manually after the chat opens — `wa.me` can only carry text.
-- **Unsaved-changes guard** — every CRUD form (items, categories, brands, customers, suppliers, stores, accounts, employees, users, vouchers, stock transfers, fund transfers, purchase orders, sale/purchase returns, damaged goods, stock adjustments, cash-register sessions, employee payments, incentive targets / awards / rules, POS new-customer modal, etc.) is tracked by a shared [`useUnsavedChangesPrompt` hook](erp-frontend/src/hooks/useUnsavedChangesPrompt.js). The hook diffs the live form against its initial snapshot; when dirty it (a) attaches a capture-phase `click` listener that intercepts any `<a href="#/…">` before React Router sees it, pops a confirm dialog, and only lets the navigation through if the user agrees, and (b) wires `beforeunload` for tab close / refresh. The click-interceptor approach was chosen over React Router's `useBlocker` because the app uses the declarative `<HashRouter>` (not a data router), where `useBlocker` is unavailable.
+- **WhatsApp share** — a "Send on WhatsApp" button on the sales invoice, booking receipt, warranty lookup cards, and customer ledger (balance reminder). It opens a free `wa.me` deep link (WhatsApp Web/Desktop on a PC, the app on mobile) with the customer's number and a prefilled text message — no backend, no API token, no per-message cost. Phone numbers are normalised to international form for `wa.me` ([`utils/whatsapp.js`](apps/erp-frontend/src/utils/whatsapp.js)); a missing number opens the contact picker instead. The printed PDF (Print → Save as PDF in the browser dialog) is attached manually after the chat opens — `wa.me` can only carry text.
+- **Unsaved-changes guard** — every CRUD form (items, categories, brands, customers, suppliers, stores, accounts, employees, users, vouchers, stock transfers, fund transfers, purchase orders, sale/purchase returns, damaged goods, stock adjustments, cash-register sessions, employee payments, incentive targets / awards / rules, POS new-customer modal, etc.) is tracked by a shared [`useUnsavedChangesPrompt` hook](apps/erp-frontend/src/hooks/useUnsavedChangesPrompt.js). The hook diffs the live form against its initial snapshot; when dirty it (a) attaches a capture-phase `click` listener that intercepts any `<a href="#/…">` before React Router sees it, pops a confirm dialog, and only lets the navigation through if the user agrees, and (b) wires `beforeunload` for tab close / refresh. The click-interceptor approach was chosen over React Router's `useBlocker` because the app uses the declarative `<HashRouter>` (not a data router), where `useBlocker` is unavailable.
 - **Seamless title bar (Electron)** — the in-app `.topbar` and the sidebar header (`.brand`) share the exact same background as the Windows-drawn min/max/close overlay (`#fafafa` light, `#333333` dark, both pinned to `--surface-elev` in tokens.css). No 1 px border lines on the top 44 px band — the opaque overlay sits on top of the topbar, so any border would appear truncated at the seam. Separation from page content comes from the `--bg` vs `--surface-elev` colour contrast.
 - **Accent colour — hardcoded Windows blue (`#0078d4`).** Every accent surface resolves through `var(--primary)` / `var(--info)`. Not user-configurable — keeping it fixed avoids an OS-accent bridge, a Settings page, a boot-time shade-derivation script, and cross-platform colour-format edge cases.
 
@@ -383,7 +383,7 @@ This is **how you load opening stock.** Items on their own carry no quantity —
 | `paymentMethod` | | text | `CASH` / `BANK` / … (label only; the journal credit defaults to Cash on Hand). |
 | `notes` | | text | |
 
-> The column lists above are the single source of truth, mirrored in code at [`erp-frontend/src/utils/importSchemas.js`](erp-frontend/src/utils/importSchemas.js) (UI templates + hints) and the per-module `importRows()` mappers in `erp-backend/src/modules/<entity>/<entity>.service.ts` (purchase bills: [`purchases.service.ts`](erp-backend/src/modules/purchases/purchases.service.ts)). Keep all three in lockstep when a column changes.
+> The column lists above are the single source of truth, mirrored in code at [`erp-frontend/src/utils/importSchemas.js`](apps/erp-frontend/src/utils/importSchemas.js) (UI templates + hints) and the per-module `importRows()` mappers in `erp-backend/src/modules/<entity>/<entity>.service.ts` (purchase bills: [`purchases.service.ts`](apps/erp-backend/src/modules/purchases/purchases.service.ts)). Keep all three in lockstep when a column changes.
 
 ---
 
@@ -441,7 +441,7 @@ Key cross-module wiring: `OutboxService` is the only shared dependency between t
 ## Repo layout
 
 ```
-erp-backend/
+apps/erp-backend/
 ├─ src/
 │  ├─ main.ts                 # NestJS bootstrap; helmet/CSP, scoped body limits, CORS allow-list,
 │  │                          # global ValidationPipe + ErrorLogFilter, migrations-on-boot
@@ -462,7 +462,7 @@ erp-backend/
 │     purchase-orders/ purchases/ reports/ returns/ sales/ sequences/
 │     service-tickets/ stock/ stock-transfers/ stores/ suppliers/ sync/ users/
 
-erp-frontend/
+apps/erp-frontend/
 ├─ logo.jpeg                  # source brand mark (HE monogram on black)
 ├─ public/
 │  ├─ index.html              # CSP meta + theme bootstrap before React renders
@@ -483,7 +483,7 @@ erp-frontend/
 │  ├─ utils/exporters.js      # CSV (BOM) + print-to-PDF
 │  └─ styles/                 # tokens.css, app.css (flat Windows 10)
 
-erp-desktop/
+apps/erp-desktop/
 ├─ src/main.js                # Electron main: app:// protocol, splash, spawn backend, title-bar theme
 ├─ src/preload.js             # tiny window.erpBridge (setTitleBarTheme) over IPC
 ├─ build-resources/
@@ -495,7 +495,7 @@ erp-desktop/
    ├─ rebuild-native.js       # better-sqlite3 Electron-ABI rebuild (prebuild-install → rebuild)
    └─ postinstall.js          # lenient native rebuild (dev convenience)
 
-erp-mobile/                     # standalone read-only Android app (Expo / React Native)
+apps/erp-mobile/                # standalone read-only Android app (Expo / React Native)
 ├─ App.js                     # bottom-tab navigation (Dashboard / History / Stock / Balances)
 ├─ src/
 │  ├─ config.js               # Supabase URL + anon key
@@ -506,15 +506,19 @@ erp-mobile/                     # standalone read-only Android app (Expo / React
 ├─ supabase/setup.sql         # anon grants + computed views (on-hand, A/R, A/P, KPIs)
 └─ android/                   # generated by `expo prebuild` (gitignored)
 
+packages/                    # reserved for shared code across apps (empty placeholder)
 scripts/
-└─ make-icons.ps1             # chroma-key logo.jpeg → favicon + Windows .ico
+└─ make-icons.ps1             # chroma-key logo.jpeg → favicon + Windows .ico (run from repo root)
+docs/                        # CODEBASE_MAP.md, design.md, handoff.md, Manual.txt (gitignored)
+local/                       # GITIGNORED: secrets, mobile-signing keystore, live db, backups, repo bundles
+package.json                 # monorepo root — orchestration scripts (npm run dev:backend / build:web / …)
 ```
 
 ---
 
 ## Setup & run
 
-> The three projects (`erp-backend`, `erp-frontend`, `erp-desktop`) are built and run **independently** — each has its own `package.json`. The root `package.json` is a stray minimal manifest, **not** an npm-workspaces monorepo.
+> The four apps under `apps/` (`erp-backend`, `erp-frontend`, `erp-desktop`, `erp-mobile`) are built and run **independently** — each has its own `package.json` + `node_modules`. The root `package.json` is a **monorepo orchestrator**: convenience scripts (`npm run dev:backend`, `build:web`, `test:backend`, `package:desktop`, `install:all`, …) that delegate into each app via `npm --prefix apps/<app> …`. It deliberately does **not** enable npm-workspaces hoisting — that would break the desktop packaging (`prepare-resources.js` runs `npm ci` against each app's own lockfile) and the Electron/React-Native native builds.
 
 ### Prerequisites
 - **Node.js 24+** (Node 22 also fine if you avoid newer syntax in `prepare-resources.js`)
@@ -522,12 +526,12 @@ scripts/
 
 ### Two-terminal dev
 ```bash
-cd erp-backend
+cd apps/erp-backend
 npm install
 npm run start:dev          # http://localhost:3001/api · health: http://localhost:3001/api/health
 
 # in a second terminal
-cd erp-frontend
+cd apps/erp-frontend
 npm install
 npm start                  # http://localhost:3000
 ```
@@ -536,7 +540,7 @@ On first boot the backend seeds a SUPERUSER (`admin` / `Tech@123`), the chart of
 
 ### Seed stress-test data
 ```bash
-cd erp-backend
+cd apps/erp-backend
 npm run seed                 # heavy (default): ~400 items, ~5k sales, plus every other module
 SEED_SCALE=medium npm run seed
 SEED_SCALE=light  npm run seed
@@ -549,15 +553,15 @@ Two caveats specific to seeding bulk volume into SQLite:
 
 ### Production builds
 ```bash
-cd erp-backend && npm run build      # → erp-backend/dist
-cd erp-frontend && npm run build     # → erp-frontend/build (SPA bundle for app://localhost, or any static host)
+cd apps/erp-backend && npm run build      # → apps/erp-backend/dist
+cd apps/erp-frontend && npm run build     # → apps/erp-frontend/build (SPA bundle for app://localhost, or any static host)
 ```
 
 ---
 
 ## Environment variables
 
-`erp-backend/.env` (gitignored). Either set `DATABASE_URL` for Postgres / Supabase or leave it blank for SQLite.
+`apps/erp-backend/.env` (gitignored). Either set `DATABASE_URL` for Postgres / Supabase or leave it blank for SQLite.
 
 ```dotenv
 # Server
@@ -589,13 +593,13 @@ DB_MIGRATE_ON_BOOT=false
 
 **Supabase gotchas** — use the **Session pooler** (`pooler.supabase.com:5432`), NOT the Direct connection (free-tier blocks IPv4) and NOT the Transaction pooler on `:6543` (breaks TypeORM prepared statements). The pooler username is `postgres.<project-ref>`, not plain `postgres` — `app.module.ts` parses `DATABASE_URL` by hand and passes explicit `username`/`password`/`host`/`port` rather than the `url:` option, because some pg/TLS paths split the dotted username and ship only `postgres` (which the pooler rejects). URL-encode special characters in the password (`@` → `%40`).
 
-> ⚠️ **Production warning — `DB_SYNC=true` is dev-only.** On Postgres / Supabase this lets TypeORM silently `ALTER` / `DROP` columns whenever an entity diff changes — irrecoverable data loss is one rogue refactor away. The migration CLI exists ([data-source.ts](erp-backend/src/data-source.ts) + `db:migrate*` scripts); to baseline production: `cd erp-backend && npm run db:migrate:generate -- src/migrations/InitialSchema`, commit it, flip `DB_SYNC=false`, set `DB_MIGRATE_ON_BOOT=true`, and ship every later schema change as a migration. Until that baseline is generated, treat `DB_SYNC=true` against a populated Supabase DB as the one-time first-run.
+> ⚠️ **Production warning — `DB_SYNC=true` is dev-only.** On Postgres / Supabase this lets TypeORM silently `ALTER` / `DROP` columns whenever an entity diff changes — irrecoverable data loss is one rogue refactor away. The migration CLI exists ([data-source.ts](apps/erp-backend/src/data-source.ts) + `db:migrate*` scripts); to baseline production: `cd apps/erp-backend && npm run db:migrate:generate -- src/migrations/InitialSchema`, commit it, flip `DB_SYNC=false`, set `DB_MIGRATE_ON_BOOT=true`, and ship every later schema change as a migration. Until that baseline is generated, treat `DB_SYNC=true` against a populated Supabase DB as the one-time first-run.
 
 ---
 
 ## Mobile / LAN access
 
-The CRA dev server binds to `0.0.0.0`. From a phone on the same network, visit `http://<your-LAN-IP>:3000` — the API client at [src/api/client.js](erp-frontend/src/api/client.js) resolves the API base URL from `window.location.hostname`, so the page auto-targets `http://<LAN-IP>:3001` instead of the phone's own localhost. The backend CORS allow-list ([main.ts](erp-backend/src/main.ts)) permits private-network IPv4 origins (10/8, 172.16/12, 192.168/16) plus the exact `app://localhost` / localhost dev origins.
+The CRA dev server binds to `0.0.0.0`. From a phone on the same network, visit `http://<your-LAN-IP>:3000` — the API client at [src/api/client.js](apps/erp-frontend/src/api/client.js) resolves the API base URL from `window.location.hostname`, so the page auto-targets `http://<LAN-IP>:3001` instead of the phone's own localhost. The backend CORS allow-list ([main.ts](apps/erp-backend/src/main.ts)) permits private-network IPv4 origins (10/8, 172.16/12, 192.168/16) plus the exact `app://localhost` / localhost dev origins.
 
 To find your LAN IP on Windows: `ipconfig` → look for an IPv4 address starting with `192.168.…` or `10.0.…`.
 
@@ -615,7 +619,7 @@ The main process holds a **single-instance lock** (a second launch focuses the e
 
 ### Renderer sandboxing
 
-The Electron `BrowserWindow` runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface — just `setTitleBarTheme(theme)` so the Windows-drawn min/max/close overlay can flip light↔dark with the in-app theme. A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out — it sees the same DOM a regular browser tab would. The strict Helmet CSP on the backend and the `<meta http-equiv="Content-Security-Policy">` tag in [index.html](erp-frontend/public/index.html) (`script-src 'self'`) further block dynamic script evaluation.
+The Electron `BrowserWindow` runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`. The renderer has no direct access to Node APIs, the filesystem, or `require`. The preload script ([erp-desktop/src/preload.js](erp-desktop/src/preload.js)) exposes a deliberately tiny `window.erpBridge` IPC surface — just `setTitleBarTheme(theme)` so the Windows-drawn min/max/close overlay can flip light↔dark with the in-app theme. A hypothetical XSS inside the React build cannot read `<userData>/erp.sqlite` or shell out — it sees the same DOM a regular browser tab would. The strict Helmet CSP on the backend and the `<meta http-equiv="Content-Security-Policy">` tag in [index.html](apps/erp-frontend/public/index.html) (`script-src 'self'`) further block dynamic script evaluation.
 
 ### Window chrome (VS Code-style)
 
@@ -624,7 +628,7 @@ The window drops the native menu bar (`Menu.setApplicationMenu(null)`) and hides
 ### Build the installer
 
 ```bash
-cd erp-desktop
+cd apps/erp-desktop
 npm install
 npm run package:win        # → release/Hassan Electronics-Setup-1.0.0.exe     (NSIS installer, ~115 MB)
                            # → release/Hassan Electronics-Portable-1.0.0.exe  (single-file portable, ~115 MB)
@@ -648,7 +652,7 @@ npm run package            # current platform
 
 **Unsigned.** Windows SmartScreen warns on first run; click *More info → Run anyway*. To suppress, ship a code-signing certificate via electron-builder's `signtoolOptions`.
 
-> **Electron version pin.** `erp-desktop/package.json` pins `electron` to `^40.0.0`. better-sqlite3 v12.10 only publishes Electron prebuilts through ABI `electron-v145` (= Electron 40); newer majors force a source compile via node-gyp which fails without MSVC Build Tools. If you bump Electron, either wait for a matching better-sqlite3 release or install "Build Tools for Visual Studio 2022" with the **Desktop development with C++** workload.
+> **Electron version pin.** `apps/erp-desktop/package.json` pins `electron` to `^40.0.0`. better-sqlite3 v12.10 only publishes Electron prebuilts through ABI `electron-v145` (= Electron 40); newer majors force a source compile via node-gyp which fails without MSVC Build Tools. If you bump Electron, either wait for a matching better-sqlite3 release or install "Build Tools for Visual Studio 2022" with the **Desktop development with C++** workload.
 
 ### Wire the install to Supabase
 
@@ -692,15 +696,15 @@ Local shop node (SQLite)  ──Sync push──▶  Supabase Postgres  ◀──
 
 ### One-time Supabase setup
 
-On-hand stock and party balances are **not stored** — they're computed. Run [`erp-mobile/supabase/setup.sql`](erp-mobile/supabase/setup.sql) once in the Supabase SQL editor (as the project owner). It grants the `anon` role SELECT on the business tables the app reads and creates four views whose math mirrors `ReportsService` exactly: `mobile_item_stock` (on-hand = running `SUM(IN − OUT)` of `stock_movements`, **not** `costed_qty`), `mobile_customer_balance`, `mobile_supplier_balance`, and `mobile_kpis`. It deliberately does **not** expose users/auth, settings, audit/error logs, or the sync queue. (Confidentiality is out of scope; the app is read-only.)
+On-hand stock and party balances are **not stored** — they're computed. Run [`erp-mobile/supabase/setup.sql`](apps/erp-mobile/supabase/setup.sql) once in the Supabase SQL editor (as the project owner). It grants the `anon` role SELECT on the business tables the app reads and creates four views whose math mirrors `ReportsService` exactly: `mobile_item_stock` (on-hand = running `SUM(IN − OUT)` of `stock_movements`, **not** `costed_qty`), `mobile_customer_balance`, `mobile_supplier_balance`, and `mobile_kpis`. It deliberately does **not** expose users/auth, settings, audit/error logs, or the sync queue. (Confidentiality is out of scope; the app is read-only.)
 
 ### Configure & build
 
-1. Paste the Supabase **anon / public** key into [`erp-mobile/src/config.js`](erp-mobile/src/config.js) (the URL is already set from `.env`). Never put the `service_role` key in the app.
+1. Paste the Supabase **anon / public** key into [`erp-mobile/src/config.js`](apps/erp-mobile/src/config.js) (the URL is already set from `.env`). Never put the `service_role` key in the app.
 2. Build the signed APK:
 
 ```
-cd erp-mobile
+cd apps/erp-mobile
 npm install
 npx expo prebuild --platform android     # generates android/ (one-time)
 cd android
@@ -719,7 +723,7 @@ The backup is a full JSON snapshot of every business table (sales, purchases, pa
 - **Manual snapshot** — `System → Backups → Save backup now` writes a snapshot to disk on the server.
 - **Download snapshot** — streams an in-memory snapshot to the browser as a file download (no file persisted server-side; superuser-only). A backup is a frozen-in-time copy of the whole business, so downloads are restricted and recorded.
 - **Restore** — `Restore from file` (superuser + one-shot reauth + literal `RESTORE` confirmation) accepts a JSON snapshot up to 100 MB, takes a pre-restore safety snapshot, then wipes and replays every business table inside a single transaction.
-- **Storage** — defaults to `erp-backend/backups/` in dev; Electron forces `<userData>/backups` so backups survive uninstalls. Each row carries a `sha256` for verification.
+- **Storage** — defaults to `apps/erp-backend/backups/` in dev; Electron forces `<userData>/backups` so backups survive uninstalls. Each row carries a `sha256` for verification.
 
 ---
 
@@ -728,11 +732,11 @@ The backup is a full JSON snapshot of every business table (sales, purchases, pa
 Backend has **157 Jest tests across 14 spec files**, covering the high-value services:
 
 ```bash
-cd erp-backend && npm test            # full suite, ~14 s
-cd erp-backend && npx jest --coverage # coverage report (~32 s)
+cd apps/erp-backend && npm test            # full suite, ~14 s
+cd apps/erp-backend && npx jest --coverage # coverage report (~32 s)
 ```
 
-Tests use an isolated in-memory SQLite TypeORM data source per spec ([src/testing/test-db.ts](erp-backend/src/testing/test-db.ts)) — no Supabase calls, no shared state. (The ERROR/WARN lines printed during the run — `SyncService … failed: boom`, `SyncSignatureGuard … rejected`, etc. — are intentional negative-path assertions inside passing tests, not failures.)
+Tests use an isolated in-memory SQLite TypeORM data source per spec ([src/testing/test-db.ts](apps/erp-backend/src/testing/test-db.ts)) — no Supabase calls, no shared state. (The ERROR/WARN lines printed during the run — `SyncService … failed: boom`, `SyncSignatureGuard … rejected`, etc. — are intentional negative-path assertions inside passing tests, not failures.)
 
 Spec files: `app.controller`, `categories.service`, `items.service`, `journals/journal.service`, `periods/periods.service`, `pos.service`, `purchases.service`, `reports.service`, `sales.service`, `sequences/sequence.service`, `stock.service`, `sync/hmac.util`, `sync/sync-signature.guard`, `sync/sync.service`.
 
@@ -751,7 +755,7 @@ Per-service line coverage (real numbers): **stock 100 %**, **sequence 100 %**, *
 - **DTO validation** — every Create / Update DTO uses class-validator decorators. The global `ValidationPipe` has `whitelist`, `transform`, and `forbidNonWhitelisted` on — extra fields throw.
 - **Auto-generated voucher numbers** — `INV-`, `BILL-`, `SR-`, `PR-`, `RCT-`, `PMT-`, `TRF-`, `PO-`, `DMG-`, `STK-TRF-`, `JE-`, `SVC-`, `DLV-`, and master-data codes `CUST-`, `SUPP-`, `EMP-`, `ACC-`, plus per-type employee-transaction prefixes (`SALA-`, `SAL-`, `ADV-`, `RBT-`, `EXP-`, `INC-`, `ADJ-`). Every prefix routes through `SequenceService.next(prefix, seedFromMax?)`, which atomically increments a row in the `sequences` table (`prefix` PK, `nextValue` int, 6-digit zero-pad). On Postgres the read is `SELECT … FOR UPDATE`; on SQLite the single-writer connection serialises. Seeded on first call from a count callback. Numbers may have gaps from rolled-back transactions, but two distinct calls never collide.
 - **Quick-search bar everywhere** — `CrudPage` exposes `searchKeys={[...]}` so each list page controls which fields it searches over.
-- **Delete = safe** — master-data deletes are wrapped in `deleteOrConflict` ([delete-guard.ts](erp-backend/src/common/delete-guard.ts)) which catches DB foreign-key violations (Postgres `23503` / SQLite `FOREIGN KEY constraint failed`) and turns them into a friendly 409 telling the user to use Close instead. (Categories rely on `onDelete: 'SET NULL'` for their self-ref children and aren't guarded; brands / stores / suppliers / customers / employees / accounts / items are.)
+- **Delete = safe** — master-data deletes are wrapped in `deleteOrConflict` ([delete-guard.ts](apps/erp-backend/src/common/delete-guard.ts)) which catches DB foreign-key violations (Postgres `23503` / SQLite `FOREIGN KEY constraint failed`) and turns them into a friendly 409 telling the user to use Close instead. (Categories rely on `onDelete: 'SET NULL'` for their self-ref children and aren't guarded; brands / stores / suppliers / customers / employees / accounts / items are.)
 - **Reports are read-only** — no writes allowed inside `ReportsService` or its controller.
 - **Outbox decouples sales from sync** — `OutboxService` is the only thing both sales / purchases / POS and the sync worker depend on. Do not make `SalesModule` import `SyncModule` (circular).
 - **HashRouter, not BrowserRouter** — required so the SPA fallback inside the `app://` protocol handler works on any sub-route.
@@ -781,7 +785,7 @@ A directional roadmap, agreed for a single-shop install operated by the owner an
 - ✅ **Electron sandbox** — `contextIsolation: true` + `nodeIntegration: false` + `sandbox: true`; the renderer can't `require`, touch the filesystem, or shell out. Preload exposes only `window.erpBridge.setTitleBarTheme`.
 - ✅ **Sequence-table voucher numbers** — `sequences` table + global `SequenceService` replaces every `count + 1` generation. Postgres uses `SELECT … FOR UPDATE`; SQLite relies on single-writer.
 - ✅ **Backup-restore hardening (integrity)** — `@SuperuserOnly()` on `/backup/restore`, `/backup/download-now`, `/backup/:id/download`. Restore additionally requires a one-shot `X-Reauth-Token` (from `POST /auth/reauthenticate`, 60-second TTL) or the legacy password — protects against a left-open session wiping the DB. Download endpoints are superuser-gated but un-reauthed (read-only; confidentiality isn't the threat model).
-- ✅ **TypeORM migrations infra** — standalone [data-source.ts](erp-backend/src/data-source.ts) + `db:migrate*` scripts; the main process applies pending migrations on launch when `DB_MIGRATE_ON_BOOT=true` (Electron sets it). Baseline + flip to `DB_SYNC=false` before treating Supabase as production.
+- ✅ **TypeORM migrations infra** — standalone [data-source.ts](apps/erp-backend/src/data-source.ts) + `db:migrate*` scripts; the main process applies pending migrations on launch when `DB_MIGRATE_ON_BOOT=true` (Electron sets it). Baseline + flip to `DB_SYNC=false` before treating Supabase as production.
 - ✅ **WAL checkpoint on shutdown** — `SqliteCheckpointService` runs `PRAGMA wal_checkpoint(TRUNCATE)` on graceful shutdown (self-disables on Postgres) so the next boot doesn't replay a large WAL after a crash.
 - ❌ **At-rest encryption (SQLite + backups) — explicitly out of scope.** Confidentiality is the lowest of the C-I-A trio for this deployment; encryption would *hurt* availability (lose the key → brick every backup) without addressing any real threat. Plaintext on purpose.
 

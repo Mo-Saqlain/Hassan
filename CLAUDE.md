@@ -6,53 +6,59 @@ Four deliverables ship from this repo: `erp-backend` (API), `erp-frontend` (web 
 
 ## Repo layout
 
+Monorepo. The four deliverables live under `apps/`, each still installing & building **independently** (see the workspace note below the tree).
+
 ```
-erp-backend/    NestJS 11 + TypeORM 0.3. 36 feature modules under src/modules (one per folder), 48 domain entities + a `settings` table (50 `*.entity.ts` files; `BaseEntity` is abstract). SQLite (better-sqlite3) by default; Postgres when DATABASE_URL is set.
-erp-frontend/   React 19 + HashRouter + axios + light/dark themes. CRA build system.
-erp-desktop/    Electron 40 wrapper. Spawns the compiled backend as a child process and loads the React build via the custom app:// protocol (NOT file://).
-erp-mobile/     Expo (SDK 57) / React Native 0.86 READ-ONLY Android companion. Talks directly to Supabase (PostgREST via the anon/publishable key) — never the NestJS backend, never writes. Ships as a sideloaded signed `.apk`. See `### Mobile`.
-scripts/        make-icons.ps1 — chroma-keys logo.jpeg and emits the favicon + Windows .ico.
-README.md       User-and-dev-facing overview (also holds the "CSV import & data migration" schema reference).
-package.json    Stray root manifest (axios + react-router-dom only). NOT an npm workspaces monorepo — each of the FOUR projects installs/builds independently.
-CODEBASE_MAP.md · design.md · handoff.md   Dev-facing deep-dive docs (file-by-file map, design notes, historical handoff). May lag the code — treat CLAUDE.md + source as canonical.
-Manual.txt      Owner-facing operating manual. GITIGNORED — not committed; reflect its terminology but don't link it as a repo file.
+apps/erp-backend/    NestJS 11 + TypeORM 0.3. 36 feature modules under src/modules (one per folder), 48 domain entities + a `settings` table (50 `*.entity.ts` files; `BaseEntity` is abstract). SQLite (better-sqlite3) by default; Postgres when DATABASE_URL is set.
+apps/erp-frontend/   React 19 + HashRouter + axios + light/dark themes. CRA build system.
+apps/erp-desktop/    Electron 40 wrapper. Spawns the compiled backend as a child process and loads the React build via the custom app:// protocol (NOT file://).
+apps/erp-mobile/     Expo (SDK 57) / React Native 0.86 READ-ONLY Android companion. Talks directly to Supabase (PostgREST via the anon/publishable key) — never the NestJS backend, never writes. Ships as a sideloaded signed `.apk`. See `### Mobile`.
+packages/            Reserved for code shared across apps. Empty placeholder — nothing extracted yet.
+scripts/             make-icons.ps1 — chroma-keys logo.jpeg and emits the favicon + Windows .ico. Run from the repo root.
+docs/                Dev-facing deep-dive docs — CODEBASE_MAP.md, design.md, handoff.md (file-by-file map, design notes, historical handoff; may lag the code — treat CLAUDE.md + source as canonical), plus the GITIGNORED owner-facing Manual.txt.
+local/               GITIGNORED working data: secrets (real .env), mobile-signing (release keystore + plaintext passwords), db (live erp.sqlite + logs), backups, repo bundles. NEVER committed — see `.gitignore`.
+README.md            User-and-dev-facing overview (also holds the "CSV import & data migration" schema reference).
+CLAUDE.md            This guide. Stays at repo root (auto-loaded).
+package.json         Monorepo root: orchestration scripts (`npm run dev:backend`, `dev:web`, `build:backend`, `build:web`, `test:backend`, `start:desktop`, `package:desktop`, `start:mobile`, `install:all`) that delegate into each app via `npm --prefix apps/<app> …`.
 ```
+
+**Not npm-workspaces (no hoisting), by design.** The root `package.json` deliberately does NOT declare a `workspaces` array — each app keeps its own `node_modules` + `package-lock.json` and installs independently. True npm workspace hoisting breaks this repo three ways: `apps/erp-desktop/scripts/prepare-resources.js` runs `npm ci` against `apps/erp-backend`'s *own* `package-lock.json` (workspaces replace per-app locks with one root lock → `npm ci` fails); the Electron 40 ABI pin for `better-sqlite3` needs the backend's native module resolvable where `@electron/rebuild` expects it; and React Native's Metro bundler fights hoisting. The root is an orchestrator only. To adopt real workspaces later you'd first have to rework the desktop packaging + add RN Metro config.
 
 ## Run
 
 Two terminals during dev:
 
 ```
-cd erp-backend  && npm run start:dev   # http://localhost:3001/api
-cd erp-frontend && npm start           # http://localhost:3000
+cd apps/erp-backend  && npm run start:dev   # http://localhost:3001/api
+cd apps/erp-frontend && npm start           # http://localhost:3000
 ```
 
 Optional Electron desktop wrapper (build both first):
 ```
-cd erp-backend  && npm run build
-cd erp-frontend && npm run build
-cd erp-desktop  && npm start
+cd apps/erp-backend  && npm run build
+cd apps/erp-frontend && npm run build
+cd apps/erp-desktop  && npm start
 ```
 
 Packaged installer:
 ```
-cd erp-desktop && npm run package:win   # → release/Hassan Electronics-Setup-1.0.0.exe (+ Portable exe)
+cd apps/erp-desktop && npm run package:win   # → release/Hassan Electronics-Setup-1.0.0.exe (+ Portable exe)
 ```
 
 Mobile app (Expo / React Native, read-only):
 ```
-cd erp-mobile && npm install && npm start     # Expo dev server; press 'a' for Android, or scan the QR in Expo Go
+cd apps/erp-mobile && npm install && npm start     # Expo dev server; press 'a' for Android, or scan the QR in Expo Go
 ```
 Release APK (needs Android SDK + JDK 17–21; on this box the Android Studio JBR at `C:\Program Files\Android\Android Studio\jbr` works):
 ```
-cd erp-mobile/android && ./gradlew assembleRelease
+cd apps/erp-mobile/android && ./gradlew assembleRelease
 # → android/app/build/outputs/apk/release/app-release.apk  (copied to erp-mobile/Hassan-Electronics-1.0.0.apk for distribution)
 ```
 `android/` is generated by `npx expo prebuild` and is gitignored in full (see `### Mobile`).
 
 ## Environment
 
-`erp-backend/.env` (gitignored). Either set `DATABASE_URL` for Postgres/Supabase or leave it blank to fall back to SQLite.
+`apps/erp-backend/.env` (gitignored). Either set `DATABASE_URL` for Postgres/Supabase or leave it blank to fall back to SQLite.
 
 ```
 DATABASE_URL=postgresql://postgres.<ref>:<password-url-encoded>@aws-1-<region>.pooler.supabase.com:5432/postgres
@@ -80,7 +86,7 @@ SHOP_SYNC_SECRET=<≥32 bytes> # shared HMAC secret; the local pusher also needs
 ## Architecture
 
 ### Backend (NestJS)
-- Module-per-domain under `erp-backend/src/modules/`. Each module owns its entities, DTOs, service, controller.
+- Module-per-domain under `apps/erp-backend/src/modules/`. Each module owns its entities, DTOs, service, controller.
 - TypeORM `synchronize` is **unconditionally true on SQLite**; gated by `DB_SYNC=true` on Postgres. Migration infra exists (`src/data-source.ts`, `npm run db:migrate*`, table `typeorm_migrations`) but **no migration files have been written yet** — `synchronize` still does the work in dev. The CLI DataSource is separate from the runtime one; keep both pointed at the same entity glob.
 - `@Global()` modules (inject anywhere without import): `SequenceModule`, `PeriodsModule`, `JournalsModule`, `AccountsModule`, `ItemSerialsModule`, `UsersModule`. Sales/Purchases/POS/Returns/etc. rely on this — they import only `StockModule` + `OutboxModule` explicitly and resolve `SequenceService`/`JournalService`/`AccountsService`/`ItemSerialsService` globally.
 - `OutboxModule` owns the local sync queue (`sync_queue`); `SalesService`/`PurchasesService`/`PosService` enqueue events via `OutboxService.enqueue` when `CLOUD_SYNC_URL` is set.
@@ -90,7 +96,7 @@ SHOP_SYNC_SECRET=<≥32 bytes> # shared HMAC secret; the local pusher also needs
 - `JournalService.post(input, manager?)` accepts the caller's `EntityManager` so the journal entry is written in the SAME transaction as the operational row. Every money-moving service (Sales, Purchases, POS, Payments, Fund-transfers, settle-commitment) posts a balanced double-entry journal inside its transaction. `JournalService` rejects unbalanced entries (tolerance 0.005) and posting to control accounts.
 - `PeriodsService.assertOpen(date)` blocks posting only into HARD_CLOSED periods; SOFT_CLOSED and no-covering-period are allowed.
 - `ReportsModule` is read-only — it touches every business entity to compute ledgers + financials. It serves both operational/movement-derived statements and journal-derived parallel statements (`trial-balance`, `*-from-journals`). Don't put writes there.
-- **CSV import** (`common/csv-import.ts`): the browser parses the CSV and POSTs already-parsed JSON rows (`{ rows: [...] }`) to `POST /api/<entity>/import` — the backend never receives a file (no multer / `FileInterceptor`). `csv-import.ts` is a row-mapping + validation + per-row-isolation harness (`str`/`num`/`bool` coercers, `validateDto`, `runImport` — reports each failure by 1-based CSV line, and one bad row never aborts the batch). Import endpoints exist for **8 master-data entities** (items, categories, brands, customers, suppliers, stores, accounts, employees) via a uniform `service.importRows(rows)`, plus a **purchase-bill** path (`purchases.service.ts` groups rows by `billNo` into multi-line bills, resolves item/supplier/store by name/SKU, and runs the real `create()` → stock IN + weighted-avg cost roll-up + serial intake + balanced journal). Frontend schemas live in `erp-frontend/src/utils/importSchemas.js`; keep them, the backend `importRows()` mappers, and the README "CSV import & data migration" table in lockstep.
+- **CSV import** (`common/csv-import.ts`): the browser parses the CSV and POSTs already-parsed JSON rows (`{ rows: [...] }`) to `POST /api/<entity>/import` — the backend never receives a file (no multer / `FileInterceptor`). `csv-import.ts` is a row-mapping + validation + per-row-isolation harness (`str`/`num`/`bool` coercers, `validateDto`, `runImport` — reports each failure by 1-based CSV line, and one bad row never aborts the batch). Import endpoints exist for **8 master-data entities** (items, categories, brands, customers, suppliers, stores, accounts, employees) via a uniform `service.importRows(rows)`, plus a **purchase-bill** path (`purchases.service.ts` groups rows by `billNo` into multi-line bills, resolves item/supplier/store by name/SKU, and runs the real `create()` → stock IN + weighted-avg cost roll-up + serial intake + balanced journal). Frontend schemas live in `apps/erp-frontend/src/utils/importSchemas.js`; keep them, the backend `importRows()` mappers, and the README "CSV import & data migration" table in lockstep.
 - `AuthGuard` is global (registered in `UsersModule` via `APP_GUARD`). Exempt routes (`@Public()`): `/auth/login`, `/auth/request-access`, `/health`, `/sync/push`, `/item-serials/warranty/:serial`. `@SuperuserOnly()` gates users/audit-logs/error-logs management + privileged backup ops.
 - Auth tokens are opaque (scrypt-hashed passwords, not JWT), single active token per user, 12-hour sliding window. `ReauthService` issues one-shot 60s tokens (`X-Reauth-Token`) for destructive backup restore/download.
 - Cross-cutting concerns use TypeORM `EntitySubscriber`, never DB triggers: `AuditSubscriber` writes `audit_logs`; `ErrorLogFilter` (global exception filter) writes `error_logs`; `SqliteCheckpointService` runs `PRAGMA wal_checkpoint(TRUNCATE)` on shutdown (`app.enableShutdownHooks()` required).
@@ -130,13 +136,13 @@ The System → **Connection** page (`pages/Connection.js`) is a "Check connectio
 - **Read-only Android companion** — Expo SDK 57 / React Native 0.86 / React 19. Entry `index.js` → `App.js`. It talks **directly to Supabase** (PostgREST via `@supabase/supabase-js` + the public anon key) — it does **not** call the NestJS backend and never writes. It mirrors what the desktop shows by reading the cloud copy the shop populates when it clicks **Sync**.
 - **4 bottom-tab screens** (`@react-navigation/bottom-tabs`): **Dashboard** (KPIs — today/month sales, all-time revenue, gross profit, A/R, A/P, inventory value, low-stock), **History** (sales/purchases toggle, searchable, tap-to-expand line items), **Stock** (on-hand / available / reserved / value, low-stock filter), **Balances** (customer A/R / supplier A/P toggle with outstanding totals). Data layer is `src/api.js`; screens use the `src/useLoad.js` hook (pull-to-refresh).
 - **Config** — `src/config.js` holds `SUPABASE_URL` + `SUPABASE_ANON_KEY`, both **committed on purpose**: the anon / `sb_publishable_…` key is safe to ship because it only grants the read access `setup.sql` configures. **Never** put the `service_role` / `sb_secret_…` key here. `isConfigured()` gates a warn banner. The client is built with `persistSession:false` (no Supabase Auth); `react-native-url-polyfill/auto` must be imported first (required for supabase-js on RN).
-- **Cloud read model** — run `erp-mobile/supabase/setup.sql` **once** (as the Supabase project owner) in the SQL editor. It grants `anon` SELECT on the business tables (sales, sale_items, purchases, purchase_items, items, brands, categories, item_categories, customers, suppliers, stores) plus a read-only `mobile_anon_read` RLS policy per table (Supabase runs RLS, so a bare grant reads back empty; the policy permits anon SELECT while INSERT/UPDATE/DELETE stay blocked), and creates the 4 views the app reads: `mobile_kpis`, `mobile_item_stock` (on-hand = Σ stock_movements, available = on-hand − reserved_qty, value = on-hand × avg_cost), `mobile_customer_balance`, `mobile_supplier_balance` (balance formulas mirror `ReportsService`). It deliberately does **not** expose users/auth, settings, audit/error logs, or the sync queue.
+- **Cloud read model** — run `apps/erp-mobile/supabase/setup.sql` **once** (as the Supabase project owner) in the SQL editor. It grants `anon` SELECT on the business tables (sales, sale_items, purchases, purchase_items, items, brands, categories, item_categories, customers, suppliers, stores) plus a read-only `mobile_anon_read` RLS policy per table (Supabase runs RLS, so a bare grant reads back empty; the policy permits anon SELECT while INSERT/UPDATE/DELETE stay blocked), and creates the 4 views the app reads: `mobile_kpis`, `mobile_item_stock` (on-hand = Σ stock_movements, available = on-hand − reserved_qty, value = on-hand × avg_cost), `mobile_customer_balance`, `mobile_supplier_balance` (balance formulas mirror `ReportsService`). It deliberately does **not** expose users/auth, settings, audit/error logs, or the sync queue.
 - **Build** — plain Expo prebuild + local Gradle (**no EAS**). `android/` is generated by `npx expo prebuild --platform android` and is **gitignored in full**, so `build.gradle`, `gradle.properties` (which holds the `HASSAN_*` keystore passwords in plaintext), and `android/app/hassan-release.keystore` live **only on disk, not in git**. Release APK: `cd android && ./gradlew assembleRelease`. Keep the keystore safe — future updates must be signed with the same key or phones refuse to upgrade. App id `com.hassanelectronics.erpmobile`; `versionCode`/`versionName` in both `app.json` and `android/app/build.gradle`.
 - **Theme** (`src/theme.js`) matches the desktop's flat Windows-10 look — primary `#0078d4`, `radius: 0`, 1px borders, monospace numbers.
 
 ### Branding
-- Source: `erp-frontend/logo.jpeg` (HE monogram, white H + blue E on black).
-- `scripts/make-icons.ps1` chroma-keys out the black backdrop (luminance key, threshold 24, feather 72) and emits transparent `logo192.png` / `logo512.png` / `logo1024.png` plus a multi-resolution `favicon.ico` (16/24/32/48/64/128/256) into `erp-frontend/public/`. The same ICO is copied to `erp-desktop/build-resources/icon.ico` for electron-builder.
+- Source: `apps/erp-frontend/logo.jpeg` (HE monogram, white H + blue E on black).
+- `scripts/make-icons.ps1` chroma-keys out the black backdrop (luminance key, threshold 24, feather 72) and emits transparent `logo192.png` / `logo512.png` / `logo1024.png` plus a multi-resolution `favicon.ico` (16/24/32/48/64/128/256) into `apps/erp-frontend/public/`. The same ICO is copied to `apps/erp-desktop/build-resources/icon.ico` for electron-builder.
 - The transparent logo is rendered on the **Sign in** and **Request access** screens only (no chip / backdrop). A theme toggle sits in the top-right of the login card. Everywhere else only the wordmark renders.
 
 ## Domain model essentials
@@ -218,8 +224,8 @@ Don't add a `@Cron` back unless the product direction explicitly changes — the
 Backend has **163 Jest tests across 14 spec files** (`src/**/*.spec.ts`) covering the high-value services:
 
 ```
-cd erp-backend && npm test               # full suite (~14s)
-cd erp-backend && npm run test:cov        # coverage report (~32s)
+cd apps/erp-backend && npm test               # full suite (~14s)
+cd apps/erp-backend && npm run test:cov        # coverage report (~32s)
 ```
 
 Tests use an in-memory SQLite TypeORM data source via `src/testing/test-db.ts` (`inMemoryTypeOrm`) — they don't touch Supabase. Expected ERROR/WARN log lines in the output are intentional negative-path assertions, not failures.
@@ -240,10 +246,10 @@ Spec files: `app.controller`, `categories.service`, `items.service`, `journals/j
 | Allocate a voucher number | `SequenceService.next(prefix, () => repo.count())`. Don't hand-roll `count + 1`. |
 | Change DB schema | Edit the entity; TypeORM `synchronize` applies on SQLite (always) / Postgres (`DB_SYNC=true`). Migration infra exists but no migration files yet — add one before treating Supabase as production. |
 | Update favicon / app icon | Replace `erp-frontend/logo.jpeg`, then run `scripts/make-icons.ps1` from the repo root. |
-| Stress-seed data | `cd erp-backend && npm run seed` (SEED_SCALE=light\|medium\|heavy). Forces SQLite, detaches AuditSubscriber, drives real services. |
-| Build a desktop installer | `cd erp-desktop && npm run package:win` → `release/Hassan Electronics-Setup-1.0.0.exe` + Portable exe (per-user NSIS, unsigned; data preserved on uninstall). Also builds backend + frontend automatically via `prepare-resources.js`. |
-| Build the mobile APK | `cd erp-mobile/android && ./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk` (needs Android SDK + JDK 17–21). Grant cloud reads once via `erp-mobile/supabase/setup.sql`. |
-| Add a CSV-importable column | Add it to the entity's Create DTO, map it in the service's `importRows()` (via `str`/`num`/`bool`), add it to `erp-frontend/src/utils/importSchemas.js`, and document it in the README "CSV import" table — keep all three in lockstep. |
+| Stress-seed data | `cd apps/erp-backend && npm run seed` (SEED_SCALE=light\|medium\|heavy). Forces SQLite, detaches AuditSubscriber, drives real services. |
+| Build a desktop installer | `cd apps/erp-desktop && npm run package:win` → `release/Hassan Electronics-Setup-1.0.0.exe` + Portable exe (per-user NSIS, unsigned; data preserved on uninstall). Also builds backend + frontend automatically via `prepare-resources.js`. |
+| Build the mobile APK | `cd apps/erp-mobile/android && ./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk` (needs Android SDK + JDK 17–21). Grant cloud reads once via `apps/erp-mobile/supabase/setup.sql`. |
+| Add a CSV-importable column | Add it to the entity's Create DTO, map it in the service's `importRows()` (via `str`/`num`/`bool`), add it to `apps/erp-frontend/src/utils/importSchemas.js`, and document it in the README "CSV import" table — keep all three in lockstep. |
 
 ## Don'ts
 
@@ -276,5 +282,5 @@ Spec files: `app.controller`, `categories.service`, `items.service`, `journals/j
 - Don't propose at-rest encryption / httpOnly cookies / backup encryption — confidentiality is out of scope; the owner prioritises integrity + availability. (Backup snapshots are plaintext JSON by design; the users/auth and backups tables are excluded from backup dump AND restore.)
 - Don't ship the Supabase `service_role` / `sb_secret_…` key in `erp-mobile` — only the anon / `sb_publishable_…` key belongs in `src/config.js` (it grants just the read access `supabase/setup.sql` configures). And don't add write paths to the mobile app; it's read-only by design.
 - Don't blindly re-run `expo prebuild` in `erp-mobile` — it regenerates the gitignored `android/` from template and overwrites the release `signingConfig` + `HASSAN_*` props. If you must, re-apply the signing edits and keep `hassan-release.keystore` (same key, or phones refuse to upgrade over an existing install).
-- Don't bump the `erp-mobile` Expo SDK without reading the exact versioned docs — `erp-mobile/AGENTS.md` points at `https://docs.expo.dev/versions/v57.0.0/`. Expo APIs move between SDKs.
+- Don't bump the `erp-mobile` Expo SDK without reading the exact versioned docs — `apps/erp-mobile/AGENTS.md` points at `https://docs.expo.dev/versions/v57.0.0/`. Expo APIs move between SDKs.
 - Don't POST a file / multipart to the backend CSV `import` endpoints — they accept already-parsed JSON `{ rows }` (the browser parses via `utils/csv.js`). Keep `importSchemas.js`, the backend `importRows()` mappers, and the README CSV table in lockstep — a column added in one place but not the others silently drops on import.

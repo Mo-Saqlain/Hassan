@@ -1,5 +1,7 @@
 # Handoff — 2026-05-31 (rolling up everything since 2026-05-13)
 
+> **Layout note (added later):** the repo was reorganized into a monorepo — the four projects now live under `apps/` (`apps/erp-backend/`, `apps/erp-frontend/`, `apps/erp-desktop/`, `apps/erp-mobile/`). Any `erp-*/` path below predates that move; prefix it with `apps/`.
+
 Two and a half weeks of sessions have shipped seven commits on `main` since the last handoff. This document rolls the work into one read so a new developer can pick the codebase up without reading the full conversation log.
 
 ## Where we are now
