@@ -13,6 +13,16 @@ pnpm-debug.log*
 .env.development
 .env.production
 
+# ───────── Local working data (NEVER commit) ─────────
+# Consolidated home for operational data + secrets that live only on disk:
+#   local/secrets/       real backend .env(s)
+#   local/mobile-signing/ release keystore + gradle.properties (plaintext pwds)
+#   local/db/            live erp.sqlite + logs
+#   local/backups/       backup snapshots (dev + live)
+#   local/repo-bundle/   git bundle mirrors
+#   local/misc/          stray assets
+local/
+
 # ───────── Build output ─────────
 dist/
 build/
