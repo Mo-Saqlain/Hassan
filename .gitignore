@@ -30,10 +30,10 @@ out/
 *.tsbuildinfo
 
 # ───────── ERP local databases ─────────
-erp-backend/erp.sqlite
-erp-backend/erp.sqlite-journal
-erp-backend/erp.sqlite-shm
-erp-backend/erp.sqlite-wal
+apps/erp-backend/erp.sqlite
+apps/erp-backend/erp.sqlite-journal
+apps/erp-backend/erp.sqlite-shm
+apps/erp-backend/erp.sqlite-wal
 *.sqlite
 *.sqlite-journal
 *.sqlite-shm
@@ -42,12 +42,13 @@ erp-backend/erp.sqlite-wal
 # ───────── Backup snapshots ─────────
 # Written by /api/backup; path overridable via BACKUP_DIR env var.
 backups/
-erp-backend/backups/
+apps/erp-backend/backups/
 
 # ───────── Electron ─────────
-erp-desktop/dist/
-erp-desktop/out/
-erp-desktop/release/
+apps/erp-desktop/dist/
+apps/erp-desktop/out/
+apps/erp-desktop/release/
+apps/erp-desktop/backend-staging/
 
 # ───────── Editor / OS ─────────
 .vscode/
@@ -67,7 +68,7 @@ coverage/
 .cache/
 *.local
 Changes.txt
-erp-desktop/build-resources/installer.nsh
+apps/erp-desktop/build-resources/installer.nsh
 
 Manual.txt
-erp-backend/erp.sqlite.pre-seed-backup
+apps/erp-backend/erp.sqlite.pre-seed-backup

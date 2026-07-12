@@ -226,7 +226,7 @@ function startBackend() {
   if (!fs.existsSync(entry)) {
     dialog.showErrorBox(
       'Backend build missing',
-      `Could not find compiled backend at:\n${entry}\n\nRun \`npm run build\` inside erp-backend first.`,
+      `Could not find compiled backend at:\n${entry}\n\nRun \`npm run build\` inside apps/erp-backend first.`,
     );
     app.quit();
     return;
@@ -450,7 +450,7 @@ async function createWindow() {
     if (!fs.existsSync(index)) {
       dialog.showErrorBox(
         'Frontend build missing',
-        `Could not find React build at:\n${index}\n\nRun \`npm run build\` inside erp-frontend first.`,
+        `Could not find React build at:\n${index}\n\nRun \`npm run build\` inside apps/erp-frontend first.`,
       );
       app.quit();
       return;

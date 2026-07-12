@@ -11,7 +11,7 @@
 $ErrorActionPreference = 'Stop'
 try {
     $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    $map  = Join-Path $root 'CODEBASE_MAP.md'
+    $map  = Join-Path $root 'docs\CODEBASE_MAP.md'
 
     function Emit($msg) {
         @{ hookSpecificOutput = @{ hookEventName = 'SessionStart'; additionalContext = $msg } } |
@@ -24,7 +24,7 @@ try {
     }
 
     $mapTime = (Get-Item $map).LastWriteTime
-    $srcDirs = @('erp-backend\src', 'erp-frontend\src', 'erp-desktop\src') |
+    $srcDirs = @('apps\erp-backend\src', 'apps\erp-frontend\src', 'apps\erp-desktop\src') |
         ForEach-Object { Join-Path $root $_ } |
         Where-Object { Test-Path $_ }
 

@@ -1,4 +1,19 @@
 {
+  "name": "hassan-electronics",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hassan Electronics ERP + POS monorepo. Four independently-installed apps under apps/: erp-backend (API), erp-frontend (web UI), erp-desktop (Electron installer), erp-mobile (read-only Android). See CLAUDE.md.",
+  "scripts": {
+    "dev:backend": "npm --prefix apps/erp-backend run start:dev",
+    "dev:web": "npm --prefix apps/erp-frontend start",
+    "build:backend": "npm --prefix apps/erp-backend run build",
+    "build:web": "npm --prefix apps/erp-frontend run build",
+    "test:backend": "npm --prefix apps/erp-backend test",
+    "start:desktop": "npm --prefix apps/erp-desktop start",
+    "package:desktop": "npm --prefix apps/erp-desktop run package:win",
+    "start:mobile": "npm --prefix apps/erp-mobile start",
+    "install:all": "npm --prefix apps/erp-backend install && npm --prefix apps/erp-frontend install && npm --prefix apps/erp-desktop install && npm --prefix apps/erp-mobile install"
+  },
   "dependencies": {
     "axios": "^1.16.0",
     "react-router-dom": "^7.15.0"

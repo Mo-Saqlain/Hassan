@@ -3,19 +3,19 @@
 # favicon, taskbar icon, electron app icon, and the login-screen brand mark.
 #
 # Source selection (first match wins):
-#   1. erp-frontend/logo.png   — an already-transparent PNG. Used as-is; the
+#   1. apps/erp-frontend/logo.png   — an already-transparent PNG. Used as-is; the
 #                                 black chroma-key is SKIPPED (it would eat the
 #                                 logo's own dark tones and there's no black
 #                                 backdrop to remove).
-#   2. erp-frontend/logo.jpeg  — legacy JPEG with a black backdrop. The
+#   2. apps/erp-frontend/logo.jpeg  — legacy JPEG with a black backdrop. The
 #                                 backdrop is keyed out to alpha (luminance key).
 #
 # Outputs:
-#   erp-frontend/public/logo192.png
-#   erp-frontend/public/logo512.png
-#   erp-frontend/public/logo1024.png
-#   erp-frontend/public/favicon.ico        (multi-resolution ICO with PNG-encoded entries)
-#   erp-desktop/build-resources/icon.ico   (same ICO for electron-builder)
+#   apps/erp-frontend/public/logo192.png
+#   apps/erp-frontend/public/logo512.png
+#   apps/erp-frontend/public/logo1024.png
+#   apps/erp-frontend/public/favicon.ico        (multi-resolution ICO with PNG-encoded entries)
+#   apps/erp-desktop/build-resources/icon.ico   (same ICO for electron-builder)
 
 Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = 'Stop'
@@ -98,10 +98,10 @@ public static class LogoProc {
 Add-Type -TypeDefinition $csharp -ReferencedAssemblies System.Drawing -ErrorAction SilentlyContinue
 
 $root    = Split-Path -Parent $PSScriptRoot
-$srcPng  = Join-Path $root 'erp-frontend\logo.png'
-$srcJpeg = Join-Path $root 'erp-frontend\logo.jpeg'
-$pub     = Join-Path $root 'erp-frontend\public'
-$des     = Join-Path $root 'erp-desktop\build-resources'
+$srcPng  = Join-Path $root 'apps\erp-frontend\logo.png'
+$srcJpeg = Join-Path $root 'apps\erp-frontend\logo.jpeg'
+$pub     = Join-Path $root 'apps\erp-frontend\public'
+$des     = Join-Path $root 'apps\erp-desktop\build-resources'
 
 if (-not (Test-Path $des)) { New-Item -ItemType Directory -Path $des -Force | Out-Null }
 
