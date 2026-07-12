@@ -9,7 +9,11 @@ const tabs = [
   { key: 'cash', label: 'Cash Flow' },
   { key: 'equity', label: 'Changes in Equity' },
   { key: 'margins', label: 'Margin Insights' },
+  { key: 'product-sales', label: 'Product Sales' },
+  { key: 'customers-by-product', label: 'Customers by Product' },
 ];
+
+const ANALYTICS_TABS = new Set(['product-sales', 'customers-by-product']);
 
 export default function Financials() {
   const [tab, setTab] = useState('income');
@@ -23,6 +27,28 @@ export default function Financials() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Scope pickers — only used by the two product-analytics tabs.
+  const [items, setItems] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [brands, setBrands] = useState([]);
+  const [scope, setScope] = useState({ itemId: '', categoryId: '', brandId: '' });
+
+  // Selecting one scope dimension clears the others — the backend applies a
+  // first-non-empty-wins precedence, so mutually-exclusive pickers keep the
+  // UI honest about what actually gets filtered.
+  const updateScope = (k, v) =>
+    setScope({ itemId: '', categoryId: '', brandId: '', [k]: v });
+
+  useEffect(() => {
+    Promise.all([api.get('/items'), api.get('/categories'), api.get('/brands')])
+      .then(([i, c, b]) => {
+        setItems(i.data);
+        setCategories(c.data);
+        setBrands(b.data);
+      })
+      .catch(() => {});
+  }, []);
+
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -34,6 +60,18 @@ export default function Financials() {
       else if (tab === 'cash') url = `/reports/cash-flow?from=${from}&to=${to}`;
       else if (tab === 'equity') url = `/reports/equity-changes?from=${from}&to=${to}`;
       else if (tab === 'margins') url = `/reports/margin-analytics?from=${from}&to=${to}`;
+      else if (tab === 'product-sales') {
+        const q = new URLSearchParams({ from, to });
+        if (scope.categoryId) q.append('categoryId', scope.categoryId);
+        if (scope.brandId) q.append('brandId', scope.brandId);
+        url = `/reports/product-sales?${q.toString()}`;
+      } else if (tab === 'customers-by-product') {
+        const q = new URLSearchParams({ from, to });
+        if (scope.itemId) q.append('itemId', scope.itemId);
+        else if (scope.categoryId) q.append('categoryId', scope.categoryId);
+        else if (scope.brandId) q.append('brandId', scope.brandId);
+        url = `/reports/customers-by-product?${q.toString()}`;
+      }
       const r = await api.get(url);
       setData(r.data);
     } catch (e) {
@@ -49,19 +87,66 @@ export default function Financials() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  const isAnalytics = ANALYTICS_TABS.has(tab);
+
   return (
     <>
       <div className="page-head">
         <div className="page-title">
-          <h1>Financial statements</h1>
+          <h1>{isAnalytics ? 'Sales analysis' : 'Financial statements'}</h1>
           <p>
-            {tab === 'balance'
-              ? `As of ${asOf}`
-              : `${from} → ${to}`}{' '}
-            · incentives applied to adjusted net income
+            {tab === 'balance' ? `As of ${asOf}` : `${from} → ${to}`}
+            {isAnalytics
+              ? ' · reversed sales excluded'
+              : ' · incentives applied to adjusted net income'}
           </p>
         </div>
-        <div className="row">
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          {isAnalytics && (
+            <>
+              {tab === 'customers-by-product' && (
+                <select
+                  className="input"
+                  value={scope.itemId}
+                  onChange={(e) => updateScope('itemId', e.target.value)}
+                  style={{ maxWidth: 220 }}
+                >
+                  <option value="">— Any item —</option>
+                  {items.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name} ({i.sku})
+                    </option>
+                  ))}
+                </select>
+              )}
+              <select
+                className="input"
+                value={scope.categoryId}
+                onChange={(e) => updateScope('categoryId', e.target.value)}
+                style={{ maxWidth: 200 }}
+              >
+                <option value="">— Any category —</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="input"
+                value={scope.brandId}
+                onChange={(e) => updateScope('brandId', e.target.value)}
+                style={{ maxWidth: 200 }}
+              >
+                <option value="">— Any brand —</option>
+                {brands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           {tab === 'balance' ? (
             <input
               className="input"
@@ -123,14 +208,20 @@ export default function Financials() {
             }}
           >
             <ExportButtons
-              filename={`financials_${tab}`}
+              filename={`report_${tab}`}
               title={tabTitle(tab)}
               subtitle={periodLabel(tab, data, asOf, from, to)}
-              columns={[
-                { key: 'label', label: 'Item' },
-                { key: 'value', label: 'Amount', align: 'right' },
-              ]}
-              rows={flattenStatement(tab, data)}
+              columns={
+                isAnalytics
+                  ? analyticsColumns(tab)
+                  : [
+                      { key: 'label', label: 'Item' },
+                      { key: 'value', label: 'Amount', align: 'right' },
+                    ]
+              }
+              rows={
+                isAnalytics ? analyticsRows(tab, data) : flattenStatement(tab, data)
+              }
             />
           </div>
           {tab === 'income' && <IncomeStatement data={data} />}
@@ -138,6 +229,8 @@ export default function Financials() {
           {tab === 'cash' && <CashFlow data={data} />}
           {tab === 'equity' && <EquityChanges data={data} />}
           {tab === 'margins' && <MarginInsights data={data} />}
+          {tab === 'product-sales' && <ProductSales data={data} />}
+          {tab === 'customers-by-product' && <CustomersByProduct data={data} />}
         </>
       )}
     </>
@@ -157,9 +250,66 @@ function tabTitle(tab) {
       return 'Cash Flow Statement';
     case 'equity':
       return 'Statement of Changes in Equity';
+    case 'margins':
+      return 'Margin Insights';
+    case 'product-sales':
+      return 'Product Sales (by category)';
+    case 'customers-by-product':
+      return 'Customers by Product';
     default:
       return 'Financial Statement';
   }
+}
+
+/** Export column defs for the two product-analytics tabs. */
+function analyticsColumns(tab) {
+  if (tab === 'product-sales') {
+    return [
+      { key: 'category', label: 'Category' },
+      { key: 'name', label: 'Item' },
+      { key: 'sku', label: 'SKU' },
+      { key: 'brandName', label: 'Brand' },
+      { key: 'qty', label: 'Units', align: 'right' },
+      { key: 'revenue', label: 'Revenue', align: 'right' },
+      { key: 'cogs', label: 'COGS', align: 'right' },
+      { key: 'grossProfit', label: 'Gross Profit', align: 'right' },
+      { key: 'marginPct', label: 'Margin %', align: 'right' },
+    ];
+  }
+  return [
+    { key: 'name', label: 'Customer' },
+    { key: 'phone', label: 'Phone' },
+    { key: 'qty', label: 'Units', align: 'right' },
+    { key: 'invoices', label: 'Invoices', align: 'right' },
+    { key: 'spend', label: 'Spend', align: 'right' },
+  ];
+}
+
+/** Flatten an analytics response into export rows. */
+function analyticsRows(tab, d) {
+  if (!d) return [];
+  if (tab === 'product-sales') {
+    return (d.categories ?? []).flatMap((cat) =>
+      cat.items.map((it) => ({
+        category: cat.categoryName,
+        name: it.name,
+        sku: it.sku,
+        brandName: it.brandName,
+        qty: it.qty,
+        revenue: fmt(it.revenue),
+        cogs: fmt(it.cogs),
+        grossProfit: fmt(it.grossProfit),
+        marginPct: Number(it.marginPct).toFixed(1),
+      })),
+    );
+  }
+  return (d.rows ?? []).map((r) => ({
+    name: r.name,
+    phone: r.phone ?? '',
+    qty: r.qty,
+    invoices: r.invoices,
+    spend: fmt(r.spend),
+  }));
 }
 
 function periodLabel(tab, data, asOf, from, to) {
@@ -469,6 +619,159 @@ function MarginInsights({ data }) {
           formatValue={(v, r) => `${pct(v)} · Rs ${Number(r.discount ?? 0).toFixed(0)}`}
         />
       </div>
+    </div>
+  );
+}
+
+/** Summary tile used by the two product-analytics tabs. */
+function Stat({ label, value, money, pct, color }) {
+  const display = pct
+    ? `${Number(value ?? 0).toFixed(1)}%`
+    : money
+      ? `Rs ${fmt(value)}`
+      : Number(value ?? 0).toLocaleString();
+  return (
+    <div className="stat-card">
+      <div className="stat-body">
+        <div className="label">{label}</div>
+        <div className="value" style={color ? { color } : undefined}>
+          {display}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ProductSales — sales-by-product summary grouped by category. Each category
+ * card carries a subtotal strip; the top ledger-summary shows the grand total
+ * for the period. Units / revenue / COGS / gross-profit / margin per item.
+ */
+function ProductSales({ data }) {
+  if (!data?.categories) return null;
+  const t = data.totals ?? {};
+  if (data.categories.length === 0) {
+    return <div className="card muted center">No sales in this period.</div>;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="ledger-summary">
+        <Stat label="Units sold" value={t.qty} />
+        <Stat label="Revenue" value={t.revenue} money />
+        <Stat label="COGS" value={t.cogs} money />
+        <Stat
+          label="Gross profit"
+          value={t.grossProfit}
+          money
+          color="var(--success)"
+        />
+        <Stat label="Margin" value={t.marginPct} pct />
+      </div>
+
+      {data.categories.map((cat) => (
+        <div className="card" key={cat.categoryId ?? '__none__'}>
+          <div
+            className="row"
+            style={{
+              justifyContent: 'space-between',
+              alignItems: 'baseline',
+              flexWrap: 'wrap',
+              gap: 6,
+            }}
+          >
+            <h3 style={{ margin: 0 }}>{cat.categoryName}</h3>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {Number(cat.qty).toLocaleString()} units · Rs {fmt(cat.revenue)} ·
+              GP Rs {fmt(cat.grossProfit)} ({Number(cat.marginPct).toFixed(1)}%)
+            </span>
+          </div>
+          <table style={{ marginTop: 8 }}>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>SKU</th>
+                <th>Brand</th>
+                <th className="right">Units</th>
+                <th className="right">Revenue</th>
+                <th className="right">COGS</th>
+                <th className="right">Gross profit</th>
+                <th className="right">Margin %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cat.items.map((it) => (
+                <tr key={it.itemId}>
+                  <td>{it.name}</td>
+                  <td>{it.sku}</td>
+                  <td>{it.brandName}</td>
+                  <td className="right">{Number(it.qty).toLocaleString()}</td>
+                  <td className="right">{fmt(it.revenue)}</td>
+                  <td className="right">{fmt(it.cogs)}</td>
+                  <td className="right">{fmt(it.grossProfit)}</td>
+                  <td className="right">{Number(it.marginPct).toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * CustomersByProduct — every customer that bought the selected product scope
+ * in the window, ranked by units. Shows units, distinct-invoice count, and
+ * total spend per customer. Walk-in sales collapse into one labelled row.
+ */
+function CustomersByProduct({ data }) {
+  if (!data?.rows) return null;
+  const t = data.totals ?? {};
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="card" style={{ padding: '10px 14px' }}>
+        <strong>Scope:</strong> {data.scope?.label ?? 'All products'}
+      </div>
+
+      <div className="ledger-summary">
+        <Stat label="Customers" value={t.customers} />
+        <Stat label="Units bought" value={t.qty} />
+        <Stat label="Invoices" value={t.invoices} />
+        <Stat label="Total spend" value={t.spend} money />
+      </div>
+
+      {data.rows.length === 0 ? (
+        <div className="card muted center">
+          No buyers for this scope in the period.
+        </div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th className="right">#</th>
+              <th>Customer</th>
+              <th>Phone</th>
+              <th className="right">Units</th>
+              <th className="right">Invoices</th>
+              <th className="right">Spend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r, i) => (
+              <tr key={r.customerId ?? `walkin-${i}`}>
+                <td className="right">{i + 1}</td>
+                <td>{r.name}</td>
+                <td>{r.phone ?? '—'}</td>
+                <td className="right">
+                  <strong>{Number(r.qty).toLocaleString()}</strong>
+                </td>
+                <td className="right">{r.invoices}</td>
+                <td className="right">Rs {fmt(r.spend)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

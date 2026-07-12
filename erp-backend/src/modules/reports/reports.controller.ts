@@ -131,6 +131,40 @@ export class ReportsController {
     return this.service.itemMargins(from, to);
   }
 
+  /** Sales-by-product summary grouped by category (units / revenue / profit).
+   *  Optional `categoryId` or `brandId` narrows the scope; `from`/`to` bound
+   *  the period. Powers the "Product Sales" report tab. */
+  @Get('product-sales')
+  productSales(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('brandId') brandId?: string,
+  ) {
+    return this.service.productSales({ from, to, categoryId, brandId });
+  }
+
+  /** Which customers bought a given product scope, with units + invoice count
+   *  + spend per customer. Scope via `itemId` | `categoryId` | `brandId`
+   *  (first non-empty wins); `from`/`to` bound the period. Powers the
+   *  "Customers by Product" report tab. */
+  @Get('customers-by-product')
+  customersByProduct(
+    @Query('itemId') itemId?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('brandId') brandId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.customersByProduct({
+      itemId,
+      categoryId,
+      brandId,
+      from,
+      to,
+    });
+  }
+
   /** Sales aged by item: how long since the unit last moved off the shelf.
    *  Surfaces dead-stock value + the slowest brands. Query: `asOf`. */
   @Get('slow-moving-stock')

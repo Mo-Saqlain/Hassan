@@ -1,6 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import {
+  Between,
+  In,
+  IsNull,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 import { Customer } from '../customers/entities/customer.entity';
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Sale } from '../sales/entities/sale.entity';
@@ -12,6 +19,8 @@ import { PurchaseReturn } from '../returns/entities/purchase-return.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { Account } from '../accounts/entities/account.entity';
 import { Item } from '../items/entities/item.entity';
+import { Brand } from '../brands/entities/brand.entity';
+import { Category } from '../categories/entities/category.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { IncentivesService } from '../incentives/incentives.service';
 import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
@@ -45,6 +54,8 @@ export class ReportsService {
     @InjectRepository(Payment) private readonly payments: Repository<Payment>,
     @InjectRepository(Account) private readonly accounts: Repository<Account>,
     @InjectRepository(Item) private readonly items: Repository<Item>,
+    @InjectRepository(Brand) private readonly brands: Repository<Brand>,
+    @InjectRepository(Category) private readonly categories: Repository<Category>,
     @InjectRepository(StockMovement) private readonly movements: Repository<StockMovement>,
     private readonly incentives: IncentivesService,
     private readonly transfers: FundTransfersService,
@@ -842,6 +853,48 @@ export class ReportsService {
   // Stock ledger
   // ──────────────────────────────────────────────────────────
 
+  /**
+   * Resolve a product scope filter (one of item / category / brand / supplier)
+   * to the concrete set of item ids it covers. Precedence follows the order of
+   * the checks below — the first non-empty filter wins. Returns `undefined`
+   * when no scope filter is supplied (meaning "all items", so callers must NOT
+   * add an `item_id IN (…)` clause). Returns an empty array when a scope was
+   * requested but matched no items — callers should short-circuit to an empty
+   * result rather than treating it as "all items".
+   */
+  private async resolveItemIds(filter: {
+    itemId?: string;
+    categoryId?: string;
+    brandId?: string;
+    supplierId?: string;
+  }): Promise<string[] | undefined> {
+    if (filter.itemId) return [filter.itemId];
+    if (filter.categoryId) {
+      const rows = await this.items
+        .createQueryBuilder('i')
+        .innerJoin('item_categories', 'ic', 'ic.item_id = i.id')
+        .where('ic.category_id = :cid', { cid: filter.categoryId })
+        .select('i.id', 'id')
+        .getRawMany();
+      return rows.map((r) => r.id);
+    }
+    if (filter.brandId) {
+      const rows = await this.items.find({ where: { brandId: filter.brandId } });
+      return rows.map((r) => r.id);
+    }
+    if (filter.supplierId) {
+      // Items that appear on at least one purchase from this supplier.
+      const rows = await this.purchaseItems
+        .createQueryBuilder('pi')
+        .innerJoin('pi.purchase', 'p')
+        .where('p.supplier_id = :sid', { sid: filter.supplierId })
+        .select('DISTINCT pi.item_id', 'id')
+        .getRawMany();
+      return rows.map((r) => r.id);
+    }
+    return undefined;
+  }
+
   async stockLedger(filter: {
     itemId?: string;
     categoryId?: string;
@@ -851,31 +904,7 @@ export class ReportsService {
     to?: string;
   }) {
     // Resolve item ids matching the filters.
-    let itemIds: string[] | undefined;
-
-    if (filter.itemId) {
-      itemIds = [filter.itemId];
-    } else if (filter.categoryId) {
-      const rows = await this.items
-        .createQueryBuilder('i')
-        .innerJoin('item_categories', 'ic', 'ic.item_id = i.id')
-        .where('ic.category_id = :cid', { cid: filter.categoryId })
-        .select('i.id', 'id')
-        .getRawMany();
-      itemIds = rows.map((r) => r.id);
-    } else if (filter.brandId) {
-      const rows = await this.items.find({ where: { brandId: filter.brandId } });
-      itemIds = rows.map((r) => r.id);
-    } else if (filter.supplierId) {
-      // Items that appear on at least one purchase from this supplier.
-      const rows = await this.purchaseItems
-        .createQueryBuilder('pi')
-        .innerJoin('pi.purchase', 'p')
-        .where('p.supplier_id = :sid', { sid: filter.supplierId })
-        .select('DISTINCT pi.item_id', 'id')
-        .getRawMany();
-      itemIds = rows.map((r) => r.id);
-    }
+    const itemIds = await this.resolveItemIds(filter);
 
     if (itemIds && itemIds.length === 0) {
       return {
@@ -2364,6 +2393,426 @@ export class ReportsService {
       byBrand,
       lowestMarginSales,
       highDiscountSales,
+    };
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Product sales history + who-bought-what (operational sales analytics)
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Build an inclusive [from 00:00, to 23:59:59.999] createdAt clause from
+   * date-only (YYYY-MM-DD) query strings. Unlike the legacy `buildDateWhere`
+   * (which uses the raw `new Date(to)` = midnight and so drops most of the
+   * "to" day), this treats `to` as end-of-day so a report run "up to today"
+   * includes today's sales — the behaviour a shop owner expects.
+   */
+  private dayInclusiveWhere(from?: string, to?: string) {
+    const fromDate = from ? new Date(`${from}T00:00:00.000`) : undefined;
+    const toDate = to ? new Date(`${to}T23:59:59.999`) : undefined;
+    if (fromDate && toDate) return Between(fromDate, toDate);
+    if (fromDate) return MoreThanOrEqual(fromDate);
+    if (toDate) return LessThanOrEqual(toDate);
+    return undefined;
+  }
+
+  /**
+   * Sales-by-product summary, grouped by category. For every item sold in the
+   * window (optionally narrowed to one category or brand) returns units sold,
+   * revenue, COGS (snapshotted `costAtSaleTime`), gross profit and margin %,
+   * then rolls the items up under their category with per-category subtotals
+   * and a grand total.
+   *
+   * Netting: reversed sales are excluded outright (`reversedAt IS NULL`) and
+   * sale returns are subtracted from qty/revenue/COGS (returns COGS uses the
+   * item's current avg cost as a stand-in, matching `itemMargins`).
+   *
+   * Category assignment: an item can belong to several categories (M2M). Each
+   * item is charged to ONE representative category so revenue isn't double
+   * counted — the selected category when `categoryId` is filtered, otherwise
+   * the item's first category (or "Uncategorised").
+   */
+  async productSales(filter: {
+    from?: string;
+    to?: string;
+    categoryId?: string;
+    brandId?: string;
+  }): Promise<{
+    from: string | null;
+    to: string | null;
+    categories: Array<{
+      categoryId: string | null;
+      categoryName: string;
+      qty: number;
+      revenue: number;
+      cogs: number;
+      grossProfit: number;
+      marginPct: number;
+      items: Array<{
+        itemId: string;
+        name: string;
+        sku: string;
+        brandName: string;
+        qty: number;
+        revenue: number;
+        cogs: number;
+        grossProfit: number;
+        marginPct: number;
+      }>;
+    }>;
+    totals: {
+      qty: number;
+      revenue: number;
+      cogs: number;
+      grossProfit: number;
+      marginPct: number;
+    };
+  }> {
+    const dateWhere = this.dayInclusiveWhere(filter.from, filter.to);
+
+    const sales = await this.sales.find({
+      where: {
+        ...(dateWhere ? { createdAt: dateWhere } : {}),
+        reversedAt: IsNull(),
+      },
+    });
+    const saleIds = sales.map((s) => s.id);
+    const saleLines = saleIds.length
+      ? await this.saleItems.find({ where: { saleId: In(saleIds) } })
+      : [];
+    const saleReturns = await this.saleReturns.find({
+      where: dateWhere ? { createdAt: dateWhere } : {},
+      relations: ['lines'],
+    });
+
+    // Aggregate qty / revenue / COGS per item.
+    const agg = new Map<
+      string,
+      { qty: number; revenue: number; cogs: number }
+    >();
+    const bump = (
+      itemId: string,
+      qty: number,
+      revenue: number,
+      cogs: number,
+    ) => {
+      const e = agg.get(itemId) ?? { qty: 0, revenue: 0, cogs: 0 };
+      e.qty += qty;
+      e.revenue += revenue;
+      e.cogs += cogs;
+      agg.set(itemId, e);
+    };
+    for (const ln of saleLines) {
+      bump(
+        ln.itemId,
+        Number(ln.quantity),
+        Number(ln.lineTotal),
+        Number(ln.quantity) * Number(ln.costAtSaleTime ?? 0),
+      );
+    }
+
+    if (agg.size === 0) {
+      return {
+        from: filter.from ?? null,
+        to: filter.to ?? null,
+        categories: [],
+        totals: { qty: 0, revenue: 0, cogs: 0, grossProfit: 0, marginPct: 0 },
+      };
+    }
+
+    // Load the sold items with their eager brand + categories so we can both
+    // net returns (needs avg cost) and group by category.
+    const soldItems = await this.items.find({
+      where: { id: In(Array.from(agg.keys())) },
+    });
+    const itemById = new Map(soldItems.map((i) => [i.id, i]));
+
+    for (const r of saleReturns) {
+      for (const ln of r.lines ?? []) {
+        if (!agg.has(ln.itemId)) continue; // returned an item that didn't sell in-window
+        const it = itemById.get(ln.itemId);
+        const unitCost = it
+          ? Number(it.avgCost) > 0
+            ? Number(it.avgCost)
+            : Number(it.purchasePrice)
+          : 0;
+        bump(
+          ln.itemId,
+          -Number(ln.quantity),
+          -Number(ln.quantity) * Number(ln.unitPrice),
+          -Number(ln.quantity) * unitCost,
+        );
+      }
+    }
+
+    // Optional scope narrowing (category / brand). itemId isn't offered here —
+    // a single-item "summary" is just its margin row, use item-margins instead.
+    let allowed: Set<string> | null = null;
+    if (filter.categoryId || filter.brandId) {
+      const ids = await this.resolveItemIds({
+        categoryId: filter.categoryId,
+        brandId: filter.brandId,
+      });
+      allowed = new Set(ids ?? []);
+    }
+
+    // Group items under a single representative category.
+    type CatBucket = {
+      categoryId: string | null;
+      categoryName: string;
+      qty: number;
+      revenue: number;
+      cogs: number;
+      items: Array<{
+        itemId: string;
+        name: string;
+        sku: string;
+        brandName: string;
+        qty: number;
+        revenue: number;
+        cogs: number;
+        grossProfit: number;
+        marginPct: number;
+      }>;
+    };
+    const buckets = new Map<string, CatBucket>();
+    const totals = { qty: 0, revenue: 0, cogs: 0 };
+
+    for (const [itemId, v] of agg.entries()) {
+      if (allowed && !allowed.has(itemId)) continue;
+      const it = itemById.get(itemId);
+
+      let catId: string | null;
+      let catName: string;
+      if (filter.categoryId) {
+        catId = filter.categoryId;
+        catName =
+          it?.categories?.find((c) => c.id === filter.categoryId)?.name ??
+          'Selected category';
+      } else {
+        const first = it?.categories?.[0];
+        catId = first?.id ?? null;
+        catName = first?.name ?? 'Uncategorised';
+      }
+
+      const key = catId ?? '__none__';
+      const bucket =
+        buckets.get(key) ??
+        ({
+          categoryId: catId,
+          categoryName: catName,
+          qty: 0,
+          revenue: 0,
+          cogs: 0,
+          items: [],
+        } as CatBucket);
+
+      const revenue = round2(v.revenue);
+      const cogs = round2(v.cogs);
+      const grossProfit = round2(revenue - cogs);
+      bucket.qty += v.qty;
+      bucket.revenue += revenue;
+      bucket.cogs += cogs;
+      bucket.items.push({
+        itemId,
+        name: it?.name ?? '(deleted item)',
+        sku: it?.sku ?? '—',
+        brandName: it?.brand?.name ?? '—',
+        qty: v.qty,
+        revenue,
+        cogs,
+        grossProfit,
+        marginPct: revenue > 0 ? round2((grossProfit / revenue) * 100) : 0,
+      });
+      buckets.set(key, bucket);
+
+      totals.qty += v.qty;
+      totals.revenue += revenue;
+      totals.cogs += cogs;
+    }
+
+    const categories = Array.from(buckets.values())
+      .map((b) => {
+        const revenue = round2(b.revenue);
+        const cogs = round2(b.cogs);
+        const grossProfit = round2(revenue - cogs);
+        return {
+          categoryId: b.categoryId,
+          categoryName: b.categoryName,
+          qty: b.qty,
+          revenue,
+          cogs,
+          grossProfit,
+          marginPct: revenue > 0 ? round2((grossProfit / revenue) * 100) : 0,
+          items: b.items.sort((a, c) => c.revenue - a.revenue),
+        };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const grandRevenue = round2(totals.revenue);
+    const grandCogs = round2(totals.cogs);
+    const grandProfit = round2(grandRevenue - grandCogs);
+
+    return {
+      from: filter.from ?? null,
+      to: filter.to ?? null,
+      categories,
+      totals: {
+        qty: totals.qty,
+        revenue: grandRevenue,
+        cogs: grandCogs,
+        grossProfit: grandProfit,
+        marginPct: grandRevenue > 0 ? round2((grandProfit / grandRevenue) * 100) : 0,
+      },
+    };
+  }
+
+  /**
+   * "Who bought this?" — for a product scope (a specific item, or every item
+   * in a category / brand) list each customer that bought within the window
+   * with the units they took, how many separate invoices they bought it on,
+   * and their total spend on the scope. Sorted by units desc.
+   *
+   * Walk-in / no-customer sales are collapsed into a single labelled row so
+   * the totals reconcile with the product-sales summary. Reversed sales are
+   * excluded. This is a gross-purchases view (returns are not netted) — the
+   * question is "who has ever bought this", and a later return doesn't unmake
+   * them a buyer.
+   */
+  async customersByProduct(filter: {
+    itemId?: string;
+    categoryId?: string;
+    brandId?: string;
+    from?: string;
+    to?: string;
+  }): Promise<{
+    scope: {
+      type: 'item' | 'category' | 'brand' | 'all';
+      id: string | null;
+      label: string;
+    };
+    from: string | null;
+    to: string | null;
+    rows: Array<{
+      customerId: string | null;
+      name: string;
+      phone: string | null;
+      qty: number;
+      invoices: number;
+      spend: number;
+    }>;
+    totals: { customers: number; qty: number; invoices: number; spend: number };
+  }> {
+    // Resolve the scope label + the item ids it covers.
+    let scope: {
+      type: 'item' | 'category' | 'brand' | 'all';
+      id: string | null;
+      label: string;
+    } = { type: 'all', id: null, label: 'All products' };
+    if (filter.itemId) {
+      const it = await this.items.findOne({ where: { id: filter.itemId } });
+      scope = {
+        type: 'item',
+        id: filter.itemId,
+        label: it ? `${it.name} (${it.sku})` : filter.itemId,
+      };
+    } else if (filter.categoryId) {
+      const c = await this.categories.findOne({
+        where: { id: filter.categoryId },
+      });
+      scope = {
+        type: 'category',
+        id: filter.categoryId,
+        label: c ? c.name : filter.categoryId,
+      };
+    } else if (filter.brandId) {
+      const b = await this.brands.findOne({ where: { id: filter.brandId } });
+      scope = {
+        type: 'brand',
+        id: filter.brandId,
+        label: b ? b.name : filter.brandId,
+      };
+    }
+
+    const itemIds = await this.resolveItemIds({
+      itemId: filter.itemId,
+      categoryId: filter.categoryId,
+      brandId: filter.brandId,
+    });
+    const empty = {
+      scope,
+      from: filter.from ?? null,
+      to: filter.to ?? null,
+      rows: [],
+      totals: { customers: 0, qty: 0, invoices: 0, spend: 0 },
+    };
+    // A scope was requested but matched no items → no buyers, short-circuit.
+    if (itemIds && itemIds.length === 0) return empty;
+
+    const qb = this.saleItems
+      .createQueryBuilder('sl')
+      .innerJoin('sl.sale', 's')
+      .select('s.customer_id', 'customerId')
+      .addSelect('COALESCE(SUM(sl.quantity), 0)', 'qty')
+      .addSelect('COUNT(DISTINCT s.id)', 'invoices')
+      .addSelect('COALESCE(SUM(sl.line_total), 0)', 'spend')
+      .where('s.reversed_at IS NULL')
+      .groupBy('s.customer_id');
+    if (itemIds) qb.andWhere('sl.item_id IN (:...ids)', { ids: itemIds });
+    if (filter.from) {
+      qb.andWhere('s.created_at >= :from', {
+        from: new Date(`${filter.from}T00:00:00.000`),
+      });
+    }
+    if (filter.to) {
+      qb.andWhere('s.created_at <= :to', {
+        to: new Date(`${filter.to}T23:59:59.999`),
+      });
+    }
+
+    const raw = await qb.getRawMany<{
+      customerId: string | null;
+      qty: string;
+      invoices: string;
+      spend: string;
+    }>();
+
+    // Resolve customer names/phones in one trip.
+    const customerIds = raw
+      .map((r) => r.customerId)
+      .filter((id): id is string => !!id);
+    const customerList = customerIds.length
+      ? await this.customers.find({ where: { id: In(customerIds) } })
+      : [];
+    const byId = new Map(customerList.map((c) => [c.id, c]));
+
+    const rows = raw
+      .map((r) => {
+        const c = r.customerId ? byId.get(r.customerId) : undefined;
+        return {
+          customerId: r.customerId ?? null,
+          name: r.customerId
+            ? (c?.name ?? '(deleted customer)')
+            : 'Walk-in / no customer',
+          phone: c?.phone ?? null,
+          qty: Number(r.qty),
+          invoices: Number(r.invoices),
+          spend: round2(Number(r.spend)),
+        };
+      })
+      .sort((a, b) => b.qty - a.qty || b.spend - a.spend);
+
+    return {
+      scope,
+      from: filter.from ?? null,
+      to: filter.to ?? null,
+      rows,
+      totals: {
+        customers: rows.length,
+        qty: rows.reduce((s, r) => s + r.qty, 0),
+        invoices: rows.reduce((s, r) => s + r.invoices, 0),
+        spend: round2(rows.reduce((s, r) => s + r.spend, 0)),
+      },
     };
   }
 }

@@ -13,6 +13,8 @@ import { PurchaseReturn } from '../returns/entities/purchase-return.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { Account } from '../accounts/entities/account.entity';
 import { Item } from '../items/entities/item.entity';
+import { Brand } from '../brands/entities/brand.entity';
+import { Category } from '../categories/entities/category.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { IncentivesModule } from '../incentives/incentives.module';
 import { FundTransfersModule } from '../fund-transfers/fund-transfers.module';
@@ -36,6 +38,8 @@ import { JournalLine } from '../journals/entities/journal-line.entity';
       Payment,
       Account,
       Item,
+      Brand,
+      Category,
       StockMovement,
       Employee,
       EmployeeTransaction,

@@ -342,4 +342,54 @@ describe('ReportsService', () => {
     // Earnings echo the income statement
     expect(bs.currentPeriodEarnings).toBe(1600);
   });
+
+  it('product sales: units/revenue/profit per item grouped by category', async () => {
+    // Seed sold 5 + 3 @ Rs 500 (revenue 4000), COGS 8 × 300 = 2400.
+    const ps = await reports.productSales({});
+    expect(ps.totals.qty).toBe(8);
+    expect(ps.totals.revenue).toBe(4000);
+    expect(ps.totals.cogs).toBe(2400);
+    expect(ps.totals.grossProfit).toBe(1600);
+    expect(ps.totals.marginPct).toBeCloseTo(40, 1);
+
+    // Seed item carries no category → collapses under "Uncategorised".
+    expect(ps.categories).toHaveLength(1);
+    const cat = ps.categories[0];
+    expect(cat.categoryName).toBe('Uncategorised');
+    expect(cat.items).toHaveLength(1);
+    expect(cat.items[0].sku).toBe('PHN-1');
+    expect(cat.items[0].qty).toBe(8);
+    expect(cat.items[0].grossProfit).toBe(1600);
+  });
+
+  it('customers by product: buyer rows carry units, invoice count, and spend', async () => {
+    const cbp = await reports.customersByProduct({});
+    expect(cbp.scope.type).toBe('all');
+    expect(cbp.rows).toHaveLength(1);
+    const row = cbp.rows[0];
+    expect(row.name).toBe('C1');
+    expect(row.qty).toBe(8); // 5 + 3 units
+    expect(row.invoices).toBe(2); // two separate sales
+    expect(row.spend).toBe(4000); // 2500 + 1500
+    expect(cbp.totals.customers).toBe(1);
+    expect(cbp.totals.qty).toBe(8);
+    expect(cbp.totals.invoices).toBe(2);
+  });
+
+  it('customers by product: itemId scope sets an item label and still filters', async () => {
+    const cbp = await reports.customersByProduct({ itemId });
+    expect(cbp.scope.type).toBe('item');
+    expect(cbp.scope.label).toContain('PHN-1');
+    expect(cbp.rows).toHaveLength(1);
+    expect(cbp.rows[0].qty).toBe(8);
+  });
+
+  it('customers by product: a scope that matches no items returns no buyers', async () => {
+    const cbp = await reports.customersByProduct({
+      brandId: '00000000-0000-0000-0000-000000000000',
+    });
+    expect(cbp.rows).toHaveLength(0);
+    expect(cbp.totals.qty).toBe(0);
+    expect(cbp.totals.customers).toBe(0);
+  });
 });
