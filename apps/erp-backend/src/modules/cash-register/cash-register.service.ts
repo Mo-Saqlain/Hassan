@@ -14,6 +14,8 @@ import { Sale } from '../sales/entities/sale.entity';
 import { Purchase } from '../purchases/entities/purchase.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { Account } from '../accounts/entities/account.entity';
+import { EmployeeTransaction } from '../employee-transactions/entities/employee-transaction.entity';
+import { SaleReturn } from '../returns/entities/sale-return.entity';
 import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
 import { FundTransfer } from '../fund-transfers/entities/fund-transfer.entity';
 
@@ -43,6 +45,10 @@ export class CashRegisterService {
     private readonly purchases: Repository<Purchase>,
     @InjectRepository(Payment)
     private readonly payments: Repository<Payment>,
+    @InjectRepository(EmployeeTransaction)
+    private readonly employeeTxns: Repository<EmployeeTransaction>,
+    @InjectRepository(SaleReturn)
+    private readonly saleReturns: Repository<SaleReturn>,
     @InjectRepository(FundTransfer)
     private readonly transferRepo: Repository<FundTransfer>,
     private readonly fundTransfers: FundTransfersService,
@@ -237,6 +243,8 @@ export class CashRegisterService {
       purchasesOnDay,
       vouchers,
       cashTransfers,
+      employeeTxnsOnDay,
+      saleReturnsOnDay,
       expectedOpening,
     ] = await Promise.all([
       this.sessions.findOne({ where: { sessionDate: day } }),
@@ -248,6 +256,8 @@ export class CashRegisterService {
       this.purchases.find({ where: { createdAt: Between(start, end) } }),
       this.payments.find({ where: { createdAt: Between(start, end) } }),
       this.fundTransfers.findInvolvingAccounts(cashIdsArr, start, end),
+      this.employeeTxns.find({ where: { transactionDate: day } }),
+      this.saleReturns.find({ where: { createdAt: Between(start, end) } }),
       this.cashOnHandAsOf(prevDay(day), cashAccounts),
     ]);
 
@@ -259,6 +269,20 @@ export class CashRegisterService {
     );
     const cashVouchers = vouchers.filter((v) =>
       cashAccountIds.has(v.accountId),
+    );
+    // Cash paid to employees from the till (salary/advance/reimbursement/
+    // incentive). SALARY_ACCRUED is a pure liability accrual and EXPENSE is
+    // money the employee paid from their OWN pocket — neither moves shop cash.
+    const employeePayouts = employeeTxnsOnDay.filter(
+      (t) =>
+        !!t.accountId &&
+        cashAccountIds.has(t.accountId) &&
+        t.type !== 'SALARY_ACCRUED' &&
+        t.type !== 'EXPENSE',
+    );
+    // Cash handed back to customers on a return.
+    const cashRefunds = saleReturnsOnDay.filter(
+      (r) => !!r.refundAccountId && cashAccountIds.has(r.refundAccountId),
     );
 
     // Opening: session value if a session exists for this date; otherwise
@@ -275,7 +299,15 @@ export class CashRegisterService {
       description: string;
       direction: 'IN' | 'OUT';
       amount: number;
-      source: 'CASH_ENTRY' | 'SALE' | 'PURCHASE' | 'RECEIPT' | 'PAYMENT' | 'TRANSFER';
+      source:
+        | 'CASH_ENTRY'
+        | 'SALE'
+        | 'PURCHASE'
+        | 'RECEIPT'
+        | 'PAYMENT'
+        | 'TRANSFER'
+        | 'EMPLOYEE'
+        | 'REFUND';
       sourceId: string;
     }> = [];
 
@@ -348,6 +380,36 @@ export class CashRegisterService {
         amount: Number(t.amount),
         source: 'TRANSFER',
         sourceId: t.id,
+      });
+    }
+    for (const t of employeePayouts) {
+      lines.push({
+        time: new Date(t.createdAt),
+        ref: t.voucherNo,
+        type: 'EMPLOYEE',
+        category: 'EMPLOYEE',
+        description: `${t.type.replace(/_/g, ' ')}${
+          t.employee?.name ? ' · ' + t.employee.name : ''
+        }`,
+        direction: 'OUT',
+        amount: Number(t.amount),
+        source: 'EMPLOYEE',
+        sourceId: t.id,
+      });
+    }
+    for (const r of cashRefunds) {
+      lines.push({
+        time: new Date(r.createdAt),
+        ref: r.returnNo,
+        type: 'REFUND',
+        category: 'REFUND',
+        description: `Cash refund ${r.returnNo}${
+          r.customer?.name ? ' · ' + r.customer.name : ''
+        }`,
+        direction: 'OUT',
+        amount: Number(r.refundAmount ?? r.totalAmount),
+        source: 'REFUND',
+        sourceId: r.id,
       });
     }
 
@@ -430,8 +492,17 @@ export class CashRegisterService {
     const cashIds = cashAccounts.map((a) => a.id);
     const end = new Date(`${dateInclusive}T23:59:59.999Z`);
 
-    const [salesIn, purchasesOut, voucherIn, voucherOut, entryIn, entryOut, transferDelta] =
-      await Promise.all([
+    const [
+      salesIn,
+      purchasesOut,
+      voucherIn,
+      voucherOut,
+      entryIn,
+      entryOut,
+      transferDelta,
+      employeeOut,
+      refundOut,
+    ] = await Promise.all([
         this.sales
           .createQueryBuilder('s')
           .where('s.payment_method = :m', { m: 'CASH' })
@@ -475,6 +546,26 @@ export class CashRegisterService {
           .select('COALESCE(SUM(e.amount), 0)', 'sum')
           .getRawOne(),
         this.fundTransfers.groupDeltaAt(cashIds, end),
+        cashIds.length === 0
+          ? Promise.resolve(null)
+          : this.employeeTxns
+              .createQueryBuilder('t')
+              .where('t.account_id IN (:...ids)', { ids: cashIds })
+              .andWhere("t.type NOT IN ('SALARY_ACCRUED', 'EXPENSE')")
+              .andWhere('t.transaction_date <= :d2', { d2: dateInclusive })
+              .select('COALESCE(SUM(t.amount), 0)', 'sum')
+              .getRawOne(),
+        cashIds.length === 0
+          ? Promise.resolve(null)
+          : this.saleReturns
+              .createQueryBuilder('r')
+              .where('r.refund_account_id IN (:...ids)', { ids: cashIds })
+              .andWhere('r.created_at <= :end', { end })
+              .select(
+                'COALESCE(SUM(COALESCE(r.refund_amount, r.total_amount)), 0)',
+                'sum',
+              )
+              .getRawOne(),
       ]);
 
     return (
@@ -485,7 +576,9 @@ export class CashRegisterService {
       Number(voucherOut?.sum ?? 0) +
       Number(entryIn?.sum ?? 0) -
       Number(entryOut?.sum ?? 0) +
-      transferDelta
+      transferDelta -
+      Number(employeeOut?.sum ?? 0) -
+      Number(refundOut?.sum ?? 0)
     );
   }
 

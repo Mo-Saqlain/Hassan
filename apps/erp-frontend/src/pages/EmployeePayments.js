@@ -7,11 +7,20 @@ import ExportButtons from '../components/ExportButtons';
 const TYPES = [
   { value: 'SALARY', label: 'Salary' },
   { value: 'ADVANCE', label: 'Advance (employee borrows)' },
-  { value: 'REIMBURSEMENT', label: 'Reimbursement (employee paid expense)' },
-  { value: 'EXPENSE', label: 'Shop expense paid by employee' },
+  { value: 'REIMBURSEMENT', label: 'Reimbursement (pay employee back)' },
+  { value: 'EXPENSE', label: 'Shop expense the employee paid (we owe them)' },
   { value: 'INCENTIVE_PAYOUT', label: 'Incentive payout' },
   { value: 'ADJUSTMENT', label: 'Adjustment' },
 ];
+
+// Types that represent cash/bank actually leaving the shop to the employee.
+// For these we default the account to the till so the cash book stays exact.
+const PAYOUT_TYPES = new Set([
+  'SALARY',
+  'ADVANCE',
+  'REIMBURSEMENT',
+  'INCENTIVE_PAYOUT',
+]);
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -19,6 +28,11 @@ export default function EmployeePayments() {
   const { data: txns, loading, error, reload } = useResource('/employee-transactions');
   const { data: employees } = useResource('/employees');
   const { data: accounts } = useResource('/accounts');
+
+  const firstCashId = useMemo(
+    () => accounts.find((a) => a.type === 'CASH')?.id ?? '',
+    [accounts],
+  );
 
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(blank());
@@ -34,15 +48,42 @@ export default function EmployeePayments() {
     e.preventDefault();
     setSubmitErr(null);
     try {
-      await api.post('/employee-transactions', {
-        employeeId: form.employeeId,
-        type: form.type,
-        transactionDate: form.transactionDate,
-        amount: Number(form.amount),
-        accountId: form.accountId || undefined,
-        description: form.description || undefined,
-        notes: form.notes || undefined,
-      });
+      if (form.type === 'EXPENSE') {
+        // Employee paid a shop cost from their own pocket → we owe them (a
+        // debit). No shop cash moved, so no account on this row.
+        await api.post('/employee-transactions', {
+          employeeId: form.employeeId,
+          type: 'EXPENSE',
+          transactionDate: form.transactionDate,
+          amount: Number(form.amount),
+          description: form.description || undefined,
+          notes: form.notes || undefined,
+        });
+        // Optional: settle it the same day with a cash reimbursement (credit,
+        // leaves the till) so the two net to zero on the employee ledger.
+        if (form.reimburseNow && form.accountId) {
+          await api.post('/employee-transactions', {
+            employeeId: form.employeeId,
+            type: 'REIMBURSEMENT',
+            transactionDate: form.transactionDate,
+            amount: Number(form.amount),
+            accountId: form.accountId,
+            description: form.description
+              ? `Reimbursement: ${form.description}`
+              : 'Reimbursement (paid same day)',
+          });
+        }
+      } else {
+        await api.post('/employee-transactions', {
+          employeeId: form.employeeId,
+          type: form.type,
+          transactionDate: form.transactionDate,
+          amount: Number(form.amount),
+          accountId: form.accountId || undefined,
+          description: form.description || undefined,
+          notes: form.notes || undefined,
+        });
+      }
       setShow(false);
       setForm(blank());
       reload();
@@ -83,7 +124,13 @@ export default function EmployeePayments() {
             ]}
             rows={txns}
           />
-          <button className="btn btn-sm btn-primary" onClick={() => setShow(true)}>
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => {
+              setForm({ ...blank(), accountId: firstCashId });
+              setShow(true);
+            }}
+          >
             + New entry
           </button>
         </div>
@@ -121,7 +168,20 @@ export default function EmployeePayments() {
               <select
                 className="select"
                 value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}
+                onChange={(e) => {
+                  const type = e.target.value;
+                  setForm((f) => ({
+                    ...f,
+                    type,
+                    // Payouts (and the optional EXPENSE reimbursement) default
+                    // to the till so cash-from-till needs no extra clicks.
+                    accountId:
+                      PAYOUT_TYPES.has(type) || type === 'EXPENSE'
+                        ? f.accountId || firstCashId
+                        : f.accountId,
+                    reimburseNow: type === 'EXPENSE' ? f.reimburseNow : false,
+                  }));
+                }}
               >
                 {TYPES.map((t) => (
                   <option key={t.value} value={t.value}>
@@ -154,21 +214,70 @@ export default function EmployeePayments() {
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
               />
             </div>
-            <div>
-              <label>Account (for cash/bank flow)</label>
-              <select
-                className="select"
-                value={form.accountId}
-                onChange={(e) => setForm({ ...form, accountId: e.target.value })}
-              >
-                <option value="">— None / out-of-pocket —</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.type})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {form.type === 'EXPENSE' ? (
+              <div>
+                <label>Reimburse now?</label>
+                <label
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'center',
+                    fontWeight: 400,
+                    minHeight: 34,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.reimburseNow}
+                    onChange={(e) =>
+                      setForm({ ...form, reimburseNow: e.target.checked })
+                    }
+                  />
+                  Pay it back in cash today
+                </label>
+                {form.reimburseNow && (
+                  <select
+                    className="select"
+                    value={form.accountId}
+                    onChange={(e) =>
+                      setForm({ ...form, accountId: e.target.value })
+                    }
+                  >
+                    <option value="">— Select account —</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.type})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  Unpaid = we owe the employee until payday. Paying from a CASH
+                  account reduces the till.
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label>Paid from account</label>
+                <select
+                  className="select"
+                  value={form.accountId}
+                  onChange={(e) =>
+                    setForm({ ...form, accountId: e.target.value })
+                  }
+                >
+                  <option value="">— None / out-of-pocket —</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.type})
+                    </option>
+                  ))}
+                </select>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  A CASH account reduces the day's cash register.
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <label>Description</label>
@@ -258,6 +367,7 @@ function blank() {
     transactionDate: todayStr(),
     amount: '',
     accountId: '',
+    reimburseNow: false,
     description: '',
     notes: '',
   };

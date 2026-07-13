@@ -13,14 +13,19 @@ import { Account } from '../../accounts/entities/account.entity';
  * - `ADVANCE`          — shop advances money → credit (OUT of shop, employee now owes back)
  * - `REIMBURSEMENT`    — shop reimburses an expense the employee paid out-of-pocket
  *                        → credit (OUT of shop, settles what we owed the employee)
- * - `EXPENSE`          — employee spent shop money on a shop-related expense
- *                        → credit (treated like reimbursement)
+ * - `EXPENSE`          — employee paid a shop cost out of their OWN pocket
+ *                        → DEBIT (the shop now owes them back). A same-day cash
+ *                        reimbursement is recorded as a separate REIMBURSEMENT so
+ *                        the two net to zero; leave it unpaid to carry the amount
+ *                        owed until payday. `account_id` stays null (no shop cash
+ *                        moved — the money was the employee's).
  * - `INCENTIVE_PAYOUT` — shop pays out earned incentives → credit (OUT of shop)
- * - `ADJUSTMENT`       — manual debit/credit correction
+ * - `ADJUSTMENT`       — manual credit correction
  *
- * The ledger view debits incentives EARNED (computed from rules+sales) +
- * SALARY_ACCRUED rows, and credits all payouts above to give a running
- * balance — positive means we owe the employee, negative means they owe us.
+ * The ledger view debits incentives EARNED (computed from rules+sales),
+ * SALARY_ACCRUED and EXPENSE rows, and credits all payouts above to give a
+ * running balance — positive means we owe the employee, negative means they
+ * owe us.
  */
 export type EmployeeTransactionType =
   | 'SALARY_ACCRUED'

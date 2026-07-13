@@ -10,12 +10,15 @@ export default function SaleReturns() {
   const { data: items } = useResource('/items');
   const { data: customers } = useResource('/customers');
   const { data: stores } = useResource('/stores');
+  const { data: accounts } = useResource('/accounts');
 
   const blankForm = () => ({
     customerId: '',
     storeId: '',
     saleId: '',
     reason: '',
+    refundAccountId: '',
+    refundAmount: '',
     lines: [emptyLine()],
   });
   const [showForm, setShowForm] = useState(false);
@@ -62,6 +65,11 @@ export default function SaleReturns() {
       storeId: form.storeId || undefined,
       saleId: form.saleId || undefined,
       reason: form.reason || undefined,
+      refundAccountId: form.refundAccountId || undefined,
+      refundAmount:
+        form.refundAccountId && form.refundAmount !== ''
+          ? Number(form.refundAmount)
+          : undefined,
       lines: form.lines
         .filter((ln) => ln.itemId)
         .map((ln) => {
@@ -249,6 +257,43 @@ export default function SaleReturns() {
               <label>Total Returned</label>
               <input value={total.toFixed(2)} readOnly />
             </div>
+            <div>
+              <label>Refund from account</label>
+              <select
+                value={form.refundAccountId}
+                onChange={(e) =>
+                  setForm({ ...form, refundAccountId: e.target.value })
+                }
+              >
+                <option value="">— No cash refund (store credit) —</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.type})
+                  </option>
+                ))}
+              </select>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                Pick a CASH account when you hand cash back — it reduces the till.
+              </div>
+            </div>
+            {form.refundAccountId && (
+              <div>
+                <label>Refund amount</label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={form.refundAmount}
+                  placeholder={total.toFixed(2)}
+                  onChange={(e) =>
+                    setForm({ ...form, refundAmount: e.target.value })
+                  }
+                />
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  Blank = full total ({total.toFixed(2)}).
+                </div>
+              </div>
+            )}
           </div>
 
           <button type="submit" className="btn btn-primary">

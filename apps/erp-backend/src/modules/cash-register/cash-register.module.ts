@@ -8,6 +8,8 @@ import { Sale } from '../sales/entities/sale.entity';
 import { Purchase } from '../purchases/entities/purchase.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { Account } from '../accounts/entities/account.entity';
+import { EmployeeTransaction } from '../employee-transactions/entities/employee-transaction.entity';
+import { SaleReturn } from '../returns/entities/sale-return.entity';
 import { FundTransfersModule } from '../fund-transfers/fund-transfers.module';
 
 @Module({
@@ -19,6 +21,8 @@ import { FundTransfersModule } from '../fund-transfers/fund-transfers.module';
       Purchase,
       Payment,
       Account,
+      EmployeeTransaction,
+      SaleReturn,
     ]),
     FundTransfersModule,
   ],

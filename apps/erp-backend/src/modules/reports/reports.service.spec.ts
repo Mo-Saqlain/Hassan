@@ -392,4 +392,42 @@ describe('ReportsService', () => {
     expect(cbp.totals.qty).toBe(0);
     expect(cbp.totals.customers).toBe(0);
   });
+
+  it('employee ledger: EXPENSE (paid out of pocket) increases what we owe; reimbursement settles it', async () => {
+    const empRepo = ds.getRepository(Employee);
+    const txnRepo = ds.getRepository(EmployeeTransaction);
+    const emp = await empRepo.save(empRepo.create({ name: 'Worker' }));
+    const date = new Date().toISOString().slice(0, 10);
+
+    // Employee buys shop tea for Rs 200 with their own money → we owe them 200.
+    await txnRepo.save(
+      txnRepo.create({
+        voucherNo: 'EXP-T1',
+        employeeId: emp.id,
+        type: 'EXPENSE',
+        transactionDate: date,
+        amount: 200,
+      }),
+    );
+    let led = await reports.employeeLedger(emp.id);
+    expect(led.closingBalance).toBe(200); // positive = we owe the employee
+
+    // Reimburse the 200 in cash → nets back to zero.
+    await txnRepo.save(
+      txnRepo.create({
+        voucherNo: 'RBT-T1',
+        employeeId: emp.id,
+        type: 'REIMBURSEMENT',
+        transactionDate: date,
+        amount: 200,
+        accountId,
+      }),
+    );
+    led = await reports.employeeLedger(emp.id);
+    expect(led.closingBalance).toBe(0);
+
+    // Batched all-balances must agree with the per-employee ledger.
+    const all = await reports.allEmployeeBalances();
+    expect(all.find((r) => r.id === emp.id)?.balance).toBe(0);
+  });
 });

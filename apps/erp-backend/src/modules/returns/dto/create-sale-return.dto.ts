@@ -56,6 +56,20 @@ export class CreateSaleReturnDto {
   @IsOptional()
   reason?: string;
 
+  /** Account the cash/bank refund went out of. Omit for a store-credit-only
+   *  return (no money handed back). A CASH account makes the daily cash book
+   *  count it as an OUT. */
+  @IsUUID()
+  @IsOptional()
+  refundAccountId?: string;
+
+  /** Amount actually refunded. Defaults to the return total when
+   *  refundAccountId is set and this is omitted. */
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  refundAmount?: number;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

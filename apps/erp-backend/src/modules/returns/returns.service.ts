@@ -48,6 +48,11 @@ export class ReturnsService {
       }
 
       const returnNo = dto.returnNo ?? (await this.nextReturnNo(repo, 'SR'));
+      // If a refund account is given, record the cash actually handed back —
+      // defaulting to the full return value when no explicit amount is passed.
+      const refundAmount = dto.refundAccountId
+        ? Number((dto.refundAmount ?? totalAmount).toFixed(2))
+        : undefined;
       const saved = await repo.save(
         repo.create({
           returnNo,
@@ -55,6 +60,8 @@ export class ReturnsService {
           customerId: dto.customerId,
           storeId: dto.storeId,
           totalAmount,
+          refundAccountId: dto.refundAccountId,
+          refundAmount,
           reason: dto.reason,
           lines,
         }),

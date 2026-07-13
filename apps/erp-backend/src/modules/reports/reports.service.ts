@@ -121,14 +121,17 @@ export class ReportsService {
       });
     }
     for (const t of txns) {
-      // SALARY_ACCRUED is a debit — booking the monthly obligation increases
-      // what we owe the employee. SALARY / ADVANCE / REIMBURSEMENT / EXPENSE /
-      // INCENTIVE_PAYOUT are credits (money moves out of the shop to the
-      // employee, settling what we owed). ADJUSTMENT is a credit by default;
-      // users wanting to add to our liability can use a SALARY_ACCRUED-style
-      // adjustment if needed.
+      // Debits INCREASE what we owe the employee:
+      //   SALARY_ACCRUED — the monthly salary obligation booked by the scheduler;
+      //   EXPENSE        — a shop cost the employee paid out of their OWN pocket,
+      //                    so the shop now owes them back.
+      // Credits (SALARY / ADVANCE / REIMBURSEMENT / INCENTIVE_PAYOUT) are money
+      // moving out of the shop to the employee, settling what we owed. A cash
+      // reimbursement of an EXPENSE is a separate REIMBURSEMENT row, so the
+      // expense (debit) and the payout (credit) net to zero. ADJUSTMENT stays a
+      // credit.
       const amount = Number(t.amount);
-      const isDebit = t.type === 'SALARY_ACCRUED';
+      const isDebit = t.type === 'SALARY_ACCRUED' || t.type === 'EXPENSE';
       rows.push({
         date: new Date(`${t.transactionDate}T00:00:00.000Z`),
         ref: t.voucherNo,
@@ -209,7 +212,10 @@ export class ReportsService {
     const debits = new Map<string, number>();
     const credits = new Map<string, number>();
     for (const r of txnSums) {
-      const map = r.type === 'SALARY_ACCRUED' ? debits : credits;
+      // Keep in lockstep with employeeLedger's isDebit: SALARY_ACCRUED and
+      // EXPENSE increase what we owe (debit); everything else is a credit.
+      const map =
+        r.type === 'SALARY_ACCRUED' || r.type === 'EXPENSE' ? debits : credits;
       map.set(r.employeeId, (map.get(r.employeeId) ?? 0) + Number(r.sum));
     }
 
