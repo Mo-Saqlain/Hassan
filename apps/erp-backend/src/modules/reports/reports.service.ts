@@ -238,12 +238,12 @@ export class ReportsService {
 
     const opening = Number(customer.openingBalance ?? 0);
     const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
-    const [sales, returns, receipts] = await Promise.all([
+    const [sales, returns, customerPayments] = await Promise.all([
       this.sales.find({ where: { customerId, ...dateClause } }),
       this.saleReturns.find({ where: { customerId, ...dateClause } }),
-      this.payments.find({
-        where: { customerId, direction: 'IN', ...dateClause },
-      }),
+      // Both directions: IN = receipt (credit, they owe less); OUT = a loan /
+      // advance we paid the customer (debit, they owe more).
+      this.payments.find({ where: { customerId, ...dateClause } }),
     ]);
 
     const all: Array<{
@@ -291,16 +291,28 @@ export class ReportsService {
         credit: Number(r.totalAmount),
       });
     }
-    for (const p of receipts) {
-      all.push({
-        date: new Date(p.createdAt),
-        ref: p.voucherNo,
-        refId: p.id,
-        type: 'RECEIPT',
-        description: `Receipt voucher ${p.voucherNo}`,
-        debit: 0,
-        credit: Number(p.amount),
-      });
+    for (const p of customerPayments) {
+      if (p.direction === 'IN') {
+        all.push({
+          date: new Date(p.createdAt),
+          ref: p.voucherNo,
+          refId: p.id,
+          type: 'RECEIPT',
+          description: `Receipt voucher ${p.voucherNo}`,
+          debit: 0,
+          credit: Number(p.amount),
+        });
+      } else {
+        all.push({
+          date: new Date(p.createdAt),
+          ref: p.voucherNo,
+          refId: p.id,
+          type: 'LOAN',
+          description: `Loan / advance ${p.voucherNo}`,
+          debit: Number(p.amount),
+          credit: 0,
+        });
+      }
     }
 
     all.sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -363,7 +375,7 @@ export class ReportsService {
       column: string,
     ): T => (asOf ? qb.andWhere(`${column} <= :asOf`, { asOf }) : qb);
 
-    const [saleSums, returnSums, receiptSums] = await Promise.all([
+    const [saleSums, returnSums, receiptSums, paymentOutSums] = await Promise.all([
       applyAsOf(
         this.sales
           .createQueryBuilder('s')
@@ -396,6 +408,18 @@ export class ReportsService {
       )
         .groupBy('p.customer_id')
         .getRawMany(),
+      // Money paid OUT to a customer (loan / advance) — increases what they owe.
+      applyAsOf(
+        this.payments
+          .createQueryBuilder('p')
+          .select('p.customer_id', 'cid')
+          .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
+          .where('p.direction = :d', { d: 'OUT' })
+          .andWhere('p.customer_id IS NOT NULL'),
+        'p.created_at',
+      )
+        .groupBy('p.customer_id')
+        .getRawMany(),
     ]);
 
     const saleMap = new Map<string, { net: number; paid: number }>(
@@ -407,13 +431,20 @@ export class ReportsService {
     const receiptMap = new Map<string, number>(
       receiptSums.map((r) => [r.cid, Number(r.total)]),
     );
+    const loanOutMap = new Map<string, number>(
+      paymentOutSums.map((r) => [r.cid, Number(r.total)]),
+    );
 
     return list.map((c) => {
       const opening = Number(c.openingBalance ?? 0);
       const s = saleMap.get(c.id) ?? { net: 0, paid: 0 };
       const ret = returnMap.get(c.id) ?? 0;
       const rcpt = receiptMap.get(c.id) ?? 0;
-      return { ...c, balance: opening + s.net - s.paid - ret - rcpt };
+      const loanOut = loanOutMap.get(c.id) ?? 0;
+      return {
+        ...c,
+        balance: opening + s.net - s.paid - ret - rcpt + loanOut,
+      };
     });
   }
 

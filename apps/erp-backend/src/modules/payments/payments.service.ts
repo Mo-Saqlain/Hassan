@@ -27,8 +27,10 @@ export class PaymentsService {
     if (dto.direction === 'IN' && !dto.customerId) {
       throw new BadRequestException('Receipt voucher requires customerId');
     }
-    if (dto.direction === 'OUT' && !dto.supplierId) {
-      throw new BadRequestException('Payment voucher requires supplierId');
+    if (dto.direction === 'OUT' && !dto.supplierId && !dto.customerId) {
+      throw new BadRequestException(
+        'Payment voucher requires a supplierId (supplier payment) or a customerId (loan / advance to a customer)',
+      );
     }
     const voucherNo = dto.voucherNo ?? (await this.nextVoucherNo(dto.direction));
 
@@ -37,13 +39,18 @@ export class PaymentsService {
       const persisted = await repo.save(repo.create({ ...dto, voucherNo }));
 
       // Journal posting:
-      //   IN  (RCT-…, receipt from customer):  Dr Cash/Bank ; Cr A/R
-      //   OUT (PMT-…, payment to supplier):    Dr A/P       ; Cr Cash/Bank
+      //   IN  (RCT-…, receipt from customer):        Dr Cash/Bank ; Cr A/R
+      //   OUT to supplier (PMT-…, supplier payment): Dr A/P       ; Cr Cash/Bank
+      //   OUT to customer (PMT-…, loan / advance):   Dr A/R       ; Cr Cash/Bank
+      // The customer case books the disbursement straight to A/R so the
+      // customer now owes us more (a friend loan, or paying back a customer
+      // who is in credit). A later Receipt (IN) settles it.
       const sysAR = await this.accounts.findSystem('A_R');
       const sysAP = await this.accounts.findSystem('A_P');
       const sysCashFallback = await this.accounts.findSystem('CASH_ON_HAND');
       const cashAccountId = dto.accountId ?? sysCashFallback.id;
       const amount = Number(dto.amount);
+      const isCustomerOut = dto.direction === 'OUT' && !!dto.customerId;
 
       const lines =
         dto.direction === 'IN'
@@ -51,10 +58,15 @@ export class PaymentsService {
               { accountId: cashAccountId, debit: amount, narration: `${voucherNo} receipt` },
               { accountId: sysAR.id, credit: amount, narration: `${voucherNo} clears A/R` },
             ]
-          : [
-              { accountId: sysAP.id, debit: amount, narration: `${voucherNo} clears A/P` },
-              { accountId: cashAccountId, credit: amount, narration: `${voucherNo} payment` },
-            ];
+          : isCustomerOut
+            ? [
+                { accountId: sysAR.id, debit: amount, narration: `${voucherNo} loan/advance to customer` },
+                { accountId: cashAccountId, credit: amount, narration: `${voucherNo} payment` },
+              ]
+            : [
+                { accountId: sysAP.id, debit: amount, narration: `${voucherNo} clears A/P` },
+                { accountId: cashAccountId, credit: amount, narration: `${voucherNo} payment` },
+              ];
 
       await this.journals.post(
         {

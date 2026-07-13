@@ -34,6 +34,7 @@ import { OutboxService } from '../outbox/outbox.service';
 import { SalesService } from '../sales/sales.service';
 import { PurchasesService } from '../purchases/purchases.service';
 import { ReportsService } from './reports.service';
+import { PaymentsService } from '../payments/payments.service';
 import { IncentivesService } from '../incentives/incentives.service';
 import { FundTransfersService } from '../fund-transfers/fund-transfers.service';
 import { EmployeeIncentivesService } from '../employee-incentives/employee-incentives.service';
@@ -55,6 +56,7 @@ describe('ReportsService', () => {
   let ds: DataSource;
   let items: ItemsService;
   let stock: StockService;
+  let paymentsSvc: PaymentsService;
   let itemId: string;
   let customerId: string;
   let supplierId: string;
@@ -84,7 +86,7 @@ describe('ReportsService', () => {
       ],
       providers: [
         ReportsService, ItemsService, StockService, OutboxService,
-        SalesService, PurchasesService, IncentivesService,
+        SalesService, PurchasesService, IncentivesService, PaymentsService,
         FundTransfersService, EmployeeIncentivesService, SequenceService,
         AccountsService, JournalService, PeriodsService, ItemSerialsService,
       ],
@@ -96,6 +98,7 @@ describe('ReportsService', () => {
     purchases = module.get(PurchasesService);
     items = module.get(ItemsService);
     stock = module.get(StockService);
+    paymentsSvc = module.get(PaymentsService);
     ds = module.get(DataSource);
 
     const item = await items.create({
@@ -429,5 +432,46 @@ describe('ReportsService', () => {
     // Batched all-balances must agree with the per-employee ledger.
     const all = await reports.allEmployeeBalances();
     expect(all.find((r) => r.id === emp.id)?.balance).toBe(0);
+  });
+
+  it('loan to a customer: money OUT increases what they owe (Dr A/R / Cr Cash); a receipt settles it', async () => {
+    // Seed leaves customer C1 owing 1500.
+    const before = (await reports.customerLedger(customerId)).closingBalance;
+    expect(before).toBe(1500);
+
+    // Lend the customer (a friend) Rs 5000 in cash — a money-OUT voucher.
+    await paymentsSvc.create({
+      direction: 'OUT',
+      customerId,
+      accountId,
+      amount: 5000,
+    });
+    const afterLoan = await reports.customerLedger(customerId);
+    expect(afterLoan.closingBalance).toBe(before + 5000); // they now owe 6500
+    expect(afterLoan.entries.some((e) => e.type === 'LOAN')).toBe(true);
+
+    // The double-entry stays balanced (Dr A/R 5000 / Cr Cash 5000).
+    expect((await reports.trialBalance()).balanced).toBe(true);
+
+    // They repay Rs 2000 → owe 4500.
+    await paymentsSvc.create({
+      direction: 'IN',
+      customerId,
+      accountId,
+      amount: 2000,
+    });
+    expect((await reports.customerLedger(customerId)).closingBalance).toBe(
+      before + 3000,
+    );
+
+    // Batched balances (used by the balance sheet) agree.
+    const all = await reports.allCustomerBalances();
+    expect(all.find((c) => c.id === customerId)?.balance).toBe(before + 3000);
+  });
+
+  it('payment OUT with neither supplier nor customer is rejected', async () => {
+    await expect(
+      paymentsSvc.create({ direction: 'OUT', accountId, amount: 100 } as any),
+    ).rejects.toThrow(/supplier|customer/i);
   });
 });

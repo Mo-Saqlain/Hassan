@@ -9,36 +9,47 @@ import ReverseAction from './ReverseAction';
  */
 export default function VoucherPage({ direction }) {
   const title = direction === 'IN' ? 'Receipts' : 'Payments';
-  const partyLabel = direction === 'IN' ? 'Customer' : 'Supplier';
-  const partyKey = direction === 'IN' ? 'customerId' : 'supplierId';
-  // Surface a per-party running balance next to the picker so cashiers
-  // can see how much is outstanding before deciding the amount. For
-  // suppliers a positive balance means we owe them; for customers a
-  // positive balance means they owe us.
-  const balancesPath =
-    direction === 'IN'
-      ? '/reports/customer-balances'
-      : '/reports/supplier-balances';
+
+  // Money IN is always a receipt from a customer. Money OUT can settle a
+  // supplier bill (A/P) OR be a loan / advance to a customer (money out that
+  // they now owe us — e.g. lending a friend added as a customer).
+  const [payTo, setPayTo] = useState('supplier'); // only meaningful for OUT
+  const useCustomer = direction === 'IN' || payTo === 'customer';
+  const partyKey = useCustomer ? 'customerId' : 'supplierId';
+  const partyLabel = useCustomer ? 'Customer' : 'Supplier';
 
   const { data: vouchers, loading, error, reload } = useResource(
     `/payments?direction=${direction}`,
   );
   const { data: accounts } = useResource('/accounts');
-  const { data: parties } = useResource(balancesPath);
+  // Both party lists are cheap; fetch both so toggling payee is instant and
+  // we don't juggle a changing resource path.
+  const { data: customerBalances } = useResource('/reports/customer-balances');
+  const { data: supplierBalances } = useResource('/reports/supplier-balances');
+  const parties = useCustomer ? customerBalances : supplierBalances;
 
   const [showForm, setShowForm] = useState(false);
-  const blankForm = { accountId: '', [partyKey]: '', amount: '', notes: '' };
-  const [form, setForm] = useState(blankForm);
+  const blank = () => ({
+    accountId: '',
+    customerId: '',
+    supplierId: '',
+    amount: '',
+    notes: '',
+  });
+  const [form, setForm] = useState(blank());
   const [submitError, setSubmitError] = useState(null);
 
   const isDirty = useMemo(
-    () => showForm && JSON.stringify(form) !== JSON.stringify(blankForm),
-    // partyKey changes only when `direction` changes — safe to depend on
-    // form alone because the page remounts on direction switch.
+    () => showForm && JSON.stringify(form) !== JSON.stringify(blank()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [showForm, form],
   );
   useUnsavedChangesPrompt(isDirty);
+
+  const switchPayTo = (t) => {
+    setPayTo(t);
+    setForm((f) => ({ ...f, customerId: '', supplierId: '' }));
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -53,7 +64,7 @@ export default function VoucherPage({ direction }) {
     try {
       await api.post('/payments', payload);
       setShowForm(false);
-      setForm({ accountId: '', [partyKey]: '', amount: '', notes: '' });
+      setForm(blank());
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');
@@ -77,6 +88,35 @@ export default function VoucherPage({ direction }) {
             New {direction === 'IN' ? 'Receipt' : 'Payment'} Voucher
           </h3>
           {submitError && <div className="alert alert-error">{submitError}</div>}
+          {direction === 'OUT' && (
+            <div style={{ marginBottom: 12 }}>
+              <label>Pay to</label>
+              <div className="row" style={{ gap: 18 }}>
+                <label
+                  style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 400 }}
+                >
+                  <input
+                    type="radio"
+                    name="payTo"
+                    checked={payTo === 'supplier'}
+                    onChange={() => switchPayTo('supplier')}
+                  />
+                  Supplier (pay a bill)
+                </label>
+                <label
+                  style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 400 }}
+                >
+                  <input
+                    type="radio"
+                    name="payTo"
+                    checked={payTo === 'customer'}
+                    onChange={() => switchPayTo('customer')}
+                  />
+                  Customer (loan / advance)
+                </label>
+              </div>
+            </div>
+          )}
           <div className="form-row">
             <div>
               <label>{partyLabel} *</label>
@@ -92,7 +132,7 @@ export default function VoucherPage({ direction }) {
                   const bal = Number(p.balance ?? 0);
                   const label = bal === 0
                     ? p.name
-                    : direction === 'IN'
+                    : useCustomer
                     ? `${p.name} — ${bal > 0 ? `owes ${bal.toFixed(2)}` : `credit ${Math.abs(bal).toFixed(2)}`}`
                     : `${p.name} — ${bal > 0 ? `we owe ${bal.toFixed(2)}` : `they owe ${Math.abs(bal).toFixed(2)}`}`;
                   return (
@@ -114,7 +154,7 @@ export default function VoucherPage({ direction }) {
                   );
                 }
                 const hint =
-                  direction === 'IN'
+                  useCustomer
                     ? bal > 0
                       ? `Outstanding A/R: ${bal.toFixed(2)}`
                       : `Customer credit: ${Math.abs(bal).toFixed(2)}`
@@ -187,7 +227,7 @@ export default function VoucherPage({ direction }) {
             <tr>
               <th>Voucher #</th>
               <th>Date</th>
-              <th>{partyLabel}</th>
+              <th>{direction === 'IN' ? 'Customer' : 'Party'}</th>
               <th>Account</th>
               <th className="right">Amount</th>
               <th>Notes</th>
@@ -199,11 +239,7 @@ export default function VoucherPage({ direction }) {
               <tr key={v.id}>
                 <td>{v.voucherNo}</td>
                 <td>{new Date(v.createdAt).toLocaleString()}</td>
-                <td>
-                  {direction === 'IN'
-                    ? v.customer?.name ?? '—'
-                    : v.supplier?.name ?? '—'}
-                </td>
+                <td>{v.customer?.name ?? v.supplier?.name ?? '—'}</td>
                 <td>{v.account?.name ?? '—'}</td>
                 <td className="right">{Number(v.amount).toFixed(2)}</td>
                 <td>{v.notes ?? ''}</td>
