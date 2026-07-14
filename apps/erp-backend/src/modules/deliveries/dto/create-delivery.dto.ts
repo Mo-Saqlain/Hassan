@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsIn,
   IsOptional,
@@ -52,6 +53,18 @@ export class CreateDeliveryDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  /**
+   * Explicit override for the Strict Delivery Handover safeguard. When `true`,
+   * a delivery may be marked DELIVERED even though the linked sale still has an
+   * outstanding balance — used when the shop intentionally hands over a
+   * partially-paid item and leaves the residual on the customer's account.
+   * The balance is untouched; it stays as A/R. Not a persisted column — the
+   * service reads it, then strips it before saving the row.
+   */
+  @IsBoolean()
+  @IsOptional()
+  allowUnpaidHandover?: boolean;
 }
 
 export class UpdateDeliveryDto extends CreateDeliveryDto {}

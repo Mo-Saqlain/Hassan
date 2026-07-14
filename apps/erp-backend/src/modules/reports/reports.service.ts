@@ -1615,6 +1615,105 @@ export class ReportsService {
   }
 
   /**
+   * Combined "call list" of everyone the shop needs to chase or pay: customers
+   * who owe us (A/R receivables) and suppliers we owe (A/P payables), each with
+   * their phone number, outstanding balance, and how overdue they are — the
+   * one screen a shopkeeper prints or dials down when collecting money.
+   *
+   * `balance` comes from the ledger-accurate {@link allCustomerBalances} /
+   * {@link allSupplierBalances} (captures opening balances, returns netting and
+   * friend-loans), while `maxDaysElapsed` / `oldestUnpaidDate` are borrowed from
+   * the invoice-based aging so the list can be sorted most-overdue-first. A
+   * balance with no covering invoice (e.g. a pure loan or opening balance) shows
+   * a real balance with `maxDaysElapsed = 0` — aging is invoice-driven, the
+   * balance is not, and that's the documented behaviour.
+   */
+  async receivablesPayablesCallList(asOfStr?: string): Promise<{
+    asOf: string;
+    receivables: Array<{
+      partyId: string;
+      name: string;
+      phone: string | null;
+      balance: number;
+      maxDaysElapsed: number;
+      oldestUnpaidDate: string | null;
+    }>;
+    payables: Array<{
+      partyId: string;
+      name: string;
+      phone: string | null;
+      balance: number;
+      maxDaysElapsed: number;
+      oldestUnpaidDate: string | null;
+    }>;
+    totals: { receivable: number; payable: number; net: number };
+  }> {
+    const asOf = asOfStr ? new Date(asOfStr) : new Date();
+    const [custBalances, suppBalances, ar, ap] = await Promise.all([
+      this.allCustomerBalances(asOf),
+      this.allSupplierBalances(asOf),
+      this.arAging(asOfStr),
+      this.apAging(asOfStr),
+    ]);
+
+    const arMap = new Map(
+      ar.rows.map((r) => [
+        r.customerId,
+        { maxDaysElapsed: r.maxDaysElapsed, oldestUnpaidDate: r.oldestUnpaidDate },
+      ]),
+    );
+    const apMap = new Map(
+      ap.rows.map((r) => [
+        r.supplierId,
+        { maxDaysElapsed: r.maxDaysElapsed, oldestUnpaidDate: r.oldestUnpaidDate },
+      ]),
+    );
+
+    // Positive customer balance = they owe us; positive supplier balance = we
+    // owe them. Negatives (customer credit / supplier advance) are not call-list
+    // material, so they're filtered out.
+    const receivables = custBalances
+      .filter((c: any) => Number(c.balance) > 0.005)
+      .map((c: any) => {
+        const aging = arMap.get(c.id);
+        return {
+          partyId: c.id,
+          name: c.name,
+          phone: c.phone ?? null,
+          balance: round2(Number(c.balance)),
+          maxDaysElapsed: aging?.maxDaysElapsed ?? 0,
+          oldestUnpaidDate: aging?.oldestUnpaidDate ?? null,
+        };
+      })
+      .sort((a, b) => b.maxDaysElapsed - a.maxDaysElapsed || b.balance - a.balance);
+
+    const payables = suppBalances
+      .filter((s: any) => Number(s.balance) > 0.005)
+      .map((s: any) => {
+        const aging = apMap.get(s.id);
+        return {
+          partyId: s.id,
+          name: s.name,
+          phone: s.phone ?? null,
+          balance: round2(Number(s.balance)),
+          maxDaysElapsed: aging?.maxDaysElapsed ?? 0,
+          oldestUnpaidDate: aging?.oldestUnpaidDate ?? null,
+        };
+      })
+      .sort((a, b) => b.maxDaysElapsed - a.maxDaysElapsed || b.balance - a.balance);
+
+    const receivable = round2(receivables.reduce((s, r) => s + r.balance, 0));
+    const payable = round2(payables.reduce((s, r) => s + r.balance, 0));
+
+    return {
+      asOf: asOf.toISOString(),
+      receivables,
+      payables,
+      totals: { receivable, payable, net: round2(receivable - payable) },
+    };
+  }
+
+  /**
    * Per-invoice aging detail for one customer. Same FIFO consumption as
    * arAging() but flattens to a per-sale row so the Customer Ledger page
    * can show "Days Elapsed" per outstanding invoice. Cheap because we

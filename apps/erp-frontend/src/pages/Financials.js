@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import ExportButtons from '../components/ExportButtons';
+import CallList from '../components/CallList';
 import { HorizontalBars } from '../components/MiniCharts';
 
 const tabs = [
@@ -11,6 +12,7 @@ const tabs = [
   { key: 'margins', label: 'Margin Insights' },
   { key: 'product-sales', label: 'Product Sales' },
   { key: 'customers-by-product', label: 'Customers by Product' },
+  { key: 'call-list', label: 'Receivables / Payables' },
 ];
 
 const ANALYTICS_TABS = new Set(['product-sales', 'customers-by-product']);
@@ -50,6 +52,13 @@ export default function Financials() {
   }, []);
 
   const load = async () => {
+    // The call-list tab renders a self-contained component that fetches its
+    // own data — nothing for the shared statement loader to do here.
+    if (tab === 'call-list') {
+      setData(null);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     setData(null);
@@ -95,10 +104,14 @@ export default function Financials() {
         <div className="page-title">
           <h1>{isAnalytics ? 'Sales analysis' : 'Financial statements'}</h1>
           <p>
-            {tab === 'balance' ? `As of ${asOf}` : `${from} → ${to}`}
-            {isAnalytics
-              ? ' · reversed sales excluded'
-              : ' · incentives applied to adjusted net income'}
+            {tab === 'balance' || tab === 'call-list'
+              ? `As of ${asOf}`
+              : `${from} → ${to}`}
+            {tab === 'call-list'
+              ? ' · most overdue first'
+              : isAnalytics
+                ? ' · reversed sales excluded'
+                : ' · incentives applied to adjusted net income'}
           </p>
         </div>
         <div className="row" style={{ flexWrap: 'wrap' }}>
@@ -147,7 +160,7 @@ export default function Financials() {
               </select>
             </>
           )}
-          {tab === 'balance' ? (
+          {tab === 'balance' || tab === 'call-list' ? (
             <input
               className="input"
               type="date"
@@ -233,6 +246,8 @@ export default function Financials() {
           {tab === 'customers-by-product' && <CustomersByProduct data={data} />}
         </>
       )}
+
+      {tab === 'call-list' && <CallList asOf={asOf} />}
     </>
   );
 }

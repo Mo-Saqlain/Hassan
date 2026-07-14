@@ -70,6 +70,14 @@ export default function Deliveries() {
     setSubmitErr(null);
   };
 
+  const save = async (payload) => {
+    if (editing) {
+      await api.patch(`/deliveries/${editing.id}`, payload);
+    } else {
+      await api.post('/deliveries', payload);
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmitErr(null);
@@ -85,18 +93,35 @@ export default function Deliveries() {
       notes: form.notes || undefined,
     };
     try {
-      if (editing) {
-        await api.patch(`/deliveries/${editing.id}`, payload);
-      } else {
-        await api.post('/deliveries', payload);
-      }
-      setShowForm(false);
-      setEditing(null);
-      setForm(blank());
-      reload();
+      await save(payload);
     } catch (err) {
-      setSubmitErr(err.uiMessage ?? 'Save failed');
+      // Strict Delivery Handover gate: the customer still owes money. Offer a
+      // conscious override so a partially-paid item can be handed over, leaving
+      // the balance on the customer's account (A/R).
+      const msg = err.uiMessage ?? '';
+      if (form.status === 'DELIVERED' && msg.includes('still owes')) {
+        const ok = window.confirm(
+          `${msg}\n\nHand the item over anyway? The unpaid balance stays on the customer's account.`,
+        );
+        if (!ok) {
+          setSubmitErr(msg);
+          return;
+        }
+        try {
+          await save({ ...payload, allowUnpaidHandover: true });
+        } catch (err2) {
+          setSubmitErr(err2.uiMessage ?? 'Save failed');
+          return;
+        }
+      } else {
+        setSubmitErr(msg || 'Save failed');
+        return;
+      }
     }
+    setShowForm(false);
+    setEditing(null);
+    setForm(blank());
+    reload();
   };
 
   const remove = async (row) => {

@@ -126,6 +126,11 @@ export class ReportsController {
     return this.service.apAgingDetail(supplierId, asOf);
   }
 
+  @Get('call-list')
+  callList(@Query('asOf') asOf?: string) {
+    return this.service.receivablesPayablesCallList(asOf);
+  }
+
   @Get('item-margins')
   itemMargins(@Query('from') from?: string, @Query('to') to?: string) {
     return this.service.itemMargins(from, to);

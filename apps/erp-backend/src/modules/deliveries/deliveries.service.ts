@@ -106,24 +106,31 @@ export class DeliveriesService {
       const nextStatus = dto.status ?? row.status;
       const willReserve = reserves(nextStatus);
 
-      // Strict Delivery Handover Authorization: never let a unit leave the
-      // shop while the customer still owes money. The spec's defining
-      // safeguard against the "took the AC home then disputed the bill"
-      // scenario.
+      // `allowUnpaidHandover` is a control flag, not a column — pull it out so
+      // Object.assign below never tries to persist it onto the entity.
+      const { allowUnpaidHandover, ...patch } = dto;
+
+      // Strict Delivery Handover Authorization: by default, don't let a unit
+      // leave the shop while the customer still owes money — the safeguard
+      // against the "took the AC home then disputed the bill" scenario.
+      // The shop can consciously override it (partial-payment handover: hand
+      // the item over now, leave the residual on the customer's account) by
+      // sending `allowUnpaidHandover: true`. The override only bypasses the
+      // block; it never touches the balance — the residual stays as A/R.
       const isHandoverTransition =
         nextStatus === 'DELIVERED' && row.status !== 'DELIVERED';
-      if (isHandoverTransition && row.saleId) {
+      if (isHandoverTransition && row.saleId && !allowUnpaidHandover) {
         const sale = await manager
           .getRepository(Sale)
           .findOne({ where: { id: row.saleId } });
         if (sale && Number(sale.dueAmount ?? 0) > 0.005) {
           throw new BadRequestException(
-            `Cannot mark delivery ${row.deliveryNo} as DELIVERED — customer still owes Rs ${Number(sale.dueAmount).toFixed(2)} on invoice ${sale.invoiceNo}. Collect the balance via Customer → Receipts first.`,
+            `Cannot mark delivery ${row.deliveryNo} as DELIVERED — customer still owes Rs ${Number(sale.dueAmount).toFixed(2)} on invoice ${sale.invoiceNo}. Collect the balance via Customer → Receipts, or confirm the partial-payment handover to proceed.`,
           );
         }
       }
 
-      Object.assign(row, dto);
+      Object.assign(row, patch);
       if (dto.scheduledFor) row.scheduledFor = new Date(dto.scheduledFor);
       if (nextStatus === 'DELIVERED' && !row.deliveredAt) {
         row.deliveredAt = new Date();
