@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { StockService } from './stock.service';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
+import { StocktakeDto } from './dto/stocktake.dto';
 
 @Controller('stock')
 export class StockController {
@@ -30,5 +31,10 @@ export class StockController {
   @Post('adjust')
   adjust(@Body() dto: StockAdjustmentDto) {
     return this.service.adjust(dto);
+  }
+
+  @Post('stocktake')
+  stocktake(@Body() dto: StocktakeDto) {
+    return this.service.stocktake(dto);
   }
 }

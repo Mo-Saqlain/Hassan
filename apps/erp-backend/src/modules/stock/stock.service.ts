@@ -12,6 +12,8 @@ import {
 } from './entities/stock-movement.entity';
 import { Item } from '../items/entities/item.entity';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
+import { StocktakeDto } from './dto/stocktake.dto';
+import { SequenceService } from '../sequences/sequence.service';
 
 interface RecordMovementInput {
   itemId: string;
@@ -31,6 +33,7 @@ export class StockService {
     @InjectRepository(Item)
     private readonly items: Repository<Item>,
     private readonly dataSource: DataSource,
+    private readonly sequences: SequenceService,
   ) {}
 
   /**
@@ -87,6 +90,82 @@ export class StockService {
       referenceType: 'ADJUSTMENT',
       referenceId: 'manual',
       note: dto.note,
+    });
+  }
+
+  /**
+   * Physical stocktake: reconcile counted-on-shelf quantities against the
+   * system on-hand in one reviewed batch. For each counted line we snapshot
+   * the current on-hand, compute the variance (counted − system), and post a
+   * single ADJUSTMENT movement (IN if we found more than the system knew,
+   * OUT if less) — all under one shared reference (`referenceId`) so the whole
+   * count groups together in the stock ledger. Lines with zero variance touch
+   * nothing. Runs in one transaction: either the whole count posts or none of
+   * it does.
+   *
+   * NOTE: system on-hand already reflects everything sold — including booked
+   * units, which are deducted at sale time. Count only what's physically
+   * unsold on the shelf, or a held booking will read as a positive variance.
+   */
+  async stocktake(dto: StocktakeDto) {
+    const reference = await this.sequences.next('STC');
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(StockMovement);
+      const itemsRepo = manager.getRepository(Item);
+
+      const results: Array<{
+        itemId: string;
+        itemName: string;
+        systemQty: number;
+        countedQty: number;
+        variance: number;
+        adjusted: boolean;
+      }> = [];
+
+      for (const line of dto.lines) {
+        const item = await itemsRepo.findOne({ where: { id: line.itemId } });
+        if (!item) {
+          throw new NotFoundException(`Item ${line.itemId} not found`);
+        }
+        const systemQty = await this.getOnHandWithRepo(
+          repo,
+          line.itemId,
+          dto.storeId,
+        );
+        const variance = line.countedQty - systemQty;
+        if (variance !== 0) {
+          await this.recordMovement(
+            {
+              itemId: line.itemId,
+              storeId: dto.storeId,
+              type: variance > 0 ? 'IN' : 'OUT',
+              quantity: Math.abs(variance),
+              referenceType: 'ADJUSTMENT',
+              referenceId: reference,
+              note: `Stocktake ${reference} · system ${systemQty} → counted ${line.countedQty}${dto.note ? ' · ' + dto.note : ''}`,
+            },
+            manager,
+          );
+        }
+        results.push({
+          itemId: line.itemId,
+          itemName: item.name,
+          systemQty,
+          countedQty: line.countedQty,
+          variance,
+          adjusted: variance !== 0,
+        });
+      }
+
+      const varianceLines = results.filter((r) => r.variance !== 0);
+      return {
+        reference,
+        storeId: dto.storeId ?? null,
+        countedLines: results.length,
+        varianceLines: varianceLines.length,
+        netUnits: varianceLines.reduce((s, r) => s + r.variance, 0),
+        lines: results,
+      };
     });
   }
 

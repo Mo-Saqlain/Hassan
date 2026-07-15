@@ -18,7 +18,12 @@ export type AccountType =
   | 'A_R'
   | 'A_P'
   | 'CASH_ON_HAND'
-  | 'DEFERRED_RECEIVABLE';
+  | 'DEFERRED_RECEIVABLE'
+  // Operating-expense leaf accounts (Rent / Utilities / Tea / …) that live
+  // under the 6000 control node. Not a treasury flavour — never counted as an
+  // asset; expenses post to them via the Expense voucher (a Payment with an
+  // expenseAccountId). Seeded on boot, renamable by the owner.
+  | 'EXPENSE';
 
 /**
  * Financial-statement bucket. Income Statement reads INCOME + EXPENSE;

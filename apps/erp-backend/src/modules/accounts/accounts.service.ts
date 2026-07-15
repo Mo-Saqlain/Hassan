@@ -64,6 +64,23 @@ const CONTROL_ACCOUNTS: ReadonlyArray<{
   { code: '6000', name: 'Operating Expenses',  category: 'EXPENSE'   },
 ];
 
+/**
+ * Default operating-expense leaf accounts, seeded under the 6000 control node
+ * so the Expense voucher has sensible categories out of the box. All type
+ * 'EXPENSE' / category EXPENSE / subtype OPERATING_EXPENSE, postable leaves.
+ * Seeded idempotently by code; the owner can rename them or add more (any
+ * EXPENSE-category account under 6000 shows up as a pickable category).
+ */
+const EXPENSE_ACCOUNTS: ReadonlyArray<{ code: string; name: string }> = [
+  { code: '6100', name: 'Rent' },
+  { code: '6200', name: 'Utilities (Electricity / Gas / Water)' },
+  { code: '6300', name: 'Tea & Refreshments' },
+  { code: '6400', name: 'Transport & Fuel' },
+  { code: '6500', name: 'Repairs & Maintenance' },
+  { code: '6600', name: 'Communication (Phone / Internet)' },
+  { code: '6900', name: 'Miscellaneous Expenses' },
+];
+
 /** Default category inferred from the user-facing account flavour. */
 function categoryForType(type: AccountType): AccountCategory {
   switch (type) {
@@ -83,6 +100,7 @@ function categoryForType(type: AccountType): AccountCategory {
     case 'REVENUE':
       return 'INCOME';
     case 'COGS':
+    case 'EXPENSE':
       return 'EXPENSE';
   }
 }
@@ -100,6 +118,7 @@ export class AccountsService implements OnModuleInit {
     await this.backfillCategories();
     await this.seedControlAccounts();
     await this.seedSystemAccounts();
+    await this.seedExpenseAccounts();
   }
 
   /**
@@ -288,6 +307,35 @@ export class AccountsService implements OnModuleInit {
       // Backfill subType + parent link for existing rows that were seeded
       // before the hierarchy columns existed.
       if (!row.accountSubType) row.accountSubType = sys.subType;
+      if (!row.parentAccountId && parent) row.parentAccountId = parent.id;
+      await this.repo.save(row);
+    }
+  }
+
+  /**
+   * Idempotently seeds the default operating-expense leaf accounts under the
+   * 6000 control node. Looked up by code so re-runs never duplicate; the owner
+   * may rename them. These are the categories the Expense voucher posts to
+   * (Dr <expense leaf> / Cr Cash|Bank).
+   */
+  private async seedExpenseAccounts() {
+    const parent = await this.repo.findOne({ where: { code: '6000' } });
+    for (const exp of EXPENSE_ACCOUNTS) {
+      let row = await this.repo.findOne({ where: { code: exp.code } });
+      if (!row) {
+        row = this.repo.create({
+          code: exp.code,
+          name: exp.name,
+          type: 'EXPENSE',
+          accountCategory: 'EXPENSE',
+          accountSubType: 'OPERATING_EXPENSE',
+          isControl: false,
+          isSystem: true,
+          openingBalance: 0,
+          isActive: true,
+        });
+      }
+      if (!row.accountSubType) row.accountSubType = 'OPERATING_EXPENSE';
       if (!row.parentAccountId && parent) row.parentAccountId = parent.id;
       await this.repo.save(row);
     }

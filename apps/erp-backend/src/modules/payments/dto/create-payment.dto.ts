@@ -26,6 +26,13 @@ export class CreatePaymentDto {
   @IsOptional()
   supplierId?: string;
 
+  /** OUT only — records a shop operating expense against an EXPENSE-category
+   *  account (Dr expense / Cr cash-or-bank). Mutually the third kind of OUT
+   *  voucher alongside supplier payment and customer loan. */
+  @IsUUID()
+  @IsOptional()
+  expenseAccountId?: string;
+
   @IsNumber()
   @Min(0.01)
   amount: number;

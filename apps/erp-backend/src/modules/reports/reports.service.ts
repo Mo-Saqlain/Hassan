@@ -6,6 +6,7 @@ import {
   IsNull,
   LessThanOrEqual,
   MoreThanOrEqual,
+  Not,
   Repository,
 } from 'typeorm';
 import { Customer } from '../customers/entities/customer.entity';
@@ -1046,7 +1047,31 @@ export class ReportsService {
       from && to ? this.employeeIncentives.totalForPeriod(from, to) : Promise.resolve(0),
       this.incentives.awardsTotal(from, to),
     ]);
-    const expenses = employeeIncentives;
+
+    // Operating expenses — Expense vouchers (OUT payments tagged with an
+    // expenseAccountId). Grouped by category for the P&L breakdown. Reversed
+    // vouchers are excluded.
+    const expensePayments = await this.payments.find({
+      where: {
+        ...where,
+        direction: 'OUT' as any,
+        expenseAccountId: Not(IsNull()),
+        reversedAt: IsNull(),
+      },
+    });
+    const breakdownMap = new Map<string, number>();
+    let operatingExpenses = 0;
+    for (const p of expensePayments) {
+      const amt = Number(p.amount);
+      operatingExpenses += amt;
+      const label = p.expenseAccount?.name ?? 'Uncategorised';
+      breakdownMap.set(label, (breakdownMap.get(label) ?? 0) + amt);
+    }
+    const expenseBreakdown = Array.from(breakdownMap.entries())
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const expenses = employeeIncentives + operatingExpenses;
 
     const netIncome = grossProfit - expenses;
     const adjustedNetIncome = netIncome + incentivesEarned;
@@ -1068,6 +1093,8 @@ export class ReportsService {
       grossProfit,
       expenses,
       employeeIncentives,
+      operatingExpenses,
+      expenseBreakdown,
       netIncome,
       incentives: incentivesEarned,
       adjustedNetIncome,
@@ -1710,6 +1737,77 @@ export class ReportsService {
       receivables,
       payables,
       totals: { receivable, payable, net: round2(receivable - payable) },
+    };
+  }
+
+  /**
+   * Reorder report — every active item whose sellable stock has fallen to or
+   * below its reorder level (`minStockLevel`). Uses `available` (on-hand −
+   * reserved) so units already promised to bookings/deliveries count as gone.
+   * `suggestedQty` is what it takes to climb back to the minimum. Items with no
+   * reorder level set (`minStockLevel = 0`) are excluded — nothing to compare.
+   * Sorted most-urgent-first (biggest shortfall). Feeds a printable purchase
+   * list; on-hand comes from the movement ledger in one GROUP BY.
+   */
+  async reorderReport(): Promise<{
+    rows: Array<{
+      itemId: string;
+      name: string;
+      sku: string;
+      onHand: number;
+      reserved: number;
+      available: number;
+      minStockLevel: number;
+      suggestedQty: number;
+    }>;
+    count: number;
+    totalSuggestedUnits: number;
+  }> {
+    const [items, movementSums] = await Promise.all([
+      this.items.find(),
+      this.movements
+        .createQueryBuilder('m')
+        .select('m.item_id', 'iid')
+        .addSelect(
+          "COALESCE(SUM(CASE WHEN m.type = 'IN' THEN m.quantity ELSE -m.quantity END), 0)",
+          'qty',
+        )
+        .groupBy('m.item_id')
+        .getRawMany(),
+    ]);
+    const qtyByItem = new Map<string, number>(
+      movementSums.map((r) => [r.iid, Number(r.qty)]),
+    );
+
+    const rows = items
+      .filter((it) => it.isActive && Number(it.minStockLevel ?? 0) > 0)
+      .map((it) => {
+        const min = Number(it.minStockLevel);
+        const onHand = qtyByItem.get(it.id) ?? 0;
+        const reserved = Number(it.reservedQty ?? 0);
+        const available = Math.max(0, onHand - reserved);
+        return {
+          itemId: it.id,
+          name: it.name,
+          sku: it.sku,
+          onHand,
+          reserved,
+          available,
+          minStockLevel: min,
+          suggestedQty: Math.max(0, min - available),
+        };
+      })
+      .filter((r) => r.available <= r.minStockLevel)
+      .sort(
+        (a, b) =>
+          b.minStockLevel - b.available - (a.minStockLevel - a.available) ||
+          a.name.localeCompare(b.name),
+      );
+
+    return {
+      rows,
+      count: rows.length,
+      totalSuggestedUnits: rows.reduce((s, r) => s + r.suggestedQty, 0),
     };
   }
 

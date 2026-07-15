@@ -25,10 +25,13 @@ import Receipts from './pages/Receipts';
 import Payments from './pages/Payments';
 import CashRegister from './pages/CashRegister';
 import FundTransfers from './pages/FundTransfers';
+import Expenses from './pages/Expenses';
 import Incentives from './pages/Incentives';
 import PurchaseOrders from './pages/PurchaseOrders';
 import StockTransfers from './pages/StockTransfers';
 import DamagedGoods from './pages/DamagedGoods';
+import Stocktake from './pages/Stocktake';
+import ReorderReport from './pages/ReorderReport';
 import EmployeePayments from './pages/EmployeePayments';
 import Attendance from './pages/Attendance';
 import EmployeeIncentiveRules from './pages/EmployeeIncentiveRules';
@@ -168,6 +171,8 @@ export default function App() {
               <Route path="stock-ledger" element={<StockLedger />} />
               <Route path="stock-transfers" element={<StockTransfers />} />
               <Route path="damaged-goods" element={<DamagedGoods />} />
+              <Route path="stocktake" element={<Stocktake />} />
+              <Route path="reorder" element={<ReorderReport />} />
             </Route>
 
             {/* Employee hub */}
@@ -200,6 +205,7 @@ export default function App() {
             >
               <Route path="accounts" element={<MasterData entity="accounts" />} />
               <Route path="fund-transfers" element={<FundTransfers />} />
+              <Route path="expenses" element={<Expenses />} />
               <Route path="account-ledger" element={<AccountLedger />} />
               <Route path="account-ledger/:id" element={<AccountLedger />} />
             </Route>

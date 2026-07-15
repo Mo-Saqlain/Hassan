@@ -9,6 +9,8 @@ import { Category } from '../categories/entities/category.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StockMovement } from './entities/stock-movement.entity';
 import { StockService } from './stock.service';
+import { Sequence } from '../sequences/entities/sequence.entity';
+import { SequenceService } from '../sequences/sequence.service';
 
 describe('StockService', () => {
   let service: StockService;
@@ -19,11 +21,11 @@ describe('StockService', () => {
     const module = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot(
-          inMemoryTypeOrm([Item, Brand, Category, Store, StockMovement]),
+          inMemoryTypeOrm([Item, Brand, Category, Store, StockMovement, Sequence]),
         ),
-        TypeOrmModule.forFeature([Item, StockMovement]),
+        TypeOrmModule.forFeature([Item, StockMovement, Sequence]),
       ],
-      providers: [StockService],
+      providers: [StockService, SequenceService],
     }).compile();
 
     service = module.get(StockService);

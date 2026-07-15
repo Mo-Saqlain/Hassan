@@ -14,6 +14,7 @@ export type PaymentDirection = 'IN' | 'OUT';
 @Index(['accountId'])
 @Index(['customerId'])
 @Index(['supplierId'])
+@Index(['expenseAccountId'])
 @Index(['createdAt'])
 export class Payment extends BaseEntity {
   @Column({ name: 'voucher_no' })
@@ -42,6 +43,20 @@ export class Payment extends BaseEntity {
   @ManyToOne(() => Supplier, { nullable: true, eager: true })
   @JoinColumn({ name: 'supplier_id' })
   supplier?: Supplier;
+
+  /**
+   * Set on an OUT voucher that records a shop operating expense (tea, rent,
+   * utilities, …). Points at an EXPENSE-category leaf account under the 6000
+   * control node. When present, the journal posts Dr <expenseAccount> / Cr
+   * <accountId> instead of touching A/P or A/R — so the expense reduces the
+   * paid-from account (till/bank) and lands on the Income Statement.
+   */
+  @Column({ name: 'expense_account_id', nullable: true })
+  expenseAccountId?: string;
+
+  @ManyToOne(() => Account, { nullable: true, eager: true })
+  @JoinColumn({ name: 'expense_account_id' })
+  expenseAccount?: Account;
 
   @Column('decimal', { precision: 14, scale: 2 })
   amount: number;

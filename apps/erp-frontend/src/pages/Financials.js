@@ -481,11 +481,17 @@ function IncomeStatement({ data }) {
         value={data.employeeIncentives ?? 0}
         prefix="− "
       />
-      <Sub
-        label="Other expenses"
-        value={Math.max(0, (data.expenses ?? 0) - (data.employeeIncentives ?? 0))}
-        prefix="− "
-      />
+      {Array.isArray(data.expenseBreakdown) && data.expenseBreakdown.length > 0 ? (
+        data.expenseBreakdown.map((e) => (
+          <Sub key={e.category} label={e.category} value={e.amount} prefix="− " />
+        ))
+      ) : (
+        <Sub
+          label="Shop expenses"
+          value={data.operatingExpenses ?? 0}
+          prefix="− "
+        />
+      )}
       <Sum label="Net income (trading)" value={data.netIncome} />
 
       <Group label="Incentives" />

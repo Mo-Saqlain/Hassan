@@ -131,6 +131,11 @@ export class ReportsController {
     return this.service.receivablesPayablesCallList(asOf);
   }
 
+  @Get('reorder')
+  reorder() {
+    return this.service.reorderReport();
+  }
+
   @Get('item-margins')
   itemMargins(@Query('from') from?: string, @Query('to') to?: string) {
     return this.service.itemMargins(from, to);

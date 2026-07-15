@@ -18,8 +18,14 @@ export default function VoucherPage({ direction }) {
   const partyKey = useCustomer ? 'customerId' : 'supplierId';
   const partyLabel = useCustomer ? 'Customer' : 'Supplier';
 
-  const { data: vouchers, loading, error, reload } = useResource(
+  const { data: allVouchers, loading, error, reload } = useResource(
     `/payments?direction=${direction}`,
+  );
+  // Expense vouchers (OUT payments tagged with an expense category) live on the
+  // dedicated Expenses page — keep them out of the party-payment list here.
+  const vouchers = useMemo(
+    () => (allVouchers ?? []).filter((v) => !v.expenseAccountId),
+    [allVouchers],
   );
   const { data: accounts } = useResource('/accounts');
   // Both party lists are cheap; fetch both so toggling payee is instant and

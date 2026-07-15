@@ -27,12 +27,46 @@ export class PaymentsService {
     if (dto.direction === 'IN' && !dto.customerId) {
       throw new BadRequestException('Receipt voucher requires customerId');
     }
-    if (dto.direction === 'OUT' && !dto.supplierId && !dto.customerId) {
+    if (
+      dto.direction === 'OUT' &&
+      !dto.supplierId &&
+      !dto.customerId &&
+      !dto.expenseAccountId
+    ) {
       throw new BadRequestException(
-        'Payment voucher requires a supplierId (supplier payment) or a customerId (loan / advance to a customer)',
+        'Payment voucher requires a supplierId (supplier payment), a customerId (loan / advance to a customer), or an expenseAccountId (shop expense)',
       );
     }
-    const voucherNo = dto.voucherNo ?? (await this.nextVoucherNo(dto.direction));
+    if (dto.expenseAccountId) {
+      if (dto.direction !== 'OUT') {
+        throw new BadRequestException('An expense must be an OUT voucher');
+      }
+      if (dto.supplierId || dto.customerId) {
+        throw new BadRequestException(
+          'An expense voucher cannot also target a supplier or customer',
+        );
+      }
+      const expenseAcct = await this.accounts.findOne(dto.expenseAccountId);
+      if (expenseAcct.accountCategory !== 'EXPENSE') {
+        throw new BadRequestException(
+          `Account ${expenseAcct.name} is not an expense account`,
+        );
+      }
+      if (expenseAcct.isControl) {
+        throw new BadRequestException(
+          'Pick a specific expense category, not the Operating Expenses group',
+        );
+      }
+    }
+    // Expense vouchers get their own EXPV series (EXP is already the employee
+    // out-of-pocket-expense prefix — keep the two counters separate).
+    const voucherNo =
+      dto.voucherNo ??
+      (dto.expenseAccountId
+        ? await this.sequences.next('EXPV', () =>
+            this.repo.count({ where: { direction: 'OUT' } }),
+          )
+        : await this.nextVoucherNo(dto.direction));
 
     return this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(Payment);
@@ -42,15 +76,19 @@ export class PaymentsService {
       //   IN  (RCT-…, receipt from customer):        Dr Cash/Bank ; Cr A/R
       //   OUT to supplier (PMT-…, supplier payment): Dr A/P       ; Cr Cash/Bank
       //   OUT to customer (PMT-…, loan / advance):   Dr A/R       ; Cr Cash/Bank
+      //   OUT expense    (EXPV-…, shop expense):     Dr Expense   ; Cr Cash/Bank
       // The customer case books the disbursement straight to A/R so the
       // customer now owes us more (a friend loan, or paying back a customer
-      // who is in credit). A later Receipt (IN) settles it.
+      // who is in credit). A later Receipt (IN) settles it. The expense case
+      // books the cost straight to the operating-expense leaf so it lands on
+      // the Income Statement while the paid-from account (till/bank) drops.
       const sysAR = await this.accounts.findSystem('A_R');
       const sysAP = await this.accounts.findSystem('A_P');
       const sysCashFallback = await this.accounts.findSystem('CASH_ON_HAND');
       const cashAccountId = dto.accountId ?? sysCashFallback.id;
       const amount = Number(dto.amount);
       const isCustomerOut = dto.direction === 'OUT' && !!dto.customerId;
+      const isExpenseOut = dto.direction === 'OUT' && !!dto.expenseAccountId;
 
       const lines =
         dto.direction === 'IN'
@@ -58,15 +96,20 @@ export class PaymentsService {
               { accountId: cashAccountId, debit: amount, narration: `${voucherNo} receipt` },
               { accountId: sysAR.id, credit: amount, narration: `${voucherNo} clears A/R` },
             ]
-          : isCustomerOut
+          : isExpenseOut
             ? [
-                { accountId: sysAR.id, debit: amount, narration: `${voucherNo} loan/advance to customer` },
-                { accountId: cashAccountId, credit: amount, narration: `${voucherNo} payment` },
+                { accountId: dto.expenseAccountId!, debit: amount, narration: `${voucherNo} expense` },
+                { accountId: cashAccountId, credit: amount, narration: `${voucherNo} paid` },
               ]
-            : [
-                { accountId: sysAP.id, debit: amount, narration: `${voucherNo} clears A/P` },
-                { accountId: cashAccountId, credit: amount, narration: `${voucherNo} payment` },
-              ];
+            : isCustomerOut
+              ? [
+                  { accountId: sysAR.id, debit: amount, narration: `${voucherNo} loan/advance to customer` },
+                  { accountId: cashAccountId, credit: amount, narration: `${voucherNo} payment` },
+                ]
+              : [
+                  { accountId: sysAP.id, debit: amount, narration: `${voucherNo} clears A/P` },
+                  { accountId: cashAccountId, credit: amount, narration: `${voucherNo} payment` },
+                ];
 
       await this.journals.post(
         {
