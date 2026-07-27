@@ -724,7 +724,6 @@ export default function SalesVoucher() {
                       {items.map((it) => (
                         <option key={it.id} value={it.id}>
                           {it.name}
-                          {it.sku ? ` · ${it.sku}` : ''}
                         </option>
                       ))}
                     </select>

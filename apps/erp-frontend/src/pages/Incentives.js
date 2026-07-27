@@ -277,7 +277,7 @@ function TargetsPanel() {
                   <option value="">— Select —</option>
                   {items.map((i) => (
                     <option key={i.id} value={i.id}>
-                      {i.name} ({i.sku})
+                      {i.name}
                     </option>
                   ))}
                 </select>

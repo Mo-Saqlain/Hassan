@@ -160,7 +160,7 @@ export default function Stock() {
                 <option value="">— Select —</option>
                 {items.map((i) => (
                   <option key={i.id} value={i.id}>
-                    {i.modelNo ?? i.name} ({i.sku})
+                    {i.modelNo ?? i.name}
                   </option>
                 ))}
               </select>

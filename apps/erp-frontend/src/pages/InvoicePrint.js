@@ -178,9 +178,6 @@ export default function InvoicePrint({ type }) {
                 <td>{i + 1}</td>
                 <td>
                   {ln.item?.name ?? ln.itemId}
-                  {ln.item?.sku && (
-                    <span className="muted"> ({ln.item.sku})</span>
-                  )}
                   {isSale && (
                     <LineWarrantyNotice
                       item={ln.item}

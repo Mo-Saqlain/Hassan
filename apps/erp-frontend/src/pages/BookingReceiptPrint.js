@@ -116,9 +116,6 @@ export default function BookingReceiptPrint() {
                 <td>{i + 1}</td>
                 <td>
                   {ln.item?.name ?? ln.itemId}
-                  {ln.item?.sku && (
-                    <span className="muted"> ({ln.item.sku})</span>
-                  )}
                 </td>
                 <td style={{ fontFamily: 'monospace', fontSize: 10.5 }}>
                   {lineSerials.length === 0

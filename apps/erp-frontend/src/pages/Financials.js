@@ -127,7 +127,7 @@ export default function Financials() {
                   <option value="">— Any item —</option>
                   {items.map((i) => (
                     <option key={i.id} value={i.id}>
-                      {i.name} ({i.sku})
+                      {i.name}
                     </option>
                   ))}
                 </select>

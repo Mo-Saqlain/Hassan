@@ -296,7 +296,7 @@ export default function Purchases() {
                         <option value="">— Select —</option>
                         {items.map((i) => (
                           <option key={i.id} value={i.id}>
-                            {i.name} ({i.sku})
+                            {i.name}
                             {i.modelNo ? ` — ${i.modelNo}` : ''}
                           </option>
                         ))}
