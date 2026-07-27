@@ -198,6 +198,59 @@ describe('ReportsService', () => {
     expect(list[0].balance).toBe(1500);
   });
 
+  // ── Sale-return A/R netting: a return credits A/R only by the store-credit
+  //    portion (totalAmount − refundAmount). Cash handed back lives in the
+  //    daily cash book, not A/R. Baseline balance before any return = 1500.
+  const seedReturn = async (opts: {
+    total: number;
+    refundAccountId?: string;
+    refundAmount?: number;
+  }) => {
+    const repo = ds.getRepository(SaleReturn);
+    await repo.save(
+      repo.create({
+        returnNo: `SR-${Math.round(opts.total)}-${opts.refundAmount ?? 'x'}`,
+        customerId,
+        totalAmount: opts.total,
+        refundAccountId: opts.refundAccountId,
+        refundAmount: opts.refundAmount,
+        lines: [
+          ds.getRepository(SaleReturnItem).create({
+            itemId,
+            quantity: 1,
+            unitPrice: opts.total,
+            lineTotal: opts.total,
+          }),
+        ],
+      }),
+    );
+  };
+
+  it('return with no cash refund (store credit) reduces A/R by the full total', async () => {
+    await seedReturn({ total: 500 });
+    expect((await reports.customerLedger(customerId)).closingBalance).toBe(1000);
+    expect((await reports.allCustomerBalances())[0].balance).toBe(1000);
+  });
+
+  it('return fully refunded in cash does NOT change A/R (customer made whole in cash)', async () => {
+    await seedReturn({ total: 500, refundAccountId: accountId, refundAmount: 500 });
+    expect((await reports.customerLedger(customerId)).closingBalance).toBe(1500);
+    expect((await reports.allCustomerBalances())[0].balance).toBe(1500);
+    // The ledger row annotates the cash refund for the reader.
+    const row = (await reports.customerLedger(customerId)).entries.find(
+      (e) => e.type === 'SALE_RETURN',
+    );
+    expect(row?.credit).toBe(0);
+    expect(row?.description).toContain('refunded in cash');
+  });
+
+  it('return with partial cash refund credits A/R by the un-refunded remainder', async () => {
+    await seedReturn({ total: 500, refundAccountId: accountId, refundAmount: 200 });
+    // store credit = 500 − 200 = 300 → 1500 − 300 = 1200
+    expect((await reports.customerLedger(customerId)).closingBalance).toBe(1200);
+    expect((await reports.allCustomerBalances())[0].balance).toBe(1200);
+  });
+
   it('stockLedger filtered by itemId returns running balance', async () => {
     const r = await reports.stockLedger({ itemId });
     expect(r.totalIn).toBe(20);

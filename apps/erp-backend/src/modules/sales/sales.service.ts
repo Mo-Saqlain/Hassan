@@ -91,9 +91,10 @@ export class SalesService {
    *     Cr Revenue, Dr COGS, Cr Inventory)
    *   - materialises paymentCommitments when there's a residual
    */
-  private async createInTransaction(
+  async createInTransaction(
     manager: EntityManager,
     dto: CreateSaleDto,
+    opts?: { skipCreditGate?: boolean },
   ): Promise<Sale> {
       const itemRepo = manager.getRepository(Item);
       const saleRepo = manager.getRepository(Sale);
@@ -158,7 +159,12 @@ export class SalesService {
       // Credit-limit gate: any sale that leaves money owed (CREDIT or
       // partial-pay) must respect the customer's creditEnabled flag and
       // their creditLimit. Blocks the sale before stock is moved.
-      if (dueAmount > 0 && dto.customerId) {
+      //
+      // skipCreditGate is set by the exchange flow: the residual there is
+      // backed by the store credit from the give-back leg (created in the same
+      // transaction), not open debt — so the ordinary creditEnabled/limit
+      // gate would wrongly block a legitimate like-for-like swap.
+      if (dueAmount > 0 && dto.customerId && !opts?.skipCreditGate) {
         const customer = await manager
           .getRepository(Customer)
           .findOne({ where: { id: dto.customerId } });

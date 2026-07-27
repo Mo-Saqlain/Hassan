@@ -311,6 +311,22 @@ export class ItemSerialsService implements OnModuleInit {
   }
 
   /**
+   * Company-claim flow: the physical unit left our world to the manufacturer
+   * (customer → company). It never re-enters our stock, so the serial is
+   * written off rather than returned-to-shelf. The sale history is preserved
+   * on the row; only `status` moves to WRITE_OFF. Idempotent-ish: a serial
+   * already WRITE_OFF is left as-is.
+   */
+  async markWrittenOff(serial: string, manager?: EntityManager) {
+    const repo = manager ? manager.getRepository(ItemSerial) : this.repo;
+    const row = await repo.findOne({ where: { serial } });
+    if (!row) throw new NotFoundException(`Serial "${serial}" not found.`);
+    if (row.status === 'WRITE_OFF') return row;
+    row.status = 'WRITE_OFF';
+    return repo.save(row);
+  }
+
+  /**
    * Sale reversal: cleanly walks back whatever allocation state the
    * serials are in:
    *   BOOKED   → AVAILABLE   (unit was never handed over — back to floor)

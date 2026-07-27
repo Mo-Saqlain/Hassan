@@ -16,6 +16,7 @@ import { StockModule } from './modules/stock/stock.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
 import { ReturnsModule } from './modules/returns/returns.module';
+import { ExchangeModule } from './modules/exchanges/exchange.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { SyncModule } from './modules/sync/sync.module';
@@ -93,6 +94,7 @@ function buildDbOptions(): TypeOrmModuleOptions {
     SalesModule,
     PurchasesModule,
     ReturnsModule,
+    ExchangeModule,
     PaymentsModule,
     OutboxModule,
     SyncModule,

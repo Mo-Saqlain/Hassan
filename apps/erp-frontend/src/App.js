@@ -19,6 +19,7 @@ import Transactions from './pages/Transactions';
 import Sales from './pages/Sales';
 import SalesVoucher from './pages/SalesVoucher';
 import SaleReturns from './pages/SaleReturns';
+import Exchange from './pages/Exchange';
 import Purchases from './pages/Purchases';
 import PurchaseReturns from './pages/PurchaseReturns';
 import Receipts from './pages/Receipts';
@@ -105,6 +106,7 @@ export default function App() {
               <Route path="sales-voucher" element={<SalesVoucher />} />
               <Route path="sales" element={<Sales />} />
               <Route path="sale-returns" element={<SaleReturns />} />
+              <Route path="exchange" element={<Exchange />} />
               <Route path="deliveries" element={<Deliveries />} />
               <Route path="overdue-bookings" element={<OverdueBookings />} />
             </Route>

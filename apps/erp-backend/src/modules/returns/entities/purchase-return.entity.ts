@@ -45,6 +45,20 @@ export class PurchaseReturn extends BaseEntity {
   @Column('decimal', { precision: 14, scale: 2, name: 'total_amount', default: 0 })
   totalAmount: number;
 
+  /**
+   * Whether real goods physically leave our warehouse, or this is a pure
+   * financial supplier credit with no stock movement.
+   *   • STOCK (default)   → goods go back to the supplier (stock OUT +
+   *                         costedQty drop) — the normal purchase return.
+   *   • WARRANTY_CREDIT   → a manufacturer credited our account for a unit that
+   *                         never re-entered our stock (it went customer →
+   *                         company). NO stock OUT, NO costedQty change — only
+   *                         the supplier ledger is credited by `totalAmount`
+   *                         (the figure the company put on our ledger).
+   */
+  @Column({ name: 'disposition', default: 'STOCK' })
+  disposition: 'STOCK' | 'WARRANTY_CREDIT';
+
   @Column({ nullable: true })
   reason?: string;
 

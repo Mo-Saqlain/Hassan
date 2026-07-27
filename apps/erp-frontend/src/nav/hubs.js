@@ -55,6 +55,7 @@ export const HUBS = {
       '/sales-voucher',
       '/sales',
       '/sale-returns',
+      '/exchange',
       '/deliveries',
       '/overdue-bookings',
     ],
@@ -62,6 +63,7 @@ export const HUBS = {
       { to: '/sales-voucher', label: 'New Voucher', icon: 'receipt' },
       { to: '/sales', label: 'History', icon: 'ledger' },
       { to: '/sale-returns', label: 'Returns', icon: 'transfer' },
+      { to: '/exchange', label: 'Exchange', icon: 'transfer' },
       { to: '/deliveries', label: 'Deliveries', icon: 'truck' },
       {
         to: '/overdue-bookings',

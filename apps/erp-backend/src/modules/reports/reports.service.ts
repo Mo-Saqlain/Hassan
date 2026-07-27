@@ -282,14 +282,27 @@ export class ReportsService {
       }
     }
     for (const r of returns) {
+      // A return only reduces A/R by the STORE-CREDIT portion. Any cash handed
+      // back (refundAmount, tracked separately in the daily cash book) has
+      // already left the till — crediting the full totalAmount here on top of
+      // that would double-count it and push the customer's balance falsely
+      // negative. store-credit = totalAmount − refundAmount:
+      //   • no cash refund       → credit = full total (unchanged behaviour)
+      //   • full cash refund     → credit = 0 (customer made whole in cash)
+      //   • partial cash refund  → credit = the un-refunded remainder
+      const refunded = Number(r.refundAmount ?? 0);
+      const storeCredit = Number((Number(r.totalAmount) - refunded).toFixed(2));
       all.push({
         date: new Date(r.createdAt),
         ref: r.returnNo,
         refId: r.id,
         type: 'SALE_RETURN',
-        description: `Sale return ${r.returnNo}`,
+        description:
+          refunded > 0
+            ? `Sale return ${r.returnNo} (Rs ${refunded.toFixed(2)} refunded in cash)`
+            : `Sale return ${r.returnNo}`,
         debit: 0,
-        credit: Number(r.totalAmount),
+        credit: storeCredit,
       });
     }
     for (const p of customerPayments) {
@@ -361,7 +374,9 @@ export class ReportsService {
    * Batched: instead of running `customerLedger` per customer (4 queries each
    * → 4N+1), we run four GROUP-BY-customer aggregates and combine in JS.
    * Mirrors the same +debit / -credit math as `customerLedger`:
-   *   balance = opening + sales.net − sales.paid − returns.total − receipts.amount
+   *   balance = opening + sales.net − sales.paid − returns.storeCredit − receipts.amount
+   *   (returns.storeCredit = returns.total − returns.cashRefunded; the cash side
+   *    lives in the daily cash book, not A/R)
    *
    * `asOf` (optional) restricts every aggregate to rows created on or before
    * the cutoff — used by `balanceSheet` for the "as of date X" view without
@@ -393,6 +408,10 @@ export class ReportsService {
           .createQueryBuilder('r')
           .select('r.customer_id', 'cid')
           .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
+          // Cash refunded leaves the till (daily cash book), not A/R — net it
+          // out so only the store-credit portion reduces the balance. See the
+          // matching note in customerLedger().
+          .addSelect('COALESCE(SUM(r.refund_amount), 0)', 'refunded')
           .where('r.customer_id IS NOT NULL'),
         'r.created_at',
       )
@@ -427,7 +446,11 @@ export class ReportsService {
       saleSums.map((r) => [r.cid, { net: Number(r.net), paid: Number(r.paid) }]),
     );
     const returnMap = new Map<string, number>(
-      returnSums.map((r) => [r.cid, Number(r.total)]),
+      // Store-credit portion only: total returned − cash refunded.
+      returnSums.map((r) => [
+        r.cid,
+        Number((Number(r.total) - Number(r.refunded ?? 0)).toFixed(2)),
+      ]),
     );
     const receiptMap = new Map<string, number>(
       receiptSums.map((r) => [r.cid, Number(r.total)]),

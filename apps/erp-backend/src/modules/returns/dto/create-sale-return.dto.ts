@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -55,6 +56,18 @@ export class CreateSaleReturnDto {
   @IsString()
   @IsOptional()
   reason?: string;
+
+  /** What happens to the returned goods. Defaults to RESTOCK (back on the
+   *  shelf). CLAIMED_TO_COMPANY = the unit went to the manufacturer; no stock
+   *  re-enters and the serial is written off. See SaleReturn.disposition. */
+  @IsIn(['RESTOCK', 'CLAIMED_TO_COMPANY'])
+  @IsOptional()
+  disposition?: 'RESTOCK' | 'CLAIMED_TO_COMPANY';
+
+  /** Set when this return is the give-back leg of an exchange. */
+  @IsUUID()
+  @IsOptional()
+  replacementSaleId?: string;
 
   /** Account the cash/bank refund went out of. Omit for a store-credit-only
    *  return (no money handed back). A CASH account makes the daily cash book

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -44,6 +45,13 @@ export class CreatePurchaseReturnDto {
   @IsString()
   @IsOptional()
   reason?: string;
+
+  /** STOCK (default) = goods physically go back to the supplier. WARRANTY_CREDIT
+   *  = pure financial supplier credit, no stock movement. See
+   *  PurchaseReturn.disposition. */
+  @IsIn(['STOCK', 'WARRANTY_CREDIT'])
+  @IsOptional()
+  disposition?: 'STOCK' | 'WARRANTY_CREDIT';
 
   @IsArray()
   @ArrayMinSize(1)
