@@ -62,6 +62,56 @@ export async function getPurchases({ limit = 50, search = '' } = {}) {
   return data || [];
 }
 
+export async function getSaleReturns({ limit = 50, search = '' } = {}) {
+  let q = supabase
+    .from('sale_returns')
+    .select(
+      'id, return_no, created_at, total_amount, disposition, refund_amount, ' +
+        'replacement_sale_id, reason, ' +
+        'customers(name, phone), ' +
+        'sale_return_items(quantity, unit_price, line_total, items(name))',
+    )
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (search.trim()) q = q.ilike('return_no', `%${search.trim()}%`);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getPurchaseReturns({ limit = 50, search = '' } = {}) {
+  let q = supabase
+    .from('purchase_returns')
+    .select(
+      'id, return_no, created_at, total_amount, disposition, reason, ' +
+        'suppliers(name, phone), ' +
+        'purchase_return_items(quantity, unit_price, line_total, items(name))',
+    )
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (search.trim()) q = q.ilike('return_no', `%${search.trim()}%`);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+// Top products by revenue (default) or profit — read the pre-aggregated view.
+export async function getProductSales({ search = '', sort = 'revenue', limit = 100 } = {}) {
+  let q = supabase
+    .from('mobile_product_sales')
+    .select('*')
+    .order(sort === 'profit' ? 'profit' : 'revenue', { ascending: false })
+    .limit(limit);
+  if (search.trim()) {
+    const t = search.trim();
+    q = q.or(`name.ilike.%${t}%,sku.ilike.%${t}%,brand.ilike.%${t}%`);
+  }
+  const { data, error } = await q;
+  if (error) throw error;
+  // Drop items that never sold so the list is meaningful.
+  return (data || []).filter((r) => Number(r.units_sold) > 0);
+}
+
 export async function getStock({ search = '', lowOnly = false, limit = 200 } = {}) {
   let q = supabase
     .from('mobile_item_stock')

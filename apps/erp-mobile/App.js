@@ -12,6 +12,8 @@ import DashboardScreen from './src/screens/DashboardScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import StockScreen from './src/screens/StockScreen';
 import BalancesScreen from './src/screens/BalancesScreen';
+import ReturnsScreen from './src/screens/ReturnsScreen';
+import ReportsScreen from './src/screens/ReportsScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -25,6 +27,8 @@ const ICONS = {
   History: 'receipt-outline',
   Stock: 'cube-outline',
   Balances: 'people-outline',
+  Returns: 'return-down-back-outline',
+  Reports: 'bar-chart-outline',
 };
 
 export default function App() {
@@ -47,10 +51,13 @@ export default function App() {
             headerTitle: `Hassan Electronics · ${route.name}`,
             tabBarActiveTintColor: colors.primary,
             tabBarInactiveTintColor: colors.tabInactive,
+            // Six tabs — keep labels compact so they don't truncate on small
+            // phones, and give the icon a touch more room.
+            tabBarLabelStyle: { fontSize: 10 },
             tabBarStyle: {
               backgroundColor: colors.surface,
               borderTopColor: colors.border,
-              height: Platform.OS === 'android' ? 60 : undefined,
+              height: Platform.OS === 'android' ? 62 : undefined,
               paddingBottom: Platform.OS === 'android' ? 6 : undefined,
             },
             tabBarIcon: ({ color, size }) => (
@@ -61,6 +68,8 @@ export default function App() {
           <Tab.Screen name="Dashboard" component={DashboardScreen} />
           <Tab.Screen name="History" component={HistoryScreen} />
           <Tab.Screen name="Stock" component={StockScreen} />
+          <Tab.Screen name="Returns" component={ReturnsScreen} />
+          <Tab.Screen name="Reports" component={ReportsScreen} />
           <Tab.Screen name="Balances" component={BalancesScreen} />
         </Tab.Navigator>
       </NavigationContainer>

@@ -20,7 +20,61 @@
 -- error_logs, or the sync_queue / sync_events tables.
 --
 -- Re-running is safe: grants are idempotent and views use CREATE OR REPLACE.
+--
+-- PREREQUISITE: the cloud schema must already carry the columns the views read.
+-- Schema on Postgres comes from TypeORM `synchronize` (DB_SYNC=true), not from
+-- migration files, so a cloud DB that hasn't seen a backend boot since the last
+-- entity change will be missing columns. Section 0 checks this and tells you.
 -- ============================================================================
+
+-- ── 0. Pre-flight: is the cloud schema current? ──────────────────────────────
+-- This script (and the app) read columns that only exist once the backend has
+-- booted against THIS database with DB_SYNC=true — TypeORM `synchronize` is what
+-- creates them; there are no migration files. Running against a stale cloud copy
+-- otherwise fails deep inside a view with a bare `column ... does not exist`,
+-- which says nothing about the actual fix. Check every newer column the views +
+-- the mobile screens depend on up front and report them all at once.
+--
+-- If this raises: point the backend at this database (local/secrets/erp-backend.env
+-- has DATABASE_URL + DB_SYNC=true + DB_SSL=true), start it once, let it finish
+-- booting, then re-run this script. Do NOT hand-write the columns — that puts the
+-- cloud schema out of step with what `synchronize` expects on the next boot.
+do $$
+declare
+  missing text[] := '{}';
+  r record;
+begin
+  for r in
+    select * from (values
+      ('sale_returns',     'refund_amount'),
+      ('sale_returns',     'refund_account_id'),
+      ('sale_returns',     'disposition'),
+      ('sale_returns',     'replacement_sale_id'),
+      ('sale_returns',     'reason'),
+      ('purchase_returns', 'disposition'),
+      ('purchase_returns', 'reason'),
+      ('sale_items',       'cost_at_sale_time'),
+      ('items',            'reserved_qty'),
+      ('items',            'avg_cost'),
+      ('items',            'min_stock_level'),
+      ('payments',         'direction'),
+      ('payments',         'customer_id')
+    ) as t(tbl, col)
+  loop
+    if not exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public' and table_name = r.tbl and column_name = r.col
+    ) then
+      missing := missing || format('%s.%s', r.tbl, r.col);
+    end if;
+  end loop;
+
+  if array_length(missing, 1) > 0 then
+    raise exception
+      'Cloud schema is behind the backend entities — missing: %. Boot the NestJS backend against this database with DB_SYNC=true (TypeORM synchronize creates them), then re-run this script.',
+      array_to_string(missing, ', ');
+  end if;
+end $$;
 
 -- ── 1. Direct-read grants (history lists query these tables directly) ───────
 grant usage on schema public to anon;
@@ -28,6 +82,8 @@ grant usage on schema public to anon;
 grant select on
   sales, sale_items,
   purchases, purchase_items,
+  sale_returns, sale_return_items,
+  purchase_returns, purchase_return_items,
   items, brands, categories, item_categories,
   customers, suppliers,
   stores
@@ -45,8 +101,9 @@ do $$
 declare t text;
 begin
   foreach t in array array[
-    'sales','sale_items','purchases','purchase_items','items',
-    'brands','categories','item_categories','customers','suppliers','stores'
+    'sales','sale_items','purchases','purchase_items',
+    'sale_returns','sale_return_items','purchase_returns','purchase_return_items',
+    'items','brands','categories','item_categories','customers','suppliers','stores'
   ]
   loop
     execute format('alter table %I enable row level security', t);
@@ -91,9 +148,12 @@ left join (
 -- Mirrors ReportsService.allCustomerBalances exactly:
 --   balance = opening_balance
 --           + SUM(sales.net_amount) - SUM(sales.paid_amount)
---           - SUM(sale_returns.total_amount)
---           - SUM(payments IN.amount)
--- (No reversed_at filter — matches the desktop report so numbers agree.)
+--           - SUM(sale_returns.store_credit)          -- total − cash refunded
+--           - SUM(payments IN.amount)                 -- receipts
+--           + SUM(payments OUT.amount)                -- loans/advances to customer
+-- store_credit nets out any cash refunded on a return (that cash left via the
+-- till/cash book, so it must NOT also reduce A/R). loan-OUT payments increase
+-- what the customer owes. (No reversed_at filter — matches the desktop report.)
 create or replace view mobile_customer_balance as
 select
   c.id                                              as customer_id,
@@ -104,8 +164,9 @@ select
   c.opening_balance,
   c.opening_balance
     + coalesce(s.net, 0)  - coalesce(s.paid, 0)
-    - coalesce(r.total, 0)
-    - coalesce(p.paid_in, 0)                        as balance
+    - coalesce(r.store_credit, 0)
+    - coalesce(p.paid_in, 0)
+    + coalesce(p.paid_out, 0)                        as balance
 from customers c
 left join (
   select customer_id,
@@ -115,14 +176,18 @@ left join (
   group by customer_id
 ) s on s.customer_id = c.id
 left join (
-  select customer_id, sum(total_amount) as total
+  -- store-credit portion only: total returned − cash refunded
+  select customer_id,
+         sum(total_amount) - sum(coalesce(refund_amount, 0)) as store_credit
   from sale_returns where customer_id is not null
   group by customer_id
 ) r on r.customer_id = c.id
 left join (
-  select customer_id, sum(amount) as paid_in
+  select customer_id,
+         sum(amount) filter (where direction = 'IN')  as paid_in,
+         sum(amount) filter (where direction = 'OUT') as paid_out
   from payments
-  where direction = 'IN' and customer_id is not null
+  where customer_id is not null
   group by customer_id
 ) p on p.customer_id = c.id;
 
@@ -179,11 +244,38 @@ select
   (select coalesce(sum(balance), 0) from mobile_customer_balance where balance > 0) as ar_total,
   (select coalesce(sum(balance), 0) from mobile_supplier_balance where balance > 0) as ap_total;
 
+-- ── 5b. Per-product sales (units / revenue / COGS / profit) ──────────────────
+-- Mirrors ReportsService.product-sales: aggregated over NON-reversed sales,
+-- COGS from the snapshotted cost_at_sale_time. Items with no sales show zeros.
+create or replace view mobile_product_sales as
+select
+  i.id                                              as item_id,
+  i.name,
+  i.sku,
+  b.name                                            as brand,
+  coalesce(ps.units, 0)                             as units_sold,
+  coalesce(ps.revenue, 0)                           as revenue,
+  coalesce(ps.cogs, 0)                              as cogs,
+  coalesce(ps.revenue, 0) - coalesce(ps.cogs, 0)    as profit
+from items i
+left join brands b on b.id = i.brand_id
+left join (
+  select si.item_id,
+         sum(si.quantity)                          as units,
+         sum(si.line_total)                        as revenue,
+         sum(si.cost_at_sale_time * si.quantity)   as cogs
+  from sale_items si
+  join sales s on s.id = si.sale_id
+  where s.reversed_at is null
+  group by si.item_id
+) ps on ps.item_id = i.id;
+
 -- ── 6. Grant read on the views ───────────────────────────────────────────────
 grant select on
   mobile_item_stock,
   mobile_customer_balance,
   mobile_supplier_balance,
+  mobile_product_sales,
   mobile_kpis
 to anon;
 
