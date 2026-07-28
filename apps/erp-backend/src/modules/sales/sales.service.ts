@@ -403,9 +403,116 @@ export class SalesService {
    *   - any split fails (bad account id, etc.) → entire transaction rolls
    *     back; the Sale is NOT committed. All-or-nothing.
    */
-  async createFromVoucher(
+  /**
+   * Correct a voucher sale in place — same invoice number, same row, including
+   * its receipt splits.
+   *
+   * A voucher sale is a Sale plus N receipt rows (`referenceType: 'SALE_SPLIT'`),
+   * each with its own journal entry. `edit()` re-posts only the Sale, so using it
+   * here would leave the old receipts standing and count the money twice — which
+   * is why `assertEditable` refuses a split-bearing sale and points at this
+   * method instead.
+   *
+   * The splits are REVERSED rather than deleted: a receipt the customer was given
+   * a number for should stay on the record, and now that reversed vouchers are
+   * excluded from the ledgers, a reversed split correctly stops counting. The
+   * corrected voucher then issues fresh receipts.
+   */
+  async editFromVoucher(
+    id: string,
     dto: CreateSaleVoucherDto,
+    opts: { reason: string; userId?: string },
   ): Promise<{ sale: Sale; receipts: Payment[] }> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('An edit needs a reason.');
+    }
+    const reason = opts.reason.trim();
+    // Same pre-flight the create path runs, outside the transaction.
+    await this.validateVoucher(dto);
+
+    return this.dataSource.transaction(async (manager) => {
+      const saleRepo = manager.getRepository(Sale);
+      const original = await saleRepo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!original) throw new NotFoundException(`Sale ${id} not found`);
+
+      await this.assertEditable(manager, original, { allowSplits: true });
+
+      // 1. Reverse the old splits: balance out each receipt's journal entry and
+      //    mark the row, so neither the cash account nor A/R keeps its effect.
+      const paymentRepo = manager.getRepository(Payment);
+      const oldSplits = await paymentRepo.find({
+        where: {
+          referenceType: 'SALE_SPLIT',
+          referenceId: original.id,
+          reversedAt: IsNull(),
+        },
+      });
+      for (const split of oldSplits) {
+        const entry = await this.journals.findActiveBySource(
+          'PAYMENT',
+          split.voucherNo,
+          manager,
+        );
+        if (entry) {
+          await this.journals.reverse(
+            entry.id,
+            {
+              entryDate: new Date(),
+              description: `Reversal of ${split.voucherNo}`,
+              reason: `Edit of ${original.invoiceNo}: ${reason}`,
+            },
+            manager,
+          );
+        }
+        split.reversedAt = new Date();
+        split.reversedBy = opts.userId;
+        split.reversalReason = `Edit of ${original.invoiceNo}: ${reason}`;
+        await paymentRepo.save(split);
+      }
+
+      // 2. Unwind the sale itself.
+      await this.unwindSaleEffects(manager, original, `Edit: ${reason}`);
+
+      // 3. Re-apply the corrected voucher onto the same row.
+      const result = await this.voucherInTransaction(manager, dto, {
+        replacing: original,
+      });
+
+      result.sale.editCount = Number(original.editCount ?? 0) + 1;
+      result.sale.lastEditedAt = new Date();
+      result.sale.lastEditReason = reason;
+      const saved = await saleRepo.save(result.sale);
+
+      await this.recost.recomputeItems(
+        [
+          ...original.lines.map((l) => l.itemId),
+          ...dto.lines.map((l) => l.itemId),
+        ],
+        { manager },
+      );
+
+      if (process.env.CLOUD_SYNC_URL) {
+        await this.outbox.enqueue(
+          'SALE_UPDATED',
+          { ...dto, invoiceNo: saved.invoiceNo, editReason: reason },
+          manager,
+        );
+      }
+
+      return { sale: saved, receipts: result.receipts };
+    });
+  }
+
+  /**
+   * Voucher-shape validation: split sums, per-split account/kind coupling, and
+   * per-line serial counts. Runs BEFORE any transaction so a bad payload throws
+   * without burning a sequence number — and is shared by create and edit so a
+   * correction cannot produce a voucher create would have rejected.
+   */
+  private async validateVoucher(dto: CreateSaleVoucherDto) {
     // Pre-flight: splits must be non-negative and not exceed net.
     const splitTotal = (dto.splits ?? []).reduce(
       (s, x) => s + Number(x.amount || 0),
@@ -487,7 +594,55 @@ export class SalesService {
       }
     }
 
-    const result = await this.dataSource.transaction(async (manager) => {
+  }
+  async createFromVoucher(
+    dto: CreateSaleVoucherDto,
+  ): Promise<{ sale: Sale; receipts: Payment[] }> {
+    await this.validateVoucher(dto);
+    const result = await this.dataSource.transaction((manager) =>
+      this.voucherInTransaction(manager, dto),
+    );
+
+    if (process.env.CLOUD_SYNC_URL) {
+      await this.outbox.enqueue('SALE_VOUCHER_CREATED', {
+        ...dto,
+        invoiceNo: result.sale.invoiceNo,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Voucher body — Sale + receipt splits — scoped to a caller's EntityManager so
+   * an edit can re-apply a corrected voucher through the same code that posts a
+   * new one. Emits no outbox event; the caller owns that.
+   *
+   * With `opts.replacing` the Sale is written onto that existing row (same
+   * invoice number, same id) and fresh receipts are issued for the corrected
+   * splits. The caller must already have reversed the old splits and unwound the
+   * sale.
+   */
+  async voucherInTransaction(
+    manager: EntityManager,
+    dto: CreateSaleVoucherDto,
+    opts?: { replacing?: Sale },
+  ): Promise<{ sale: Sale; receipts: Payment[] }> {
+    return (async () => {
+      // Recomputed here rather than passed in: they are pure functions of the
+      // dto, and both entry points (create and edit) need them.
+      const splitTotal = (dto.splits ?? []).reduce(
+        (s, x) => s + Number(x.amount || 0),
+        0,
+      );
+      const grossTotal = (dto.lines ?? []).reduce(
+        (s, l) => s + Number(l.unitPrice || 0) * Number(l.quantity || 0),
+        0,
+      );
+      const netTotal = Number((grossTotal - (dto.discount ?? 0)).toFixed(2));
+      const ccSplitTotal = (dto.splits ?? [])
+        .filter((s) => s.kind === 'CUSTOMER_CREDIT')
+        .reduce((s, x) => s + Number(x.amount || 0), 0);
       // 1. Create the Sale itself with the whole net on the receivable side.
       //    Each split below clears its slice via a normal Receipt voucher.
       const baseDto: CreateSaleDto = {
@@ -503,7 +658,9 @@ export class SalesService {
         paymentMethod: 'CREDIT',
         accountId: undefined,
       };
-      const sale = await this.createInTransaction(manager, baseDto);
+      const sale = await this.createInTransaction(manager, baseDto, {
+        replacing: opts?.replacing,
+      });
 
       // 2a. CUSTOMER_CREDIT splits — cap by the customer's pre-sale available
       //     credit. The helper measures `opening + sum(due) - sum(receipts)`;
@@ -610,6 +767,15 @@ export class SalesService {
       //    splits land so the branch sees the final dueAmount, not the
       //    pre-split residual that always equals netTotal.
       const isBooking = Number(sale.dueAmount ?? 0) > 0.005;
+      // Resolved here (rather than reusing the caller's pre-flight cache) so the
+      // body stands on its own — both create and edit enter through it.
+      const itemMap = new Map(
+        (
+          await manager
+            .getRepository(Item)
+            .findBy({ id: In(Array.from(new Set(dto.lines.map((l) => l.itemId)))) })
+        ).map((i) => [i.id, i]),
+      );
       for (const ln of dto.lines) {
         const it = itemMap.get(ln.itemId);
         if (!it || !it.tracksSerials) continue;
@@ -651,16 +817,7 @@ export class SalesService {
       }
 
       return { sale, receipts };
-    });
-
-    if (process.env.CLOUD_SYNC_URL) {
-      await this.outbox.enqueue('SALE_VOUCHER_CREATED', {
-        ...dto,
-        invoiceNo: result.sale.invoiceNo,
-      });
-    }
-
-    return result;
+    })();
   }
 
   private async nextInvoiceNo(repo: Repository<Sale>): Promise<string> {
@@ -884,7 +1041,31 @@ export class SalesService {
    * Blockers for editing a posted sale. Each one exists because the alternative
    * is a document that disagrees with something pointing at it.
    */
-  private async assertEditable(manager: EntityManager, sale: Sale) {
+  private async assertEditable(
+    manager: EntityManager,
+    sale: Sale,
+    opts?: { allowSplits?: boolean },
+  ) {
+    // A voucher sale carries its payment as separate SALE_SPLIT receipt rows
+    // with their own journal entries. `edit()` re-posts only the Sale, so it
+    // would leave those receipts standing against a changed total and count the
+    // money twice. `editFromVoucher` reverses them first, and passes
+    // allowSplits.
+    if (!opts?.allowSplits) {
+      const splits = await manager.getRepository(Payment).count({
+        where: {
+          referenceType: 'SALE_SPLIT',
+          referenceId: sale.id,
+          reversedAt: IsNull(),
+        },
+      });
+      if (splits > 0) {
+        throw new BadRequestException(
+          `Sale ${sale.invoiceNo} was entered as a voucher with ${splits} payment split(s). Correct it through the Sales Voucher screen (PATCH /sales/voucher/:id) so the receipts are re-issued with it.`,
+        );
+      }
+    }
+
     if (sale.reversedAt) {
       throw new BadRequestException(
         `Sale ${sale.invoiceNo} is reversed. A reversed voucher is finished — enter a new sale instead of editing this one.`,

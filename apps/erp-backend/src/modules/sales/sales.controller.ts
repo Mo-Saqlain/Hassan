@@ -13,6 +13,7 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { CreateSaleVoucherDto } from './dto/create-sale-voucher.dto';
 import { ReverseSaleDto } from './dto/reverse-sale.dto';
 import { EditSaleDto } from './dto/edit-sale.dto';
+import { EditSaleVoucherDto } from './dto/edit-sale-voucher.dto';
 import { SettleCommitmentDto } from './dto/settle-commitment.dto';
 
 @Controller('sales')
@@ -117,8 +118,23 @@ export class SalesController {
   }
 
   /**
+   * Correct a voucher sale — the Sale AND its receipt splits, which `PATCH :id`
+   * cannot do. Declared above the `:id` route so the literal `voucher` segment
+   * isn't parsed as a UUID.
+   */
+  @Patch('voucher/:id')
+  editVoucher(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EditSaleVoucherDto,
+  ) {
+    const { reason, userId, ...voucher } = dto;
+    return this.service.editFromVoucher(id, voucher, { reason, userId });
+  }
+
+  /**
    * Correct a posted sale in place — same invoice number, same row. Body is a
-   * full sale (the corrected version), plus `reason`.
+   * full sale (the corrected version), plus `reason`. Refuses a sale that has
+   * receipt splits; those go through `PATCH voucher/:id`.
    */
   @Patch(':id')
   edit(

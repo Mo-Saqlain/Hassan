@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import EditVoucherBar from '../components/EditVoucherBar';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
@@ -29,6 +30,7 @@ import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
  */
 export default function SalesVoucher() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: items } = useResource('/items');
   const { data: customers, reload: reloadCustomers } = useResource(
     '/reports/customer-balances',
@@ -414,6 +416,74 @@ export default function SalesVoucher() {
     setSubmitErr(null);
   };
 
+  /**
+   * Correction mode. `?edit=<saleId>` loads that invoice into this form; saving
+   * PATCHes it instead of creating a new one, so it keeps its invoice number and
+   * its receipts are re-issued together with it.
+   *
+   * The voucher screen is the only place a sale's shape is expressed — lines,
+   * splits, commitments — so corrections belong here rather than in a second form
+   * bolted onto the read-only history page.
+   */
+  const editId = searchParams.get('edit');
+  const [editing, setEditing] = useState(null);
+  const [editReason, setEditReason] = useState('');
+  const [loadErr, setLoadErr] = useState(null);
+
+  useEffect(() => {
+    if (!editId) return;
+    let cancelled = false;
+    api
+      .get(`/sales/${editId}`)
+      .then((r) => {
+        if (cancelled) return;
+        const sale = r.data;
+        setEditing(sale);
+        setCustomerId(sale.customerId ?? '');
+        setNotes(sale.notes ?? '');
+        setDiscount(Number(sale.discount ?? 0));
+        setLines(
+          (sale.lines ?? []).map((ln) => ({
+            ...blankLine(),
+            itemId: ln.itemId,
+            quantity: String(ln.quantity),
+            unitPrice: String(ln.unitPrice),
+            // Serials are re-bound from what's typed; the originals are unbound
+            // server-side, so pre-filling would risk double-binding.
+            serials: '',
+          })),
+        );
+        // Rebuild the splits from the receipts this voucher raised. Money
+        // already collected has to appear here or saving would look like the
+        // customer never paid.
+        const paid = Number(sale.paidAmount ?? 0);
+        setSplits(
+          paid > 0
+            ? [{ ...blankSplit(), amount: String(paid), kind: 'CASH', accountId: '' }]
+            : [blankSplit()],
+        );
+        const sched = sale.paymentCommitments ?? [];
+        if (sched.length > 0) {
+          setUseSchedule(true);
+          setCommitments(
+            sched.map((c) => ({
+              ...blankCommitment(),
+              dueDate: (c.dueDate ?? '').slice(0, 10),
+              expectedAmount: String(c.expectedAmount ?? ''),
+              notes: c.notes ?? '',
+            })),
+          );
+        }
+      })
+      .catch((err) =>
+        setLoadErr(err.uiMessage ?? 'Could not load that invoice for editing.'),
+      );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId]);
+
   const submit = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
@@ -460,7 +530,12 @@ export default function SalesVoucher() {
             notes: c.notes.trim() || undefined,
           }));
       }
-      const r = await api.post('/sales/voucher', payload);
+      const r = editing
+        ? await api.patch(`/sales/voucher/${editing.id}`, {
+            ...payload,
+            reason: editReason,
+          })
+        : await api.post('/sales/voucher', payload);
       const saleId = r.data?.sale?.id;
       const invoiceNo = r.data?.sale?.invoiceNo;
       reset();
@@ -488,11 +563,38 @@ export default function SalesVoucher() {
   return (
     <form className="card" onSubmit={submit}>
       <div className="page-header" style={{ margin: 0 }}>
-        <h2 style={{ margin: 0 }}>Sales Voucher</h2>
+        <h2 style={{ margin: 0 }}>
+          {editing ? `Correct ${editing.invoiceNo}` : 'Sales Voucher'}
+        </h2>
         <span className="muted" style={{ fontSize: 12 }}>
-          Bill-book entry · multi-tender · atomic
+          {editing
+            ? 'Correcting a posted invoice · same number · receipts re-issued'
+            : 'Bill-book entry · multi-tender · atomic'}
         </span>
       </div>
+
+      {loadErr && (
+        <div className="alert alert-error" style={{ marginTop: 12 }}>
+          {loadErr}
+        </div>
+      )}
+
+      {editing && (
+        <div style={{ marginTop: 12 }}>
+          <EditVoucherBar
+            label={editing.invoiceNo}
+            reason={editReason}
+            onReason={setEditReason}
+            onCancel={() => navigate('/sales')}
+            editCount={Number(editing.editCount ?? 0)}
+          />
+          <div className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+            Re-enter serials for any tracked line — the originals are released
+            when the invoice is re-posted. Payment splits have been rebuilt from
+            the amount collected; pick the account each part landed in.
+          </div>
+        </div>
+      )}
 
       {submitErr && (
         <div className="alert alert-error" style={{ marginTop: 12 }}>
@@ -1238,14 +1340,34 @@ export default function SalesVoucher() {
         <button
           type="submit"
           className="btn btn-primary"
-          disabled={!canSubmit}
-          title={!canSubmit ? blockReasons.join('\n') : ''}
+          disabled={!canSubmit || (editing != null && !editReason.trim())}
+          title={
+            editing != null && !editReason.trim()
+              ? 'A correction needs a reason'
+              : !canSubmit
+                ? blockReasons.join('\n')
+                : ''
+          }
         >
-          {submitting ? 'Saving…' : 'Save voucher'}
+          {submitting
+            ? 'Saving…'
+            : editing
+              ? 'Save correction'
+              : 'Save voucher'}
         </button>
-        <button type="button" className="btn" onClick={reset}>
-          Reset
-        </button>
+        {editing ? (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => navigate('/sales')}
+          >
+            Cancel correction
+          </button>
+        ) : (
+          <button type="button" className="btn" onClick={reset}>
+            Reset
+          </button>
+        )}
       </div>
     </form>
   );

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useResource } from '../hooks/useResource';
 import ReverseAction from '../components/ReverseAction';
 
@@ -108,6 +109,19 @@ export default function Sales() {
                       flexWrap: 'wrap',
                     }}
                   >
+                    {/* Corrections open the Sales Voucher screen with this
+                        invoice loaded — that's the only place a sale's shape
+                        (lines, splits, schedule) is expressed, so the history
+                        page stays read-only and doesn't grow a second form. */}
+                    {!s.reversedAt && (
+                      <Link
+                        className="btn btn-sm"
+                        to={`/sales-voucher?edit=${s.id}`}
+                        title="Correct this invoice — keeps its number, re-issues its receipts"
+                      >
+                        Edit
+                      </Link>
+                    )}
                     <a
                       className="btn btn-sm"
                       href={`#/print/sale/${s.id}`}

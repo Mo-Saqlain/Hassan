@@ -257,6 +257,32 @@ describe('ReportsService', () => {
     expect((await reports.allCustomerBalances())[0].balance).toBe(1200);
   });
 
+  it('a reversed receipt stops crediting the customer', async () => {
+    // Baseline A/R is 1500 (the unpaid second sale).
+    const receipt = await paymentsSvc.create({
+      direction: 'IN', accountId, customerId, amount: 500,
+    });
+    expect((await reports.customerLedger(customerId)).closingBalance).toBe(1000);
+
+    await paymentsSvc.reverse(receipt.id, { reason: 'receipted twice' });
+
+    // The money never came in, so the customer owes the full amount again.
+    expect((await reports.customerLedger(customerId)).closingBalance).toBe(1500);
+    expect((await reports.allCustomerBalances())[0].balance).toBe(1500);
+  });
+
+  it('a reversed supplier payment stops reducing what we owe', async () => {
+    const payment = await paymentsSvc.create({
+      direction: 'OUT', accountId, supplierId, amount: 2000,
+    });
+    expect((await reports.supplierLedger(supplierId)).closingBalance).toBe(4000);
+
+    await paymentsSvc.reverse(payment.id, { reason: 'paid the wrong supplier' });
+
+    expect((await reports.supplierLedger(supplierId)).closingBalance).toBe(6000);
+    expect((await reports.allSupplierBalances())[0].balance).toBe(6000);
+  });
+
   it('reversing an unpaid sale clears the customer A/R it created', async () => {
     // Baseline 1500 is the unpaid second sale. Reversing it must remove the
     // debt: the goods came back, the journal was balanced out, and the customer

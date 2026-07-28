@@ -223,7 +223,7 @@ Don't add a `@Cron` back unless the product direction explicitly changes — the
 
 ## Testing
 
-Backend has **250 Jest tests across 21 spec files** (`src/**/*.spec.ts`) covering the high-value services:
+Backend has **259 Jest tests across 21 spec files** (`src/**/*.spec.ts`) covering the high-value services:
 
 ```
 cd apps/erp-backend && npm test               # full suite (~14s)
@@ -244,7 +244,7 @@ Spec files: `app.controller`, `cash-register/cash-register.service`, `categories
 | Add a transactional flow | Backend module + a dedicated frontend page wired as a tab inside the relevant hub (Sales, Purchase, Employee, etc.). |
 | Add a sync event type | Add to `SyncService.handleEvent` switch (cloud side) and call `outbox.enqueue()` at the local origin. |
 | Add a new report | Add a method on `ReportsService`, a route in `ReportsController`, then consume it in `Financials.js` (new tab) or a new page. |
-| Edit a posted voucher | UI: an **Edit** button on each voucher row opens its own form pre-filled, with a required reason (`components/EditVoucherBar.js`). API: `PATCH /api/{sales,purchases,payments,fund-transfers,stock-transfers,sale-returns,purchase-returns}/:id` — full corrected document + `reason` (`editReason` on returns, which already have a `reason` of their own). The service unwinds what the original posted, re-applies through the same create path onto the SAME row via `{ replacing }`, and recosts. Guards refuse when something downstream points at it. |
+| Edit a posted voucher | UI: an **Edit** button on each voucher row opens its own form pre-filled with a required reason. Sales open the **Sales Voucher** screen via `/sales-voucher?edit=<id>` — the only place a sale's shape (lines, splits, schedule) is expressed, so history stays read-only. API: `PATCH /api/{sales,purchases,payments,fund-transfers,stock-transfers,sale-returns,purchase-returns}/:id`, plus `PATCH /api/sales/voucher/:id` for a voucher sale (the Sale AND its `SALE_SPLIT` receipts — plain `PATCH /sales/:id` REFUSES a split-bearing sale, or the money would be counted twice). Each unwinds what the original posted, re-applies through the same create path onto the SAME row via `{ replacing }`, and recosts. |
 | Correct a cost basis | Cost is derived — call `RecostService.recomputeItem(itemId, { manager })` (or `POST /api/costing/recompute`, superuser) rather than writing `avgCost` by hand. Any service that changes a cost-affecting document must recost the items it touched, inside the same transaction. |
 | Post to the ledger | Call `JournalService.post(input, manager)` with the operation's `EntityManager` so the journal joins the same transaction. Resolve system accounts via `AccountsService.findSystem`. Post to leaf accounts, never control nodes. |
 | Allocate a voucher number | `SequenceService.next(prefix, () => repo.count())`. Don't hand-roll `count + 1`. |

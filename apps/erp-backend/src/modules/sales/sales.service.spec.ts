@@ -877,6 +877,173 @@ describe('SalesService', () => {
     });
   });
 
+  // ─── voucher editing (sale + its receipt splits) ──────────────────────────
+
+  describe('editFromVoucher', () => {
+    let cashId: string;
+    let bankId: string;
+
+    beforeEach(async () => {
+      const repo = ds.getRepository(Account);
+      cashId = (await repo.save(repo.create({ name: 'Till', type: 'CASH' }))).id;
+      bankId = (await repo.save(repo.create({ name: 'Bank', type: 'BANK' }))).id;
+    });
+
+    /** Live (non-reversed) receipts raised by a voucher. */
+    const splitsOf = async (saleId: string) =>
+      ds.getRepository(Payment).find({
+        where: { referenceType: 'SALE_SPLIT', referenceId: saleId },
+        order: { createdAt: 'ASC' },
+      });
+
+    it('corrects lines and re-issues the receipts, keeping the invoice number', async () => {
+      const { sale } = await service.createFromVoucher({
+        lines: [{ itemId, quantity: 2, unitPrice: 500 }],
+        splits: [{ amount: 1000, accountId: cashId, kind: 'CASH' }],
+      });
+      expect(await stock.getOnHand(itemId)).toBe(8);
+
+      const { sale: edited, receipts } = await service.editFromVoucher(
+        sale.id,
+        {
+          lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+          splits: [{ amount: 500, accountId: cashId, kind: 'CASH' }],
+        },
+        { reason: 'one unit, not two' },
+      );
+
+      expect(edited.id).toBe(sale.id);
+      expect(edited.invoiceNo).toBe(sale.invoiceNo);
+      expect(Number(edited.netAmount)).toBe(500);
+      expect(Number(edited.dueAmount)).toBe(0);
+      expect(await stock.getOnHand(itemId)).toBe(9);
+      expect(edited.editCount).toBe(1);
+
+      // The old receipt is reversed (kept on the record, no longer counting) and
+      // a fresh one issued for the corrected amount.
+      const all = await splitsOf(sale.id);
+      expect(all).toHaveLength(2);
+      expect(all.filter((p) => p.reversedAt)).toHaveLength(1);
+      const live = all.filter((p) => !p.reversedAt);
+      expect(live).toHaveLength(1);
+      expect(Number(live[0].amount)).toBe(500);
+      expect(receipts).toHaveLength(1);
+    });
+
+    it('can move the payment to a different account', async () => {
+      const { sale } = await service.createFromVoucher({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+        splits: [{ amount: 500, accountId: cashId, kind: 'CASH' }],
+      });
+
+      await service.editFromVoucher(
+        sale.id,
+        {
+          lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+          splits: [{ amount: 500, accountId: bankId, kind: 'CASH' }],
+        },
+        { reason: 'went into the bank, not the till' },
+      );
+
+      const live = (await splitsOf(sale.id)).filter((p) => !p.reversedAt);
+      expect(live).toHaveLength(1);
+      expect(live[0].accountId).toBe(bankId);
+    });
+
+    it('can split one payment into two', async () => {
+      const { sale } = await service.createFromVoucher({
+        lines: [{ itemId, quantity: 1, unitPrice: 1000 }],
+        splits: [{ amount: 1000, accountId: cashId, kind: 'CASH' }],
+      });
+
+      await service.editFromVoucher(
+        sale.id,
+        {
+          lines: [{ itemId, quantity: 1, unitPrice: 1000 }],
+          splits: [
+            { amount: 600, accountId: cashId, kind: 'CASH' },
+            { amount: 400, accountId: bankId, kind: 'CASH' },
+          ],
+        },
+        { reason: 'half cash, half transfer' },
+      );
+
+      const live = (await splitsOf(sale.id)).filter((p) => !p.reversedAt);
+      expect(live).toHaveLength(2);
+      expect(live.reduce((s, p) => s + Number(p.amount), 0)).toBe(1000);
+      expect(Number((await service.findOne(sale.id)).dueAmount)).toBe(0);
+    });
+
+    it('turns a fully-paid voucher into a part-paid one, leaving the residual owed', async () => {
+      const customer = await ds.getRepository(Customer).save(
+        ds.getRepository(Customer).create({
+          name: 'Booking customer', creditEnabled: true, creditLimit: 100000,
+        }),
+      );
+      const { sale } = await service.createFromVoucher({
+        customerId: customer.id,
+        lines: [{ itemId, quantity: 1, unitPrice: 1000 }],
+        splits: [{ amount: 1000, accountId: cashId, kind: 'CASH' }],
+      });
+      expect(Number(sale.dueAmount)).toBe(0);
+
+      const { sale: edited } = await service.editFromVoucher(
+        sale.id,
+        {
+          customerId: customer.id,
+          lines: [{ itemId, quantity: 1, unitPrice: 1000 }],
+          splits: [{ amount: 300, accountId: cashId, kind: 'CASH' }],
+        },
+        { reason: 'only 300 was taken as advance' },
+      );
+
+      expect(Number(edited.paidAmount)).toBe(300);
+      expect(Number(edited.dueAmount)).toBe(700);
+    });
+
+    it('applies voucher validation to the correction', async () => {
+      const { sale } = await service.createFromVoucher({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+        splits: [{ amount: 500, accountId: cashId, kind: 'CASH' }],
+      });
+
+      // Splits exceeding the net is refused on create; it must be refused here.
+      await expect(
+        service.editFromVoucher(
+          sale.id,
+          {
+            lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+            splits: [{ amount: 900, accountId: cashId, kind: 'CASH' }],
+          },
+          { reason: 'over-collect' },
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      // Untouched.
+      expect(Number((await service.findOne(sale.id)).netAmount)).toBe(500);
+    });
+
+    it('requires a reason and refuses a reversed voucher', async () => {
+      const { sale } = await service.createFromVoucher({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+        splits: [{ amount: 500, accountId: cashId, kind: 'CASH' }],
+      });
+      const good = {
+        lines: [{ itemId, quantity: 1, unitPrice: 450 }],
+        splits: [{ amount: 450, accountId: cashId, kind: 'CASH' as const }],
+      };
+
+      await expect(
+        service.editFromVoucher(sale.id, good, { reason: '  ' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      await service.reverse(sale.id, { reason: 'voided' });
+      await expect(
+        service.editFromVoucher(sale.id, good, { reason: 'too late' }),
+      ).rejects.toThrow(/reversed/i);
+    });
+  });
+
   // ─── editing ──────────────────────────────────────────────────────────────
 
   describe('edit', () => {
@@ -1043,6 +1210,26 @@ describe('SalesService', () => {
       await expect(
         service.edit(sale.id, { lines: newLines }, { reason: 'x' }),
       ).rejects.toThrow(/service ticket/i);
+    });
+
+    it('refuses a voucher sale, which carries its payment as separate receipts', async () => {
+      const cash = await ds.getRepository(Account).save(
+        ds.getRepository(Account).create({ name: 'Till', type: 'CASH' }),
+      );
+      const { sale } = await service.createFromVoucher({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+        splits: [{ amount: 500, accountId: cash.id, kind: 'CASH' }],
+      });
+
+      // Editing only the Sale would leave the RCT receipt standing against a
+      // changed total — the money would be counted twice.
+      await expect(
+        service.edit(
+          sale.id,
+          { lines: [{ itemId, quantity: 1, unitPrice: 400 }] },
+          { reason: 'price wrong' },
+        ),
+      ).rejects.toThrow(/voucher/i);
     });
 
     it('rolls the whole edit back when the corrected version is invalid', async () => {

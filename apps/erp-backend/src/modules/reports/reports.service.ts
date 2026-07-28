@@ -253,7 +253,11 @@ export class ReportsService {
       }),
       // Both directions: IN = receipt (credit, they owe less); OUT = a loan /
       // advance we paid the customer (debit, they owe more).
-      this.payments.find({ where: { customerId, ...dateClause } }),
+      // reversedAt IS NULL: a reversed receipt/payment is money that never
+      // moved, so it must stop crediting (or debiting) the party.
+      this.payments.find({
+        where: { customerId, reversedAt: IsNull(), ...dateClause },
+      }),
     ]);
 
     const all: Array<{
@@ -436,7 +440,9 @@ export class ReportsService {
           .select('p.customer_id', 'cid')
           .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
           .where('p.direction = :d', { d: 'IN' })
-          .andWhere('p.customer_id IS NOT NULL'),
+          .andWhere('p.customer_id IS NOT NULL')
+          // A reversed voucher is money that never moved.
+          .andWhere('p.reversed_at IS NULL'),
         'p.created_at',
       )
         .groupBy('p.customer_id')
@@ -448,7 +454,9 @@ export class ReportsService {
           .select('p.customer_id', 'cid')
           .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
           .where('p.direction = :d', { d: 'OUT' })
-          .andWhere('p.customer_id IS NOT NULL'),
+          .andWhere('p.customer_id IS NOT NULL')
+          // A reversed voucher is money that never moved.
+          .andWhere('p.reversed_at IS NULL'),
         'p.created_at',
       )
         .groupBy('p.customer_id')
@@ -505,7 +513,12 @@ export class ReportsService {
         where: { supplierId, reversedAt: IsNull(), ...dateClause },
       }),
       this.payments.find({
-        where: { supplierId, direction: 'OUT', ...dateClause },
+        where: {
+          supplierId,
+          direction: 'OUT',
+          reversedAt: IsNull(),
+          ...dateClause,
+        },
       }),
     ]);
 
@@ -650,7 +663,8 @@ export class ReportsService {
           .select('p.supplier_id', 'sid')
           .addSelect('COALESCE(SUM(p.amount), 0)', 'total')
           .where('p.direction = :d', { d: 'OUT' })
-          .andWhere('p.supplier_id IS NOT NULL'),
+          .andWhere('p.supplier_id IS NOT NULL')
+          .andWhere('p.reversed_at IS NULL'),
         'p.created_at',
       )
         .groupBy('p.supplier_id')
@@ -695,7 +709,9 @@ export class ReportsService {
     // 1) Payment vouchers on this account.
     // 2) Fund transfers touching this account (either side).
     const [vouchers, transfersOut] = await Promise.all([
-      this.payments.find({ where: { accountId, ...dateClause } }),
+      this.payments.find({
+        where: { accountId, reversedAt: IsNull(), ...dateClause },
+      }),
       this.transfers.findInvolvingAccounts(
         [accountId],
         new Date(0),
@@ -1295,8 +1311,12 @@ export class ReportsService {
     // For simplicity we only count explicit payment vouchers + the paid-at-time portion.
     const [receipts, payouts, sales, purchases, beginningBS, endingBS] =
       await Promise.all([
-        this.payments.find({ where: { ...where, direction: 'IN' } }),
-        this.payments.find({ where: { ...where, direction: 'OUT' } }),
+        this.payments.find({
+          where: { ...where, direction: 'IN', reversedAt: IsNull() },
+        }),
+        this.payments.find({
+          where: { ...where, direction: 'OUT', reversedAt: IsNull() },
+        }),
         this.sales.find({ where }),
         this.purchases.find({ where }),
         from ? this.cashAndBankAt(new Date(from)) : Promise.resolve(0),
@@ -1479,6 +1499,7 @@ export class ReportsService {
         where: {
           customerId: c.id,
           direction: 'IN' as any,
+          reversedAt: IsNull(),
           createdAt: LessThanOrEqual(asOf),
         },
       });
@@ -1623,6 +1644,7 @@ export class ReportsService {
         where: {
           supplierId: sp.id,
           direction: 'OUT' as any,
+          reversedAt: IsNull(),
           createdAt: LessThanOrEqual(asOf),
         },
       });
