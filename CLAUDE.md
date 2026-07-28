@@ -221,7 +221,7 @@ Don't add a `@Cron` back unless the product direction explicitly changes — the
 
 ## Testing
 
-Backend has **227 Jest tests across 19 spec files** (`src/**/*.spec.ts`) covering the high-value services:
+Backend has **237 Jest tests across 20 spec files** (`src/**/*.spec.ts`) covering the high-value services:
 
 ```
 cd apps/erp-backend && npm test               # full suite (~14s)

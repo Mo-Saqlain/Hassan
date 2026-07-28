@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import axios from 'axios';
 import { SyncEvent, SyncEventStatus } from './entities/sync-event.entity';
 import { OutboxService } from '../outbox/outbox.service';
+import { MIRRORED_ENTITIES } from '../outbox/mirror.subscriber';
 import { SalesService } from '../sales/sales.service';
 import { PurchasesService } from '../purchases/purchases.service';
 import { SyncEventDto } from './dto/sync-push.dto';
@@ -43,7 +44,92 @@ export class SyncService {
     private readonly outbox: OutboxService,
     private readonly salesService: SalesService,
     private readonly purchasesService: PurchasesService,
+    private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Apply a mirrored row. Upsert by primary key, so re-pushing is harmless and a
+   * corrected document simply overwrites the version the cloud held.
+   *
+   * The entity name is checked against the mirror whitelist before use: the
+   * payload arrives over HTTP, and resolving an arbitrary string to a repository
+   * would let a caller write any table in the database (users included) through
+   * an endpoint whose HMAC only proves the shop sent it, not what it may touch.
+   */
+  private async applyUpsert(payload: {
+    entity?: string;
+    id?: string;
+    data?: Record<string, unknown>;
+  }): Promise<string> {
+    const { entity, id, data } = payload ?? {};
+    if (!entity || !id || !data) {
+      throw new Error('ENTITY_UPSERT payload needs entity, id and data');
+    }
+    if (!MIRRORED_ENTITIES.includes(entity as any)) {
+      throw new Error(`Entity ${entity} is not mirrored`);
+    }
+    const repo = this.dataSource.getRepository(entity);
+    // save() rather than upsert(): upsert needs a conflict target per dialect,
+    // and save on an entity carrying its own id updates when the row exists.
+    await repo.save(repo.create({ ...data, id } as any));
+    return id;
+  }
+
+  private async applyDelete(payload: {
+    entity?: string;
+    id?: string;
+  }): Promise<string> {
+    const { entity, id } = payload ?? {};
+    if (!entity || !id) {
+      throw new Error('ENTITY_DELETE payload needs entity and id');
+    }
+    if (!MIRRORED_ENTITIES.includes(entity as any)) {
+      throw new Error(`Entity ${entity} is not mirrored`);
+    }
+    await this.dataSource.getRepository(entity).delete(id);
+    return id;
+  }
+
+  /**
+   * Queue the whole mirrored dataset for push — the way a fresh cloud gets
+   * populated.
+   *
+   * Sync alone could never build the cloud copy from nothing: it only ever
+   * carried five document events, so master data (and everything entered before
+   * the cloud was configured) was missing, which is why a brand-new Supabase
+   * project stayed empty apart from its schema. This walks the mirrored tables in
+   * dependency order — masters before the documents that reference them — and
+   * enqueues each row's current state.
+   *
+   * Safe to re-run: every event is an idempotent upsert.
+   */
+  async mirrorAll(): Promise<{ queued: number; byEntity: Record<string, number> }> {
+    const byEntity: Record<string, number> = {};
+    let queued = 0;
+
+    for (const name of MIRRORED_ENTITIES) {
+      if (!this.dataSource.hasMetadata(name)) continue;
+      const rows = await this.dataSource.getRepository(name).find();
+      for (const row of rows) {
+        const meta = this.dataSource.getMetadata(name);
+        const data: Record<string, unknown> = {};
+        for (const col of meta.columns) {
+          const value = col.getEntityValue(row as any);
+          if (value !== undefined) data[col.propertyName] = value;
+        }
+        await this.outbox.enqueue('ENTITY_UPSERT', {
+          entity: name,
+          id: (row as any).id,
+          data,
+        });
+        queued += 1;
+      }
+      if (rows.length > 0) byEntity[name] = rows.length;
+    }
+
+    this.logger.log(`Mirror bootstrap queued ${queued} row(s) for push.`);
+    return { queued, byEntity };
+  }
 
   // ---------- Connection check ----------
   /**
@@ -147,6 +233,25 @@ export class SyncService {
           resultId = p.id;
           break;
         }
+        case 'ENTITY_UPSERT': {
+          // Row-state mirror: write the row as the shop currently has it. This
+          // is what carries master data, edits and reversals — none of which the
+          // operation-replay events above can express. The shop is authoritative;
+          // the cloud does not re-derive anything.
+          resultId = await this.applyUpsert(event.payload as any);
+          break;
+        }
+        case 'ENTITY_DELETE': {
+          resultId = await this.applyDelete(event.payload as any);
+          break;
+        }
+        case 'SALE_UPDATED':
+        case 'PURCHASE_UPDATED':
+          // The corrected document arrives as its own ENTITY_UPSERT events (the
+          // header and every line), which is what actually updates the cloud.
+          // These are kept as an audit breadcrumb of WHY it changed — the edit
+          // reason travels on them — so acknowledging is the whole job.
+          break;
         case 'POS_SESSION_STARTED':
         case 'POS_SESSION_CLOSED':
           // Cloud side currently just acknowledges these (audit-only).
