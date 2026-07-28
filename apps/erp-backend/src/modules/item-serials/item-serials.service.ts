@@ -327,6 +327,31 @@ export class ItemSerialsService implements OnModuleInit {
   }
 
   /**
+   * Return-reversal flow: the return itself was a mistake, so the unit goes
+   * back to being sold — undoing either `markReturned` (RETURNED → SOLD) or
+   * `markWrittenOff` (WRITE_OFF → SOLD, the company-claim case). The sale
+   * history on the row was never cleared, so the warranty window and invoice
+   * link light up again as they were.
+   *
+   * Idempotent: a serial already SOLD is left alone. Anything else (IN_STOCK,
+   * DAMAGED) is refused — those states mean the unit was handled again after
+   * the return, and silently forcing them to SOLD would invent history.
+   */
+  async restoreToSold(serial: string, manager?: EntityManager) {
+    const repo = manager ? manager.getRepository(ItemSerial) : this.repo;
+    const row = await repo.findOne({ where: { serial } });
+    if (!row) throw new NotFoundException(`Serial "${serial}" not found.`);
+    if (row.status === 'SOLD') return row;
+    if (row.status !== 'RETURNED' && row.status !== 'WRITE_OFF') {
+      throw new BadRequestException(
+        `Serial "${serial}" cannot go back to SOLD from ${row.status}.`,
+      );
+    }
+    row.status = 'SOLD';
+    return repo.save(row);
+  }
+
+  /**
    * Sale reversal: cleanly walks back whatever allocation state the
    * serials are in:
    *   BOOKED   → AVAILABLE   (unit was never handed over — back to floor)

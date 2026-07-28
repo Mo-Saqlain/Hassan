@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, In, IsNull, Repository } from 'typeorm';
 import { EmployeeIncentiveRule } from './entities/employee-incentive-rule.entity';
 import { CreateRuleDto } from './dto/create-rule.dto';
 import { UpdateRuleDto } from './dto/update-rule.dto';
@@ -112,7 +112,9 @@ export class EmployeeIncentivesService {
     const [rules, sales, returns, items] = await Promise.all([
       this.rules.find({ where: ruleWhere }),
       this.sales.find({ where: { createdAt: Between(fromDate, toDate) } }),
-      this.saleReturns.find({ where: { createdAt: Between(fromDate, toDate) } }),
+      this.saleReturns.find({
+        where: { createdAt: Between(fromDate, toDate), reversedAt: IsNull() },
+      }),
       this.items.find(),
     ]);
     if (rules.length === 0) {

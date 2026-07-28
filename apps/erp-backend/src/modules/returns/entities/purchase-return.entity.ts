@@ -17,6 +17,7 @@ import { PurchaseReturnItem } from './purchase-return-item.entity';
 @Index(['supplierId'])
 @Index(['purchaseId'])
 @Index(['createdAt'])
+@Index(['reversedAt'])
 export class PurchaseReturn extends BaseEntity {
   @Column({ name: 'return_no' })
   returnNo: string;
@@ -61,6 +62,19 @@ export class PurchaseReturn extends BaseEntity {
 
   @Column({ nullable: true })
   reason?: string;
+
+  /**
+   * Set when the return itself was booked in error and walked back. Kept on the
+   * record (never deleted) but excluded from every downstream figure — the
+   * supplier ledger and A/P balances filter on `reversedAt IS NULL`. Reversal
+   * re-books the inverse stock movement and restores `costedQty`; see
+   * ReturnsService.reversePurchaseReturn.
+   */
+  @Column({ name: 'reversed_at', type: Date, nullable: true })
+  reversedAt?: Date;
+
+  @Column({ name: 'reversal_reason', nullable: true })
+  reversalReason?: string;
 
   @OneToMany(() => PurchaseReturnItem, (line) => line.purchaseReturn, {
     cascade: true,

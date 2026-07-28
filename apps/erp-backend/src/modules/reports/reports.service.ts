@@ -241,7 +241,12 @@ export class ReportsService {
     const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
     const [sales, returns, customerPayments] = await Promise.all([
       this.sales.find({ where: { customerId, ...dateClause } }),
-      this.saleReturns.find({ where: { customerId, ...dateClause } }),
+      // reversedAt IS NULL: a return that was itself booked in error has been
+      // walked back (stock re-issued, serials back to SOLD), so it must not
+      // keep crediting the customer here.
+      this.saleReturns.find({
+        where: { customerId, reversedAt: IsNull(), ...dateClause },
+      }),
       // Both directions: IN = receipt (credit, they owe less); OUT = a loan /
       // advance we paid the customer (debit, they owe more).
       this.payments.find({ where: { customerId, ...dateClause } }),
@@ -412,7 +417,9 @@ export class ReportsService {
           // out so only the store-credit portion reduces the balance. See the
           // matching note in customerLedger().
           .addSelect('COALESCE(SUM(r.refund_amount), 0)', 'refunded')
-          .where('r.customer_id IS NOT NULL'),
+          .where('r.customer_id IS NOT NULL')
+          // Reversed returns never happened — see customerLedger().
+          .andWhere('r.reversed_at IS NULL'),
         'r.created_at',
       )
         .groupBy('r.customer_id')
@@ -486,7 +493,9 @@ export class ReportsService {
     const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
     const [purchases, returns, payments] = await Promise.all([
       this.purchases.find({ where: { supplierId, ...dateClause } }),
-      this.purchaseReturns.find({ where: { supplierId, ...dateClause } }),
+      this.purchaseReturns.find({
+        where: { supplierId, reversedAt: IsNull(), ...dateClause },
+      }),
       this.payments.find({
         where: { supplierId, direction: 'OUT', ...dateClause },
       }),
@@ -619,7 +628,8 @@ export class ReportsService {
           .createQueryBuilder('r')
           .select('r.supplier_id', 'sid')
           .addSelect('COALESCE(SUM(r.total_amount), 0)', 'total')
-          .where('r.supplier_id IS NOT NULL'),
+          .where('r.supplier_id IS NOT NULL')
+          .andWhere('r.reversed_at IS NULL'),
         'r.created_at',
       )
         .groupBy('r.supplier_id')
@@ -1032,7 +1042,7 @@ export class ReportsService {
     const where = this.buildDateWhere(from, to);
     const [sales, returns] = await Promise.all([
       this.sales.find({ where }),
-      this.saleReturns.find({ where }),
+      this.saleReturns.find({ where: { ...where, reversedAt: IsNull() } }),
     ]);
 
     const grossRevenue = sales.reduce((s, x) => s + Number(x.totalAmount), 0);
@@ -2059,7 +2069,9 @@ export class ReportsService {
       : [];
 
     const saleReturns = await this.saleReturns.find({
-      where: dateBetween ? { createdAt: dateBetween } : {},
+      where: dateBetween
+        ? { createdAt: dateBetween, reversedAt: IsNull() }
+        : { reversedAt: IsNull() },
       relations: ['lines'],
     });
 
@@ -2738,7 +2750,9 @@ export class ReportsService {
       ? await this.saleItems.find({ where: { saleId: In(saleIds) } })
       : [];
     const saleReturns = await this.saleReturns.find({
-      where: dateWhere ? { createdAt: dateWhere } : {},
+      where: dateWhere
+        ? { createdAt: dateWhere, reversedAt: IsNull() }
+        : { reversedAt: IsNull() },
       relations: ['lines'],
     });
 

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import ReverseAction from '../components/ReverseAction';
 
 const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0 });
 
@@ -250,6 +251,7 @@ export default function PurchaseReturns() {
               <th>Supplier</th>
               <th className="right">Total</th>
               <th>Reason</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -260,6 +262,14 @@ export default function PurchaseReturns() {
                 <td>{r.supplier?.name ?? '—'}</td>
                 <td className="right">{Number(r.totalAmount).toFixed(2)}</td>
                 <td>{r.reason ?? '—'}</td>
+                <td>
+                  <ReverseAction
+                    endpoint="/purchase-returns"
+                    row={r}
+                    label={`purchase return ${r.returnNo}`}
+                    onDone={reload}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

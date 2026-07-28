@@ -20,6 +20,7 @@ import { SaleReturnItem } from './sale-return-item.entity';
 @Index(['createdAt'])
 @Index(['refundAccountId'])
 @Index(['replacementSaleId'])
+@Index(['reversedAt'])
 export class SaleReturn extends BaseEntity {
   @Column({ name: 'return_no' })
   returnNo: string;
@@ -102,6 +103,19 @@ export class SaleReturn extends BaseEntity {
 
   @Column({ nullable: true })
   reason?: string;
+
+  /**
+   * Set when the return itself was booked in error and walked back. A reversed
+   * return is kept on the record (never deleted) but must be treated as if it
+   * never happened: `ReportsService`, the daily cash book, and the incentive
+   * netting all filter on `reversedAt IS NULL`. Reversal re-books the inverse
+   * stock movement and restores `costedQty`; see ReturnsService.reverseSaleReturn.
+   */
+  @Column({ name: 'reversed_at', type: Date, nullable: true })
+  reversedAt?: Date;
+
+  @Column({ name: 'reversal_reason', nullable: true })
+  reversalReason?: string;
 
   @OneToMany(() => SaleReturnItem, (line) => line.saleReturn, {
     cascade: true,

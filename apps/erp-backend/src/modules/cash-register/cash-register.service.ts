@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, DataSource, Repository } from 'typeorm';
+import { Between, DataSource, IsNull, Repository } from 'typeorm';
 import { CashEntry } from './entities/cash-entry.entity';
 import { CashRegisterSession } from './entities/cash-register-session.entity';
 import { CreateCashEntryDto } from './dto/create-cash-entry.dto';
@@ -257,7 +257,11 @@ export class CashRegisterService {
       this.payments.find({ where: { createdAt: Between(start, end) } }),
       this.fundTransfers.findInvolvingAccounts(cashIdsArr, start, end),
       this.employeeTxns.find({ where: { transactionDate: day } }),
-      this.saleReturns.find({ where: { createdAt: Between(start, end) } }),
+      // Reversed returns are excluded: reversing a refunded return means the
+      // cash came back to the till, so it must stop counting as an OUT here.
+      this.saleReturns.find({
+        where: { createdAt: Between(start, end), reversedAt: IsNull() },
+      }),
       this.cashOnHandAsOf(prevDay(day), cashAccounts),
     ]);
 

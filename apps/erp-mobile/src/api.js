@@ -67,7 +67,7 @@ export async function getSaleReturns({ limit = 50, search = '' } = {}) {
     .from('sale_returns')
     .select(
       'id, return_no, created_at, total_amount, disposition, refund_amount, ' +
-        'replacement_sale_id, reason, ' +
+        'replacement_sale_id, reason, reversed_at, ' +
         'customers(name, phone), ' +
         'sale_return_items(quantity, unit_price, line_total, items(name))',
     )
@@ -83,7 +83,7 @@ export async function getPurchaseReturns({ limit = 50, search = '' } = {}) {
   let q = supabase
     .from('purchase_returns')
     .select(
-      'id, return_no, created_at, total_amount, disposition, reason, ' +
+      'id, return_no, created_at, total_amount, disposition, reason, reversed_at, ' +
         'suppliers(name, phone), ' +
         'purchase_return_items(quantity, unit_price, line_total, items(name))',
     )

@@ -103,6 +103,7 @@ export class IncentivesService {
       .innerJoin('rl.saleReturn', 'r')
       .where('rl.item_id IN (:...ids)', { ids: itemIds })
       .andWhere('r.created_at BETWEEN :start AND :end', { start, end })
+      .andWhere('r.reversed_at IS NULL')
       .select('COALESCE(SUM(rl.quantity), 0)', 'qty')
       .getRawOne();
 

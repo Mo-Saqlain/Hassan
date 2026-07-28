@@ -51,8 +51,10 @@ begin
       ('sale_returns',     'disposition'),
       ('sale_returns',     'replacement_sale_id'),
       ('sale_returns',     'reason'),
+      ('sale_returns',     'reversed_at'),
       ('purchase_returns', 'disposition'),
       ('purchase_returns', 'reason'),
+      ('purchase_returns', 'reversed_at'),
       ('sale_items',       'cost_at_sale_time'),
       ('items',            'reserved_qty'),
       ('items',            'avg_cost'),
@@ -179,7 +181,9 @@ left join (
   -- store-credit portion only: total returned − cash refunded
   select customer_id,
          sum(total_amount) - sum(coalesce(refund_amount, 0)) as store_credit
-  from sale_returns where customer_id is not null
+  from sale_returns
+  where customer_id is not null
+    and reversed_at is null   -- a reversed return never happened
   group by customer_id
 ) r on r.customer_id = c.id
 left join (
@@ -219,7 +223,9 @@ left join (
 ) p on p.supplier_id = su.id
 left join (
   select supplier_id, sum(total_amount) as total
-  from purchase_returns where supplier_id is not null
+  from purchase_returns
+  where supplier_id is not null
+    and reversed_at is null
   group by supplier_id
 ) r on r.supplier_id = su.id
 left join (

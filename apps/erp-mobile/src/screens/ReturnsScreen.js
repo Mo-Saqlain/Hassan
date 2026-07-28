@@ -77,6 +77,10 @@ function ReturnCard({ item, isSales, open, onToggle }) {
   const refund = Number(item.refund_amount || 0);
   const disp = dispositionBadge(item.disposition, isSales);
   const isExchange = isSales && !!item.replacement_sale_id;
+  // A reversed return was booked in error and walked back on the desktop. It is
+  // excluded from every balance, so show it plainly as void rather than letting
+  // it read as a live return whose value doesn't appear in the A/R figures.
+  const reversed = !!item.reversed_at;
 
   return (
     <Pressable style={styles.card} onPress={onToggle}>
@@ -89,6 +93,7 @@ function ReturnCard({ item, isSales, open, onToggle }) {
         <Text style={styles.date}>{dateTime(item.created_at)}</Text>
       </View>
       <View style={styles.badges}>
+        {reversed ? <Badge text="Reversed" tone="neg" /> : null}
         <Badge text={disp.text} tone={disp.tone} />
         {isExchange ? <Badge text="Exchange" tone="pos" /> : null}
         {isSales && refund > 0.005 ? <Badge text={`Cash back ${money(refund)}`} tone="neg" /> : null}

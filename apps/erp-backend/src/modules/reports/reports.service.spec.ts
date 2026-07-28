@@ -205,15 +205,20 @@ describe('ReportsService', () => {
     total: number;
     refundAccountId?: string;
     refundAmount?: number;
+    reversed?: boolean;
   }) => {
     const repo = ds.getRepository(SaleReturn);
     await repo.save(
       repo.create({
-        returnNo: `SR-${Math.round(opts.total)}-${opts.refundAmount ?? 'x'}`,
+        returnNo: `SR-${Math.round(opts.total)}-${opts.refundAmount ?? 'x'}${
+          opts.reversed ? '-rev' : ''
+        }`,
         customerId,
         totalAmount: opts.total,
         refundAccountId: opts.refundAccountId,
         refundAmount: opts.refundAmount,
+        reversedAt: opts.reversed ? new Date() : undefined,
+        reversalReason: opts.reversed ? 'booked in error' : undefined,
         lines: [
           ds.getRepository(SaleReturnItem).create({
             itemId,
@@ -249,6 +254,42 @@ describe('ReportsService', () => {
     // store credit = 500 − 200 = 300 → 1500 − 300 = 1200
     expect((await reports.customerLedger(customerId)).closingBalance).toBe(1200);
     expect((await reports.allCustomerBalances())[0].balance).toBe(1200);
+  });
+
+  it('a REVERSED sale return leaves A/R untouched (ledger and balances)', async () => {
+    await seedReturn({ total: 500, reversed: true });
+    // Baseline A/R is 1500. A live store-credit return would drop it to 1000;
+    // a reversed one must not appear at all — this is what makes the reversal
+    // actually fix the customer's balance rather than just flag the row.
+    const ledger = await reports.customerLedger(customerId);
+    expect(ledger.closingBalance).toBe(1500);
+    expect(ledger.entries.filter((e) => e.type === 'SALE_RETURN')).toHaveLength(0);
+    expect((await reports.allCustomerBalances())[0].balance).toBe(1500);
+  });
+
+  it('a REVERSED purchase return leaves A/P untouched (ledger and balances)', async () => {
+    const repo = ds.getRepository(PurchaseReturn);
+    await repo.save(
+      repo.create({
+        returnNo: 'PR-rev-1',
+        supplierId,
+        totalAmount: 900,
+        reversedAt: new Date(),
+        reversalReason: 'supplier refused it',
+        lines: [
+          ds.getRepository(PurchaseReturnItem).create({
+            itemId,
+            quantity: 3,
+            unitPrice: 300,
+            lineTotal: 900,
+          }),
+        ],
+      }),
+    );
+    // Baseline A/P is 6000; a live return would cut it to 5100.
+    const ledger = await reports.supplierLedger(supplierId);
+    expect(ledger.closingBalance).toBe(6000);
+    expect((await reports.allSupplierBalances())[0].balance).toBe(6000);
   });
 
   it('stockLedger filtered by itemId returns running balance', async () => {

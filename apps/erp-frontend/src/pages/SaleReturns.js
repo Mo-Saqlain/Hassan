@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
+import ReverseAction from '../components/ReverseAction';
 
 const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0, serials: '' });
 
@@ -318,6 +319,7 @@ export default function SaleReturns() {
               <th>Customer</th>
               <th className="right">Total</th>
               <th>Reason</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -328,6 +330,14 @@ export default function SaleReturns() {
                 <td>{r.customer?.name ?? '—'}</td>
                 <td className="right">{Number(r.totalAmount).toFixed(2)}</td>
                 <td>{r.reason ?? '—'}</td>
+                <td>
+                  <ReverseAction
+                    endpoint="/sale-returns"
+                    row={r}
+                    label={`sale return ${r.returnNo}`}
+                    onDone={reload}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
