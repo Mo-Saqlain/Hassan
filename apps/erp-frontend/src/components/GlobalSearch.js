@@ -1,49 +1,50 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import Icon from './Icon';
 
 /**
- * Global topbar search. Loads light-weight lists of customers, suppliers,
- * employees, accounts, and items into memory on first focus, then filters
- * them client-side as the user types. Up to 8 best matches show in a
- * popover; clicking one navigates to that entity's most useful page
- * (ledger for parties/accounts, master-data tile for items).
+ * Global topbar search — one box for everything the shop can look up.
  *
- * Filter matches against the entity's name and any short identifier
- * (code, sku, modelNo, barcode, phone). The customer/supplier/employee/
- * account codes are auto-generated (CUST-/SUPP-/EMP-/ACC-) so typing a
- * code like "CUST-000001" reliably finds the row.
+ * Queries `GET /search?q=` (debounced) and renders the grouped hits. It used to
+ * pull the whole customer, supplier, employee, account and item tables into
+ * memory on first focus and filter them in JS, which meant documents were
+ * unfindable — you could not search an invoice number anywhere in the app — and
+ * the payload grew with the catalogue. Matching in SQL covers every voucher type
+ * as well as the parties, and only the handful of hits crosses the wire.
+ *
+ * Two characters minimum, matching the endpoint.
  */
+
+/** Presentation per hit kind: tint, icon, and the label shown on the right. */
+const KIND_STYLE = {
+  customer: { tint: '#34d399', icon: 'user', label: 'Customer' },
+  supplier: { tint: '#fbbf24', icon: 'package', label: 'Supplier' },
+  employee: { tint: '#818cf8', icon: 'users', label: 'Employee' },
+  account: { tint: '#22d3ee', icon: 'bank', label: 'Account' },
+  item: { tint: '#a78bfa', icon: 'package', label: 'Item' },
+  sale: { tint: '#0078d4', icon: 'receipt', label: 'Sale' },
+  purchase: { tint: '#8764b8', icon: 'cart', label: 'Bill' },
+  saleReturn: { tint: '#fb923c', icon: 'transfer', label: 'Sale return' },
+  purchaseReturn: { tint: '#fb923c', icon: 'transfer', label: 'Purchase return' },
+  payment: { tint: '#107c10', icon: 'cash', label: 'Voucher' },
+  stockTransfer: { tint: '#6b7280', icon: 'transfer', label: 'Stock transfer' },
+  fundTransfer: { tint: '#6b7280', icon: 'transfer', label: 'Fund transfer' },
+  serviceTicket: { tint: '#f472b6', icon: 'bolt', label: 'Service' },
+  delivery: { tint: '#fbbf24', icon: 'truck', label: 'Delivery' },
+};
+
+const fallbackStyle = { tint: '#6b7280', icon: 'search', label: '' };
+
 export default function GlobalSearch() {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
-  const [data, setData] = useState(null); // {customers, suppliers, employees, accounts, items} or null
-  const [loadError, setLoadError] = useState(null);
+  const [hits, setHits] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
-
-  const loadData = () => {
-    if (data || loadError) return;
-    Promise.all([
-      api.get('/customers'),
-      api.get('/suppliers'),
-      api.get('/employees'),
-      api.get('/accounts'),
-      api.get('/items'),
-    ])
-      .then(([c, s, e, a, i]) => {
-        setData({
-          customers: c.data,
-          suppliers: s.data,
-          employees: e.data,
-          accounts: a.data,
-          items: i.data,
-        });
-      })
-      .catch((err) => setLoadError(err.uiMessage ?? 'Failed to load'));
-  };
 
   useEffect(() => {
     const handler = (ev) => {
@@ -55,100 +56,61 @@ export default function GlobalSearch() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const results = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term || !data) return [];
-    const match = (row, fields) =>
-      fields.some((f) => row[f] != null && String(row[f]).toLowerCase().includes(term));
+  // Debounced server search. The timer is cleared on every keystroke so a fast
+  // typist issues one request, not one per character.
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) {
+      setHits([]);
+      setError(null);
+      setBusy(false);
+      return undefined;
+    }
+    setBusy(true);
+    const timer = setTimeout(() => {
+      let cancelled = false;
+      api
+        .get('/search', { params: { q: term } })
+        .then((res) => {
+          if (cancelled) return;
+          // Flatten the groups into one ranked list, keeping the group order the
+          // server chose (parties first, then documents).
+          const flat = [];
+          for (const group of res.data?.groups ?? []) {
+            for (const hit of group.hits) flat.push(hit);
+          }
+          setHits(flat.slice(0, 12));
+          setError(null);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err.uiMessage ?? 'Search failed');
+        })
+        .finally(() => {
+          if (!cancelled) setBusy(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-    const hits = [];
-    for (const c of data.customers) {
-      if (match(c, ['code', 'name', 'phone', 'email'])) {
-        hits.push({
-          kind: 'Customer',
-          tint: '#34d399',
-          icon: 'user',
-          code: c.code,
-          name: c.name,
-          sub: c.phone ?? c.email ?? '',
-          to: `/customer-ledger/${c.id}`,
-        });
-      }
-    }
-    for (const s of data.suppliers) {
-      if (match(s, ['code', 'name', 'phone', 'email'])) {
-        hits.push({
-          kind: 'Supplier',
-          tint: '#fbbf24',
-          icon: 'package',
-          code: s.code,
-          name: s.name,
-          sub: s.phone ?? s.email ?? '',
-          to: `/supplier-ledger/${s.id}`,
-        });
-      }
-    }
-    for (const e of data.employees) {
-      if (match(e, ['code', 'name', 'phone', 'email', 'role'])) {
-        hits.push({
-          kind: 'Employee',
-          tint: '#818cf8',
-          icon: 'users',
-          code: e.code,
-          name: e.name,
-          sub: e.role ?? e.phone ?? '',
-          to: `/employee-ledger/${e.id}`,
-        });
-      }
-    }
-    for (const a of data.accounts) {
-      if (match(a, ['code', 'name', 'bank', 'accountNumber'])) {
-        hits.push({
-          kind: 'Account',
-          tint: '#22d3ee',
-          icon: 'bank',
-          code: a.code,
-          name: a.name,
-          sub: a.type ?? '',
-          to: `/account-ledger/${a.id}`,
-        });
-      }
-    }
-    for (const it of data.items) {
-      if (match(it, ['sku', 'barcode', 'modelNo', 'name'])) {
-        hits.push({
-          kind: 'Item',
-          tint: '#a78bfa',
-          icon: 'package',
-          code: it.sku,
-          name: it.name,
-          sub: it.modelNo ?? it.barcode ?? '',
-          to: `/items`,
-        });
-      }
-    }
-    return hits.slice(0, 8);
-  }, [query, data]);
-
-  const onFocus = () => {
-    loadData();
-    setOpen(true);
-  };
-
-  const onSelect = (r) => {
+  const onSelect = (hit) => {
     setOpen(false);
     setQuery('');
-    navigate(r.to);
+    if (hit.route) navigate(hit.route);
   };
 
   const onKeyDown = (e) => {
     if (e.key === 'Escape') {
       setOpen(false);
       inputRef.current?.blur();
-    } else if (e.key === 'Enter' && results[0]) {
-      onSelect(results[0]);
+    } else if (e.key === 'Enter' && hits[0]) {
+      onSelect(hits[0]);
     }
   };
+
+  const term = query.trim();
 
   return (
     <div className="search" ref={wrapRef}>
@@ -156,48 +118,73 @@ export default function GlobalSearch() {
       <input
         ref={inputRef}
         className="input"
-        placeholder="Search by code, name, phone, SKU…"
+        placeholder="Search invoice, bill, voucher, name, phone, SKU…"
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);
         }}
-        onFocus={onFocus}
+        onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
       />
-      {open && query.trim() && (
+      {open && term && (
         <div className="search-results">
-          {loadError && (
-            <div className="search-empty" style={{ color: 'var(--text-danger, #f87171)' }}>
-              {loadError}
+          {error && (
+            <div
+              className="search-empty"
+              style={{ color: 'var(--text-danger, #f87171)' }}
+            >
+              {error}
             </div>
           )}
-          {!loadError && !data && (
-            <div className="search-empty">Loading…</div>
+          {!error && term.length < 2 && (
+            <div className="search-empty">Type at least 2 characters.</div>
           )}
-          {data && results.length === 0 && (
+          {!error && term.length >= 2 && busy && hits.length === 0 && (
+            <div className="search-empty">Searching…</div>
+          )}
+          {!error && term.length >= 2 && !busy && hits.length === 0 && (
             <div className="search-empty">No matches.</div>
           )}
-          {results.map((r, i) => (
-            <button
-              key={`${r.kind}-${r.code ?? r.name}-${i}`}
-              type="button"
-              className="search-result"
-              onClick={() => onSelect(r)}
-            >
-              <span className="search-result-icon" style={{ background: r.tint }}>
-                <Icon name={r.icon} size={13} />
-              </span>
-              <span className="search-result-body">
-                <span className="search-result-name">
-                  {r.name}
-                  {r.code && <code className="search-result-code">{r.code}</code>}
+          {hits.map((hit, i) => {
+            const style = KIND_STYLE[hit.kind] ?? fallbackStyle;
+            return (
+              <button
+                key={`${hit.kind}-${hit.id}-${i}`}
+                type="button"
+                className="search-result"
+                onClick={() => onSelect(hit)}
+              >
+                <span
+                  className="search-result-icon"
+                  style={{ background: style.tint }}
+                >
+                  <Icon name={style.icon} size={13} />
                 </span>
-                {r.sub && <span className="search-result-sub">{r.sub}</span>}
-              </span>
-              <span className="search-result-kind">{r.kind}</span>
-            </button>
-          ))}
+                <span className="search-result-body">
+                  <span className="search-result-name">
+                    {hit.label}
+                    {hit.reversed && (
+                      <code className="search-result-code">reversed</code>
+                    )}
+                  </span>
+                  {(hit.sub || hit.amount != null) && (
+                    <span className="search-result-sub">
+                      {[
+                        hit.sub,
+                        hit.amount != null && hit.amount !== 0
+                          ? `Rs ${Number(hit.amount).toLocaleString('en-PK')}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  )}
+                </span>
+                <span className="search-result-kind">{style.label}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

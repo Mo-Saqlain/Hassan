@@ -16,6 +16,12 @@ import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
 import { RecostService } from '../costing/recost.service';
+import {
+  applySearch,
+  ListQuery,
+  Page,
+  paginate,
+} from '../../common/search';
 import { PeriodsService } from '../periods/periods.service';
 import { SaleReturn } from '../returns/entities/sale-return.entity';
 import { ServiceTicket } from '../service-tickets/entities/service-ticket.entity';
@@ -659,6 +665,32 @@ export class SalesService {
 
   private async nextInvoiceNo(repo: Repository<Sale>): Promise<string> {
     return this.sequences.next('INV', () => repo.count());
+  }
+
+  /**
+   * Searchable, paged sale history.
+   *
+   * `findAll()` below returns every sale with its lines and eager relations and
+   * no limit, which is what the history page still uses. That is fine for a shop
+   * with a few hundred invoices and steadily less fine after that, and it forced
+   * the UI to filter client-side — so it could only search what it had already
+   * downloaded. This is the endpoint to move that page onto.
+   */
+  async search(query: ListQuery): Promise<Page<Sale>> {
+    const qb = this.sales
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.customer', 'customer')
+      .orderBy('s.createdAt', 'DESC');
+    return paginate(
+      applySearch(qb, query.search, [
+        's.invoice_no',
+        's.payment_method',
+        's.notes',
+        'customer.name',
+        'customer.phone',
+      ]),
+      query,
+    );
   }
 
   findAll() {

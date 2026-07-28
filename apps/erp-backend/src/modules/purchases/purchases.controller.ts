@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { PurchasesService } from './purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
@@ -30,6 +31,19 @@ export class PurchasesController {
   @Get()
   findAll() {
     return this.service.findAll();
+  }
+
+  /**
+   * Searchable, paged history. Declared above the `:id` route so the literal
+   * segment isn't eaten by the UUID param.
+   */
+  @Get('search')
+  search(
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.service.search({ search, limit, offset });
   }
 
   @Get(':id')

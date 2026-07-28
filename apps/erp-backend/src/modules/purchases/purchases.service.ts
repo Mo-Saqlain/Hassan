@@ -20,6 +20,12 @@ import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
 import { RecostService } from '../costing/recost.service';
+import {
+  applySearch,
+  ListQuery,
+  Page,
+  paginate,
+} from '../../common/search';
 import { PurchaseReturn } from '../returns/entities/purchase-return.entity';
 
 @Injectable()
@@ -385,6 +391,24 @@ export class PurchasesService {
 
   private async nextBillNo(repo: Repository<Purchase>): Promise<string> {
     return this.sequences.next('BILL', () => repo.count());
+  }
+
+  /** Searchable, paged bill history — see SalesService.search for the rationale. */
+  async search(query: ListQuery): Promise<Page<Purchase>> {
+    const qb = this.purchases
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.supplier', 'supplier')
+      .orderBy('p.createdAt', 'DESC');
+    return paginate(
+      applySearch(qb, query.search, [
+        'p.bill_no',
+        'p.payment_method',
+        'p.notes',
+        'supplier.name',
+        'supplier.phone',
+      ]),
+      query,
+    );
   }
 
   findAll() {

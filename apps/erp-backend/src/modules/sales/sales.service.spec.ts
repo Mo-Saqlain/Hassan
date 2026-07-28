@@ -816,6 +816,67 @@ describe('SalesService', () => {
     });
   });
 
+  // ─── searchable, paged history ────────────────────────────────────────────
+
+  describe('search', () => {
+    it('matches invoice number, payment method and customer, and reports the total', async () => {
+      const customer = await ds.getRepository(Customer).save(
+        ds.getRepository(Customer).create({
+          name: 'Zubair Khan', phone: '03009998888',
+          creditEnabled: true, creditLimit: 500000,
+        }),
+      );
+      const withCustomer = await service.create({
+        customerId: customer.id,
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+        paymentMethod: 'CREDIT',
+        paidAmount: 0,
+      });
+      await service.create({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+        paymentMethod: 'CASH',
+      });
+
+      // By invoice number.
+      const byNo = await service.search({ search: withCustomer.invoiceNo });
+      expect(byNo.total).toBe(1);
+      expect(byNo.rows[0].id).toBe(withCustomer.id);
+
+      // By customer name — a join, not a column on the sale.
+      const byName = await service.search({ search: 'zubair' });
+      expect(byName.total).toBe(1);
+
+      // By payment method.
+      expect((await service.search({ search: 'CREDIT' })).total).toBe(1);
+
+      // No term = everything, still paged.
+      const all = await service.search({});
+      expect(all.total).toBe(2);
+      expect(all.limit).toBe(100);
+    });
+
+    it('pages, and the total describes the whole match set not the page', async () => {
+      for (let i = 0; i < 5; i += 1) {
+        await service.create({ lines: [{ itemId, quantity: 1, unitPrice: 100 }] });
+      }
+      const first = await service.search({ limit: 2 });
+      expect(first.rows).toHaveLength(2);
+      expect(first.total).toBe(5);
+
+      const second = await service.search({ limit: 2, offset: 2 });
+      expect(second.rows).toHaveLength(2);
+      expect(second.rows[0].id).not.toBe(first.rows[0].id);
+
+      const last = await service.search({ limit: 2, offset: 4 });
+      expect(last.rows).toHaveLength(1);
+    });
+
+    it('caps a caller-supplied limit rather than trusting it', async () => {
+      const res = await service.search({ limit: 99999 });
+      expect(res.limit).toBe(500);
+    });
+  });
+
   // ─── editing ──────────────────────────────────────────────────────────────
 
   describe('edit', () => {

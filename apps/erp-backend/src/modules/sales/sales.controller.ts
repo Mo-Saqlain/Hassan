@@ -55,6 +55,19 @@ export class SalesController {
    * dashboard widget. Query params: `withinDays` (default 7), `status`
    * (default 'PENDING').
    */
+  /**
+   * Searchable, paged history. Declared above the `:id` route so the literal
+   * segment isn't eaten by the UUID param.
+   */
+  @Get('search')
+  search(
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.service.search({ search, limit, offset });
+  }
+
   @Get('deferred/upcoming')
   upcomingDeferred() {
     return this.service.upcomingDeferred();
