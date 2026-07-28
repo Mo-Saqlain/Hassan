@@ -13,6 +13,8 @@ const empty = {
   categoryIds: [],
   purchasePrice: '',
   salePrice: '',
+  openingAvgCost: '',
+  openingCostedQty: '',
   unit: 'pcs',
   minStockLevel: '',
   isActive: true,
@@ -67,6 +69,8 @@ export default function ItemsPanel() {
           brandId: row.brandId ?? '',
           categoryIds: (row.categories ?? []).map((c) => c.id),
           purchasePrice: row.purchasePrice ?? '',
+          openingAvgCost: row.openingAvgCost ?? '',
+          openingCostedQty: row.openingCostedQty ?? '',
           salePrice: row.salePrice ?? '',
           unit: row.unit ?? 'pcs',
           minStockLevel: row.minStockLevel ?? '',
@@ -116,6 +120,10 @@ export default function ItemsPanel() {
       brandId: form.brandId || undefined,
       categoryIds: form.categoryIds,
       purchasePrice: form.purchasePrice === '' ? undefined : Number(form.purchasePrice),
+      openingAvgCost:
+        form.openingAvgCost === '' ? undefined : Number(form.openingAvgCost),
+      openingCostedQty:
+        form.openingCostedQty === '' ? undefined : Number(form.openingCostedQty),
       salePrice: form.salePrice === '' ? undefined : Number(form.salePrice),
       unit: form.unit || undefined,
       minStockLevel:
@@ -279,6 +287,37 @@ export default function ItemsPanel() {
                 step="any"
                 value={form.salePrice}
                 onChange={(e) => setForm({ ...form, salePrice: e.target.value })}
+              />
+            </div>
+            {/* Opening cost basis — for stock carried in from previous software
+                or an opening count, which has no purchase bill behind it.
+                Weighted-average cost is derived by replaying documents, so a
+                figure written straight into avgCost has nothing to replay and is
+                lost; these two fields are where the replay starts. */}
+            <div>
+              <label>Opening cost / unit</label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={form.openingAvgCost}
+                onChange={(e) =>
+                  setForm({ ...form, openingAvgCost: e.target.value })
+                }
+                placeholder="cost of stock carried in"
+              />
+            </div>
+            <div>
+              <label>Opening units at that cost</label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={form.openingCostedQty}
+                onChange={(e) =>
+                  setForm({ ...form, openingCostedQty: e.target.value })
+                }
+                placeholder="0"
               />
             </div>
             <div>

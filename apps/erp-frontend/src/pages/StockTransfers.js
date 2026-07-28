@@ -4,6 +4,7 @@ import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../components/ExportButtons';
 import ReverseAction from '../components/ReverseAction';
+import EditVoucherBar from '../components/EditVoucherBar';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -13,6 +14,8 @@ export default function StockTransfers() {
   const { data: items } = useResource('/items');
 
   const [show, setShow] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [reason, setReason] = useState('');
   const [form, setForm] = useState(blank());
   const [submitErr, setSubmitErr] = useState(null);
 
@@ -35,6 +38,31 @@ export default function StockTransfers() {
     setForm({ ...form, lines: form.lines.filter((_, i) => i !== idx) });
   };
 
+  const startEdit = (t) => {
+    setEditing(t);
+    setReason('');
+    setSubmitErr(null);
+    setForm({
+      ...blank(),
+      fromStoreId: t.fromStoreId ?? '',
+      toStoreId: t.toStoreId ?? '',
+      transferDate: t.transferDate ?? todayStr(),
+      notes: t.notes ?? '',
+      lines: (t.lines ?? []).map((ln) => ({
+        itemId: ln.itemId,
+        quantity: String(ln.quantity),
+      })),
+    });
+    setShow(true);
+  };
+
+  const cancel = () => {
+    setShow(false);
+    setEditing(null);
+    setReason('');
+    setForm(blank());
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmitErr(null);
@@ -49,19 +77,25 @@ export default function StockTransfers() {
       setSubmitErr('Add at least one item with quantity');
       return;
     }
+    const payload = {
+      fromStoreId: form.fromStoreId,
+      toStoreId: form.toStoreId,
+      transferDate: form.transferDate,
+      notes: form.notes || undefined,
+      lines: validLines.map((l) => ({
+        itemId: l.itemId,
+        quantity: Number(l.quantity),
+      })),
+    };
     try {
-      await api.post('/stock-transfers', {
-        fromStoreId: form.fromStoreId,
-        toStoreId: form.toStoreId,
-        transferDate: form.transferDate,
-        notes: form.notes || undefined,
-        lines: validLines.map((l) => ({
-          itemId: l.itemId,
-          quantity: Number(l.quantity),
-        })),
-      });
-      setShow(false);
-      setForm(blank());
+      if (editing) {
+        // The original movement pair is mirrored back and the corrected pair
+        // booked, server-side, in one transaction.
+        await api.patch(`/stock-transfers/${editing.id}`, { ...payload, reason });
+      } else {
+        await api.post('/stock-transfers', payload);
+      }
+      cancel();
       reload();
     } catch (err) {
       setSubmitErr(err.uiMessage ?? 'Save failed');
@@ -105,7 +139,18 @@ export default function StockTransfers() {
 
       {show && (
         <form className="card" onSubmit={submit}>
-          <h3 style={{ marginTop: 0 }}>New stock transfer</h3>
+          <h3 style={{ marginTop: 0 }}>
+            {editing ? `Correct ${editing.transferNo}` : 'New stock transfer'}
+          </h3>
+          {editing && (
+            <EditVoucherBar
+              label={editing.transferNo}
+              reason={reason}
+              onReason={setReason}
+              onCancel={cancel}
+              editCount={Number(editing.editCount ?? 0)}
+            />
+          )}
           {submitErr && (
             <div className="chip chip-danger" style={{ marginBottom: 10 }}>
               {submitErr}
@@ -205,7 +250,7 @@ export default function StockTransfers() {
 
           <div style={{ marginTop: 12 }}>
             <button type="submit" className="btn btn-primary">Save transfer</button>{' '}
-            <button type="button" className="btn" onClick={() => setShow(false)}>Cancel</button>
+            <button type="button" className="btn" onClick={cancel}>Cancel</button>
           </div>
         </form>
       )}
@@ -238,6 +283,17 @@ export default function StockTransfers() {
                   <td className="num">{(t.lines ?? []).length}</td>
                   <td className="muted" style={{ fontSize: 12 }}>{t.notes ?? '—'}</td>
                   <td>
+                    {!t.reversedAt && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => startEdit(t)}
+                        >
+                          Edit
+                        </button>{' '}
+                      </>
+                    )}
                     <ReverseAction
                       endpoint="/stock-transfers"
                       row={t}

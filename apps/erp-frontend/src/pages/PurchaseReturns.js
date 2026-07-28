@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from '../components/ReverseAction';
+import EditVoucherBar from '../components/EditVoucherBar';
 
 const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0 });
 
@@ -23,6 +24,8 @@ export default function PurchaseReturns() {
   });
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm());
+  const [editing, setEditing] = useState(null);
+  const [reason, setReason] = useState('');
   const [submitError, setSubmitError] = useState(null);
 
   const isDirty = useMemo(
@@ -57,6 +60,33 @@ export default function PurchaseReturns() {
     updateLine(idx, { itemId, unitPrice: it ? Number(it.purchasePrice) : 0 });
   };
 
+  const startEdit = (r) => {
+    setEditing(r);
+    setReason('');
+    setSubmitError(null);
+    setForm({
+      ...blankForm(),
+      supplierId: r.supplierId ?? '',
+      storeId: r.storeId ?? '',
+      purchaseId: r.purchaseId ?? '',
+      reason: r.reason ?? '',
+      disposition: r.disposition ?? 'STOCK',
+      lines: (r.lines ?? []).map((ln) => ({
+        itemId: ln.itemId,
+        quantity: String(ln.quantity),
+        unitPrice: String(ln.unitPrice),
+      })),
+    });
+    setShowForm(true);
+  };
+
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditing(null);
+    setReason('');
+    setForm(blankForm());
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmitError(null);
@@ -78,9 +108,15 @@ export default function PurchaseReturns() {
       return;
     }
     try {
-      await api.post('/purchase-returns', payload);
-      setShowForm(false);
-      setForm(blankForm());
+      if (editing) {
+        await api.patch(`/purchase-returns/${editing.id}`, {
+          ...payload,
+          editReason: reason,
+        });
+      } else {
+        await api.post('/purchase-returns', payload);
+      }
+      cancelForm();
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');
@@ -100,7 +136,18 @@ export default function PurchaseReturns() {
 
       {showForm && (
         <form className="card" onSubmit={submit}>
-          <h3 style={{ marginTop: 0 }}>New Purchase Return</h3>
+          <h3 style={{ marginTop: 0 }}>
+            {editing ? `Correct ${editing.returnNo}` : 'New Purchase Return'}
+          </h3>
+          {editing && (
+            <EditVoucherBar
+              label={editing.returnNo}
+              reason={reason}
+              onReason={setReason}
+              onCancel={cancelForm}
+              editCount={Number(editing.editCount ?? 0)}
+            />
+          )}
           {submitError && <div className="alert alert-error">{submitError}</div>}
           <div className="form-row">
             <div>
@@ -232,7 +279,7 @@ export default function PurchaseReturns() {
           <button type="submit" className="btn btn-primary">
             Save Return
           </button>{' '}
-          <button type="button" className="btn" onClick={() => setShowForm(false)}>
+          <button type="button" className="btn" onClick={cancelForm}>
             Cancel
           </button>
         </form>
@@ -263,6 +310,17 @@ export default function PurchaseReturns() {
                 <td className="right">{Number(r.totalAmount).toFixed(2)}</td>
                 <td>{r.reason ?? '—'}</td>
                 <td>
+                  {!r.reversedAt && !r.linkedSaleReturnId && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => startEdit(r)}
+                      >
+                        Edit
+                      </button>{' '}
+                    </>
+                  )}
                   <ReverseAction
                     endpoint="/purchase-returns"
                     row={r}

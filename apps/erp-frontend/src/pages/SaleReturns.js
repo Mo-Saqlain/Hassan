@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from '../components/ReverseAction';
+import EditVoucherBar from '../components/EditVoucherBar';
 
 const emptyLine = () => ({ itemId: '', quantity: 1, unitPrice: 0, serials: '' });
 
@@ -24,6 +25,8 @@ export default function SaleReturns() {
   });
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm());
+  const [editing, setEditing] = useState(null);
+  const [reason, setReason] = useState('');
   const [submitError, setSubmitError] = useState(null);
 
   const isDirty = useMemo(
@@ -56,6 +59,36 @@ export default function SaleReturns() {
   const onItemChange = (idx, itemId) => {
     const it = itemById.get(itemId);
     updateLine(idx, { itemId, unitPrice: it ? Number(it.salePrice) : 0 });
+  };
+
+  const startEdit = (r) => {
+    setEditing(r);
+    setReason('');
+    setSubmitError(null);
+    setForm({
+      ...blankForm(),
+      customerId: r.customerId ?? '',
+      storeId: r.storeId ?? '',
+      saleId: r.saleId ?? '',
+      reason: r.reason ?? '',
+      disposition: r.disposition ?? 'RESTOCK',
+      refundAccountId: r.refundAccountId ?? '',
+      refundAmount: r.refundAmount != null ? String(r.refundAmount) : '',
+      lines: (r.lines ?? []).map((ln) => ({
+        itemId: ln.itemId,
+        quantity: String(ln.quantity),
+        unitPrice: String(ln.unitPrice),
+        serials: (ln.serials ?? []).join('\n'),
+      })),
+    });
+    setShowForm(true);
+  };
+
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditing(null);
+    setReason('');
+    setForm(blankForm());
   };
 
   const submit = async (e) => {
@@ -91,9 +124,18 @@ export default function SaleReturns() {
       return;
     }
     try {
-      await api.post('/sale-returns', payload);
-      setShowForm(false);
-      setForm(blankForm());
+      if (editing) {
+        // Correction: same return number and row. `editReason` rather than
+        // `reason` because the return already has a reason of its own — why the
+        // customer brought the goods back, which is a different fact.
+        await api.patch(`/sale-returns/${editing.id}`, {
+          ...payload,
+          editReason: reason,
+        });
+      } else {
+        await api.post('/sale-returns', payload);
+      }
+      cancelForm();
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');
@@ -113,7 +155,18 @@ export default function SaleReturns() {
 
       {showForm && (
         <form className="card" onSubmit={submit}>
-          <h3 style={{ marginTop: 0 }}>New Sale Return</h3>
+          <h3 style={{ marginTop: 0 }}>
+            {editing ? `Correct ${editing.returnNo}` : 'New Sale Return'}
+          </h3>
+          {editing && (
+            <EditVoucherBar
+              label={editing.returnNo}
+              reason={reason}
+              onReason={setReason}
+              onCancel={cancelForm}
+              editCount={Number(editing.editCount ?? 0)}
+            />
+          )}
           {submitError && <div className="alert alert-error">{submitError}</div>}
           <div className="form-row">
             <div>
@@ -300,7 +353,7 @@ export default function SaleReturns() {
           <button type="submit" className="btn btn-primary">
             Save Return
           </button>{' '}
-          <button type="button" className="btn" onClick={() => setShowForm(false)}>
+          <button type="button" className="btn" onClick={cancelForm}>
             Cancel
           </button>
         </form>
@@ -331,6 +384,20 @@ export default function SaleReturns() {
                 <td className="right">{Number(r.totalAmount).toFixed(2)}</td>
                 <td>{r.reason ?? '—'}</td>
                 <td>
+                  {/* An exchange give-back is priced against its replacement
+                      sale, so it is corrected by reversing the exchange, not
+                      by editing this leg — the API refuses it either way. */}
+                  {!r.reversedAt && !r.replacementSaleId && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => startEdit(r)}
+                      >
+                        Edit
+                      </button>{' '}
+                    </>
+                  )}
                   <ReverseAction
                     endpoint="/sale-returns"
                     row={r}

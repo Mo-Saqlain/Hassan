@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from '../components/ReverseAction';
+import EditVoucherBar from '../components/EditVoucherBar';
 
 /**
  * Shop operating expenses (tea, rent, utilities, transport, …). Each expense
@@ -44,6 +45,8 @@ export default function Expenses() {
   );
 
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [reason, setReason] = useState('');
   const blank = () => ({
     expenseAccountId: '',
     accountId: '',
@@ -66,19 +69,46 @@ export default function Expenses() {
     setShowForm(true);
   };
 
+  const startEdit = (v) => {
+    setEditing(v);
+    setReason('');
+    setSubmitError(null);
+    setForm({
+      ...blank(),
+      expenseAccountId: v.expenseAccountId ?? '',
+      accountId: v.accountId ?? '',
+      amount: String(v.amount ?? ''),
+      notes: v.notes ?? '',
+    });
+    setShowForm(true);
+  };
+
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditing(null);
+    setReason('');
+    setForm(blank());
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmitError(null);
+    const payload = {
+      direction: 'OUT',
+      expenseAccountId: form.expenseAccountId,
+      accountId: form.accountId,
+      amount: Number(form.amount),
+      notes: form.notes || undefined,
+    };
     try {
-      await api.post('/payments', {
-        direction: 'OUT',
-        expenseAccountId: form.expenseAccountId,
-        accountId: form.accountId,
-        amount: Number(form.amount),
-        notes: form.notes || undefined,
-      });
-      setShowForm(false);
-      setForm(blank());
+      if (editing) {
+        // Same voucher number; the old journal entry is balanced out and the
+        // corrected one posted server-side.
+        await api.patch(`/payments/${editing.id}`, { ...payload, reason });
+      } else {
+        await api.post('/payments', payload);
+      }
+      cancelForm();
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');
@@ -113,7 +143,18 @@ export default function Expenses() {
 
       {showForm && (
         <form className="card" onSubmit={submit}>
-          <h3 style={{ marginTop: 0 }}>New Expense</h3>
+          <h3 style={{ marginTop: 0 }}>
+            {editing ? `Correct ${editing.voucherNo}` : 'New Expense'}
+          </h3>
+          {editing && (
+            <EditVoucherBar
+              label={editing.voucherNo}
+              reason={reason}
+              onReason={setReason}
+              onCancel={cancelForm}
+              editCount={Number(editing.editCount ?? 0)}
+            />
+          )}
           {submitError && <div className="alert alert-error">{submitError}</div>}
           <div className="form-row">
             <div>
@@ -170,13 +211,9 @@ export default function Expenses() {
           </div>
           <div style={{ marginTop: 12 }}>
             <button type="submit" className="btn btn-primary">
-              Save Expense
+              {editing ? 'Save correction' : 'Save Expense'}
             </button>{' '}
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setShowForm(false)}
-            >
+            <button type="button" className="btn" onClick={cancelForm}>
               Cancel
             </button>
           </div>
@@ -219,6 +256,17 @@ export default function Expenses() {
                   <td className="right mono">{Number(v.amount).toFixed(2)}</td>
                   <td>{v.notes ?? ''}</td>
                   <td className="right">
+                    {!v.reversedAt && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => startEdit(v)}
+                        >
+                          Edit
+                        </button>{' '}
+                      </>
+                    )}
                     <ReverseAction
                       endpoint="/payments"
                       row={v}

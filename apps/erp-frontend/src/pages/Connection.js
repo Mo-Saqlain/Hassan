@@ -21,6 +21,7 @@ export default function Connection() {
 
   const [status, setStatus] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [mirroring, setMirroring] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
 
   const check = useCallback(async () => {
@@ -69,6 +70,43 @@ export default function Connection() {
       setSyncMsg({ tone: 'err', text: e.uiMessage ?? 'Sync request failed.' });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  /**
+   * Queue the whole dataset for push. This is how a cloud that has never been
+   * populated gets filled: ordinary sync only carries what changes from now on,
+   * so a Supabase project set up after the shop started running would otherwise
+   * hold nothing but its schema. Idempotent — every event is an upsert — so
+   * running it twice costs bandwidth and nothing else.
+   */
+  const populateCloud = async () => {
+    if (
+      !window.confirm(
+        'Queue every record for the cloud?\n\nThis is normally needed once, when ' +
+          'setting the cloud up. It queues one event per row, then you press ' +
+          '"Sync now" to push them. Safe to repeat.',
+      )
+    ) {
+      return;
+    }
+    setMirroring(true);
+    setSyncMsg(null);
+    try {
+      const r = await api.post('/sync/mirror-all');
+      const queued = r.data?.queued ?? 0;
+      setSyncMsg({
+        tone: queued > 0 ? 'ok' : 'warn',
+        text:
+          queued > 0
+            ? `Queued ${queued} record(s). Press "Sync now" to push them to the cloud.`
+            : 'Nothing to queue — there are no records yet.',
+      });
+      loadStatus();
+    } catch (e) {
+      setSyncMsg({ tone: 'err', text: e.uiMessage ?? 'Could not queue records.' });
+    } finally {
+      setMirroring(false);
     }
   };
 
@@ -132,6 +170,15 @@ export default function Connection() {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <h3 style={{ margin: 0 }}>Cloud sync</h3>
+          <div style={{ display: 'inline-flex', gap: 8 }}>
+          <button
+            className="btn"
+            onClick={populateCloud}
+            disabled={mirroring || (status != null && !status.cloudConfigured)}
+            title="Queue every existing record for the cloud — needed once when setting the cloud up"
+          >
+            {mirroring ? 'Queueing…' : 'Populate cloud'}
+          </button>
           <button
             className="btn btn-primary"
             onClick={syncNow}
@@ -144,6 +191,7 @@ export default function Connection() {
           >
             {syncing ? 'Syncing…' : 'Sync now'}
           </button>
+          </div>
         </div>
 
         {status && (

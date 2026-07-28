@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from './ReverseAction';
+import EditVoucherBar from './EditVoucherBar';
 
 /**
  * direction = 'IN' (Receipt from customer) or 'OUT' (Payment to supplier)
@@ -35,6 +36,8 @@ export default function VoucherPage({ direction }) {
   const parties = useCustomer ? customerBalances : supplierBalances;
 
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [reason, setReason] = useState('');
   const blank = () => ({
     accountId: '',
     customerId: '',
@@ -57,6 +60,31 @@ export default function VoucherPage({ direction }) {
     setForm((f) => ({ ...f, customerId: '', supplierId: '' }));
   };
 
+  const startEdit = (v) => {
+    setEditing(v);
+    setReason('');
+    setSubmitError(null);
+    // A voucher paid to a customer is an OUT with customerId set; switch the
+    // Pay-to toggle to match what's actually on the row being corrected.
+    if (direction === 'OUT') setPayTo(v.customerId ? 'customer' : 'supplier');
+    setForm({
+      ...blank(),
+      accountId: v.accountId ?? '',
+      customerId: v.customerId ?? '',
+      supplierId: v.supplierId ?? '',
+      amount: String(v.amount ?? ''),
+      notes: v.notes ?? '',
+    });
+    setShowForm(true);
+  };
+
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditing(null);
+    setReason('');
+    setForm(blank());
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmitError(null);
@@ -68,9 +96,12 @@ export default function VoucherPage({ direction }) {
       notes: form.notes || undefined,
     };
     try {
-      await api.post('/payments', payload);
-      setShowForm(false);
-      setForm(blank());
+      if (editing) {
+        await api.patch(`/payments/${editing.id}`, { ...payload, reason });
+      } else {
+        await api.post('/payments', payload);
+      }
+      cancelForm();
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');
@@ -91,8 +122,19 @@ export default function VoucherPage({ direction }) {
       {showForm && (
         <form className="card" onSubmit={submit}>
           <h3 style={{ marginTop: 0 }}>
-            New {direction === 'IN' ? 'Receipt' : 'Payment'} Voucher
+            {editing
+              ? `Correct ${editing.voucherNo}`
+              : `New ${direction === 'IN' ? 'Receipt' : 'Payment'} Voucher`}
           </h3>
+          {editing && (
+            <EditVoucherBar
+              label={editing.voucherNo}
+              reason={reason}
+              onReason={setReason}
+              onCancel={cancelForm}
+              editCount={Number(editing.editCount ?? 0)}
+            />
+          )}
           {submitError && <div className="alert alert-error">{submitError}</div>}
           {direction === 'OUT' && (
             <div style={{ marginBottom: 12 }}>
@@ -215,7 +257,7 @@ export default function VoucherPage({ direction }) {
             <button
               type="button"
               className="btn"
-              onClick={() => setShowForm(false)}
+              onClick={cancelForm}
             >
               Cancel
             </button>
@@ -250,6 +292,20 @@ export default function VoucherPage({ direction }) {
                 <td className="right">{Number(v.amount).toFixed(2)}</td>
                 <td>{v.notes ?? ''}</td>
                 <td className="right">
+                  {/* A settlement receipt belongs to a sale's instalment
+                      schedule — the API refuses to edit it here, so don't
+                      offer the button. */}
+                  {!v.reversedAt && v.referenceType !== 'SALE_COMMITMENT' && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => startEdit(v)}
+                      >
+                        Edit
+                      </button>{' '}
+                    </>
+                  )}
                   <ReverseAction
                     endpoint="/payments"
                     row={v}

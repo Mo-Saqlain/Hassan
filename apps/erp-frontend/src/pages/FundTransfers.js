@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from '../components/ReverseAction';
+import EditVoucherBar from '../components/EditVoucherBar';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -15,12 +16,36 @@ export default function FundTransfers() {
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(blank());
   const [submitErr, setSubmitErr] = useState(null);
+  // The transfer being corrected, or null when entering a new one.
+  const [editing, setEditing] = useState(null);
+  const [reason, setReason] = useState('');
 
   const isDirty = useMemo(
     () => show && JSON.stringify(form) !== JSON.stringify(blank()),
     [show, form],
   );
   useUnsavedChangesPrompt(isDirty);
+
+  const startEdit = (t) => {
+    setEditing(t);
+    setReason('');
+    setSubmitErr(null);
+    setForm({
+      transferDate: t.transferDate ?? todayStr(),
+      fromAccountId: t.fromAccountId ?? '',
+      toAccountId: t.toAccountId ?? '',
+      amount: String(t.amount ?? ''),
+      notes: t.notes ?? '',
+    });
+    setShow(true);
+  };
+
+  const cancel = () => {
+    setShow(false);
+    setEditing(null);
+    setReason('');
+    setForm(blank());
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -29,16 +54,22 @@ export default function FundTransfers() {
       setSubmitErr('Source and destination must differ');
       return;
     }
+    const payload = {
+      transferDate: form.transferDate,
+      fromAccountId: form.fromAccountId,
+      toAccountId: form.toAccountId,
+      amount: Number(form.amount),
+      notes: form.notes || undefined,
+    };
     try {
-      await api.post('/fund-transfers', {
-        transferDate: form.transferDate,
-        fromAccountId: form.fromAccountId,
-        toAccountId: form.toAccountId,
-        amount: Number(form.amount),
-        notes: form.notes || undefined,
-      });
-      setShow(false);
-      setForm(blank());
+      if (editing) {
+        // Same transfer number and row; the old journal entry is balanced out
+        // and the corrected one posted server-side.
+        await api.patch(`/fund-transfers/${editing.id}`, { ...payload, reason });
+      } else {
+        await api.post('/fund-transfers', payload);
+      }
+      cancel();
       reload();
     } catch (err) {
       setSubmitErr(err.uiMessage ?? 'Save failed');
@@ -64,7 +95,18 @@ export default function FundTransfers() {
 
       {show && (
         <form className="card" onSubmit={submit}>
-          <h3 style={{ marginTop: 0 }}>New Transfer</h3>
+          <h3 style={{ marginTop: 0 }}>
+            {editing ? `Correct ${editing.transferNo}` : 'New Transfer'}
+          </h3>
+          {editing && (
+            <EditVoucherBar
+              label={editing.transferNo}
+              reason={reason}
+              onReason={setReason}
+              onCancel={cancel}
+              editCount={Number(editing.editCount ?? 0)}
+            />
+          )}
           {submitErr && <div className="alert alert-error">{submitErr}</div>}
           <div className="form-row">
             <div>
@@ -134,9 +176,9 @@ export default function FundTransfers() {
           </div>
           <div style={{ marginTop: 12 }}>
             <button type="submit" className="btn btn-primary">
-              Save Transfer
+              {editing ? 'Save correction' : 'Save Transfer'}
             </button>{' '}
-            <button type="button" className="btn" onClick={() => setShow(false)}>
+            <button type="button" className="btn" onClick={cancel}>
               Cancel
             </button>
           </div>
@@ -176,6 +218,17 @@ export default function FundTransfers() {
                 <td className="right">{Number(t.amount).toFixed(2)}</td>
                 <td>{t.notes ?? ''}</td>
                 <td className="right">
+                  {!t.reversedAt && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => startEdit(t)}
+                      >
+                        Edit
+                      </button>{' '}
+                    </>
+                  )}
                   <ReverseAction
                     endpoint="/fund-transfers"
                     row={t}

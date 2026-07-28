@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ReverseAction from '../components/ReverseAction';
+import EditVoucherBar from '../components/EditVoucherBar';
 import ImportCsv from '../components/ImportCsv';
 import { IMPORT_SCHEMAS } from '../utils/importSchemas';
 
@@ -50,6 +51,8 @@ export default function Purchases() {
   const [savingNewItem, setSavingNewItem] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [reason, setReason] = useState('');
   const [form, setForm] = useState(blankPurchase());
   const [submitError, setSubmitError] = useState(null);
 
@@ -153,6 +156,39 @@ export default function Purchases() {
     }
   };
 
+  const startEdit = (p) => {
+    setEditing(p);
+    setReason('');
+    setSubmitError(null);
+    setForm({
+      ...blankPurchase(),
+      supplierId: p.supplierId ?? '',
+      storeId: p.storeId ?? '',
+      discount: String(p.discount ?? 0),
+      paidAmount: p.paidAmount != null ? String(p.paidAmount) : '',
+      paymentMethod: p.paymentMethod ?? 'CASH',
+      notes: p.notes ?? '',
+      lines: (p.lines ?? []).map((ln) => ({
+        itemId: ln.itemId,
+        storeId: ln.storeId ?? '',
+        quantity: String(ln.quantity),
+        unitPrice: String(ln.unitPrice),
+        // Serials aren't re-sent on a correction: the originals are withdrawn
+        // server-side and only re-registered from what's typed here, so
+        // pre-filling blank avoids silently duplicating an intake.
+        serials: '',
+      })),
+    });
+    setShowForm(true);
+  };
+
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditing(null);
+    setReason('');
+    setForm(blankPurchase());
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmitError(null);
@@ -184,9 +220,15 @@ export default function Purchases() {
       return;
     }
     try {
-      await api.post('/purchases', payload);
-      setShowForm(false);
-      setForm(blankPurchase());
+      if (editing) {
+        // Same bill number. The stock IN is mirrored back, the journal entry
+        // balanced out, the serial intake withdrawn, and the corrected bill
+        // re-posted — then the weighted-average cost is re-derived.
+        await api.patch(`/purchases/${editing.id}`, { ...payload, reason });
+      } else {
+        await api.post('/purchases', payload);
+      }
+      cancelForm();
       reload();
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');
@@ -221,7 +263,18 @@ export default function Purchases() {
 
       {showForm && (
         <form className="card" onSubmit={submit}>
-          <h3 style={{ marginTop: 0 }}>New Purchase</h3>
+          <h3 style={{ marginTop: 0 }}>
+            {editing ? `Correct ${editing.billNo}` : 'New Purchase'}
+          </h3>
+          {editing && (
+            <EditVoucherBar
+              label={editing.billNo}
+              reason={reason}
+              onReason={setReason}
+              onCancel={cancelForm}
+              editCount={Number(editing.editCount ?? 0)}
+            />
+          )}
           {submitError && <div className="alert alert-error">{submitError}</div>}
           <div className="form-row">
             <div>
@@ -441,7 +494,7 @@ export default function Purchases() {
           <button type="submit" className="btn btn-primary">
             Save Purchase
           </button>{' '}
-          <button type="button" className="btn" onClick={() => setShowForm(false)}>
+          <button type="button" className="btn" onClick={cancelForm}>
             Cancel
           </button>
         </form>
@@ -484,6 +537,15 @@ export default function Purchases() {
                       justifyContent: 'flex-end',
                     }}
                   >
+                    {!p.reversedAt && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => startEdit(p)}
+                      >
+                        Edit
+                      </button>
+                    )}
                     <a
                       className="btn btn-sm"
                       href={`#/print/purchase/${p.id}`}
