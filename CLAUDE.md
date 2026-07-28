@@ -221,7 +221,7 @@ Don't add a `@Cron` back unless the product direction explicitly changes — the
 
 ## Testing
 
-Backend has **200 Jest tests across 18 spec files** (`src/**/*.spec.ts`) covering the high-value services:
+Backend has **207 Jest tests across 18 spec files** (`src/**/*.spec.ts`) covering the high-value services:
 
 ```
 cd apps/erp-backend && npm test               # full suite (~14s)
@@ -265,7 +265,7 @@ Spec files: `app.controller`, `cash-register/cash-register.service`, `categories
 - Don't push the outbox unsigned — `pushPending` refuses if `SHOP_ID`/`SHOP_SYNC_SECRET` are missing, and the receiver guard rejects with no dev-bypass. Don't add one. If a non-Node local node is ever added, swap the body canonicalization to a canonical-JSON serializer (current HMAC relies on V8 JSON key-order stability on both ends).
 - Don't bring back the native menu bar (File / Edit / View). `Menu.setApplicationMenu(null)` is intentional; the topbar carries the brand + actions.
 - Don't put writes in `ReportsService` — it's read-only.
-- Don't add a query over `sale_returns` / `purchase_returns` without `reversedAt IS NULL`. A reversed return has already been walked back physically, so counting it would double-apply the correction. Current filter sites: `ReportsService` (customer/supplier ledgers, `allCustomer/SupplierBalances`, income statement, item-margins, product-sales), `CashRegisterService` (the refund OUT in the daily cash book), `EmployeeIncentivesService`, `IncentivesService` (target netting), and the mobile `mobile_customer_balance` / `mobile_supplier_balance` views in `setup.sql`. Miss one and the reversal silently fails to fix that figure — which is worse than having no reversal at all.
+- Don't add a query over ANY voucher table (`sales`, `purchases`, `sale_returns`, `purchase_returns`, `stock_transfers`, `payments`, `fund_transfers`) without `reversedAt IS NULL` in operational reads. A reversed return has already been walked back physically, so counting it would double-apply the correction. Current filter sites: `ReportsService` (customer/supplier ledgers, `allCustomer/SupplierBalances`, income statement, item-margins, product-sales), `CashRegisterService` (the refund OUT in the daily cash book), `EmployeeIncentivesService`, `IncentivesService` (target netting), and the mobile `mobile_customer_balance` / `mobile_supplier_balance` views in `setup.sql`. Miss one and the reversal silently fails to fix that figure — which is worse than having no reversal at all.
 - Don't add DELETE for returns (or any posted voucher). Correction is reversal: the wrong document stays visible with its reason, and the balances come out right. Deleting destroys the audit trail an accountant needs to explain the change.
 - Don't bring back the manual "+ New Sale" form on the Sales page — sales are POS/voucher-driven; that page is read-only history.
 - Don't use `@Column({ type: 'timestamp' })` or `@Column({ type: 'datetime' })` — both crash one of the two supported dialects. Use `@Column({ type: Date })` (or `type: 'date'` for pure date strings).

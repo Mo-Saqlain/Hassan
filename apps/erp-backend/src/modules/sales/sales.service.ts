@@ -740,10 +740,26 @@ export class SalesService {
     id: string,
     opts: { userId?: string; reason: string },
   ): Promise<Sale> {
+    return this.dataSource.transaction((manager) =>
+      this.reverseInTransaction(manager, id, opts),
+    );
+  }
+
+  /**
+   * Reversal body scoped to a caller-supplied EntityManager, so a larger atomic
+   * operation can unwind a sale as one of several legs — an exchange reversal
+   * has to undo the replacement sale, the give-back return and any supplier
+   * credit together or not at all.
+   */
+  async reverseInTransaction(
+    manager: EntityManager,
+    id: string,
+    opts: { userId?: string; reason: string },
+  ): Promise<Sale> {
     if (!opts.reason || opts.reason.trim().length === 0) {
       throw new BadRequestException('Reversal requires a reason.');
     }
-    return this.dataSource.transaction(async (manager) => {
+    return (async () => {
       const saleRepo = manager.getRepository(Sale);
       const sale = await saleRepo.findOne({
         where: { id },
@@ -815,7 +831,7 @@ export class SalesService {
       );
 
       return saved;
-    });
+    })();
   }
 
   /**

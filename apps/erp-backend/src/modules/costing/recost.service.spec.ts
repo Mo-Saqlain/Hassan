@@ -138,7 +138,7 @@ describe('RecostService', () => {
 
   it('replays sales, sale returns and purchase returns into costedQty', async () => {
     await purchases.create({ lines: [{ itemId, quantity: 10, unitPrice: 50000 }] });
-    await sales.create({ lines: [{ itemId, quantity: 4 }], paymentMethod: 'CASH' });
+    await sales.create({ lines: [{ itemId, quantity: 4, unitPrice: 90000 }], paymentMethod: 'CASH' });
     await returns.createSaleReturn({ lines: [{ itemId, quantity: 1, unitPrice: 90000 }] });
     await returns.createPurchaseReturn({ lines: [{ itemId, quantity: 2, unitPrice: 50000 }] });
     const forward = await cost();
@@ -198,7 +198,7 @@ describe('RecostService', () => {
   it('leaves COGS snapshots alone by default and rewrites them on request', async () => {
     await purchases.create({ lines: [{ itemId, quantity: 10, unitPrice: 50000 }] });
     const sale = await sales.create({
-      lines: [{ itemId, quantity: 2 }], paymentMethod: 'CASH',
+      lines: [{ itemId, quantity: 2, unitPrice: 90000 }], paymentMethod: 'CASH',
     });
     const lineId = sale.lines[0].id;
     const snapshot = async () =>
@@ -225,7 +225,7 @@ describe('RecostService', () => {
 
   it('is idempotent — recomputing twice changes nothing the second time', async () => {
     await purchases.create({ lines: [{ itemId, quantity: 7, unitPrice: 31000 }] });
-    await sales.create({ lines: [{ itemId, quantity: 2 }], paymentMethod: 'CASH' });
+    await sales.create({ lines: [{ itemId, quantity: 2, unitPrice: 90000 }], paymentMethod: 'CASH' });
 
     const first = await recost.recomputeItem(itemId);
     const second = await recost.recomputeItem(itemId);

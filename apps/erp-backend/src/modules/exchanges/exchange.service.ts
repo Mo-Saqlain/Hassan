@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Not } from 'typeorm';
 import { CreateExchangeDto } from './dto/create-exchange.dto';
 import { ReturnsService } from '../returns/returns.service';
 import { SalesService } from '../sales/sales.service';
@@ -9,6 +9,24 @@ import { Sale } from '../sales/entities/sale.entity';
 import { SaleReturn } from '../returns/entities/sale-return.entity';
 import { PurchaseReturn } from '../returns/entities/purchase-return.entity';
 import { CreateSaleDto } from '../sales/dto/create-sale.dto';
+
+/** Read model for the exchange list / detail — the three legs as one row. */
+export interface ExchangeSummary {
+  saleReturnId: string;
+  returnNo: string;
+  createdAt: Date;
+  customerId?: string;
+  invoiceNo?: string;
+  saleId?: string;
+  returnCredit: number;
+  newSaleNet: number;
+  cashCollected: number;
+  difference: number;
+  supplierCreditNo?: string;
+  supplierCredit: number;
+  reversedAt: Date | null;
+  reversalReason: string | null;
+}
 
 export interface ExchangeResult {
   saleReturn: SaleReturn;
@@ -132,9 +150,15 @@ export class ExchangeService {
       // Bind new-goods serials as DELIVERED — the customer takes them now.
       await this.bindNewSaleSerials(manager, sale, dto);
 
-      // ── Link the give-back to the replacement sale (both-way trace) ───────
+      // ── Link the legs together (both-way trace) ───────────────────────────
       saleReturn.replacementSaleId = sale.id;
       await manager.getRepository(SaleReturn).save(saleReturn);
+      if (purchaseReturn) {
+        // Without this the supplier-credit leg is findable only by reading its
+        // reason text, so reversing the exchange would leave it standing.
+        purchaseReturn.linkedSaleReturnId = saleReturn.id;
+        await manager.getRepository(PurchaseReturn).save(purchaseReturn);
+      }
 
       const newSaleNet = Number(sale.netAmount);
       const difference = Number(
@@ -159,6 +183,140 @@ export class ExchangeService {
    * warranty from the item's cover config — mirrors the full-pay branch of the
    * voucher flow. Validates serial counts for items that require them.
    */
+  /**
+   * Exchanges have no table of their own — one IS a sale return carrying a
+   * `replacementSaleId`, plus the sale it points at and any linked supplier
+   * credit. So listing them means listing those returns and composing the legs,
+   * which is also why an exchange is addressed by its give-back return id.
+   */
+  async list(): Promise<ExchangeSummary[]> {
+    const returns = await this.dataSource.getRepository(SaleReturn).find({
+      where: { replacementSaleId: Not(IsNull()) },
+      order: { createdAt: 'DESC' },
+    });
+    return Promise.all(returns.map((r) => this.compose(r)));
+  }
+
+  async findOne(saleReturnId: string): Promise<ExchangeSummary> {
+    const saleReturn = await this.dataSource
+      .getRepository(SaleReturn)
+      .findOne({ where: { id: saleReturnId } });
+    if (!saleReturn) {
+      throw new NotFoundException(`Sale return ${saleReturnId} not found`);
+    }
+    if (!saleReturn.replacementSaleId) {
+      throw new BadRequestException(
+        `Return ${saleReturn.returnNo} is a plain return, not an exchange.`,
+      );
+    }
+    return this.compose(saleReturn);
+  }
+
+  /**
+   * Undo a whole exchange in one transaction — replacement sale, give-back
+   * return, and the supplier warranty credit if one was booked.
+   *
+   * Order is forced: the sale goes first. `ReturnsService` refuses to reverse a
+   * give-back while its replacement sale still stands, because removing the
+   * store credit that funded the swap would leave the customer owing for goods
+   * they exchanged into. Doing it here in the right order means the caller never
+   * has to know that rule.
+   *
+   * Idempotent by construction: each leg's own reversal short-circuits on
+   * `reversedAt`, so re-running after a partial failure finishes the job rather
+   * than double-unwinding.
+   */
+  async reverse(
+    saleReturnId: string,
+    opts: { reason: string; userId?: string },
+  ): Promise<ExchangeSummary> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('Reversal requires a reason.');
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const saleReturn = await manager
+        .getRepository(SaleReturn)
+        .findOne({ where: { id: saleReturnId } });
+      if (!saleReturn) {
+        throw new NotFoundException(`Sale return ${saleReturnId} not found`);
+      }
+      if (!saleReturn.replacementSaleId) {
+        throw new BadRequestException(
+          `Return ${saleReturn.returnNo} is a plain return, not an exchange — reverse it directly.`,
+        );
+      }
+
+      await this.sales.reverseInTransaction(
+        manager,
+        saleReturn.replacementSaleId,
+        { reason: `Exchange reversal: ${reason}`, userId: opts.userId },
+      );
+
+      await this.returns.reverseSaleReturnInTransaction(manager, saleReturn.id, {
+        reason: `Exchange reversal: ${reason}`,
+        userId: opts.userId,
+      });
+
+      const credit = await manager
+        .getRepository(PurchaseReturn)
+        .findOne({ where: { linkedSaleReturnId: saleReturn.id } });
+      if (credit) {
+        await this.returns.reversePurchaseReturnInTransaction(
+          manager,
+          credit.id,
+          { reason: `Exchange reversal: ${reason}`, userId: opts.userId },
+        );
+      }
+
+      const refreshed = await manager
+        .getRepository(SaleReturn)
+        .findOneOrFail({ where: { id: saleReturn.id } });
+      return this.compose(refreshed, manager);
+    });
+  }
+
+  private async compose(
+    saleReturn: SaleReturn,
+    manager?: EntityManager,
+  ): Promise<ExchangeSummary> {
+    const run = manager ?? this.dataSource.manager;
+    const [sale, supplierCredit] = await Promise.all([
+      saleReturn.replacementSaleId
+        ? run.getRepository(Sale).findOne({
+            where: { id: saleReturn.replacementSaleId },
+          })
+        : null,
+      run
+        .getRepository(PurchaseReturn)
+        .findOne({ where: { linkedSaleReturnId: saleReturn.id } }),
+    ]);
+    const returnCredit = Number(saleReturn.totalAmount);
+    const newSaleNet = sale ? Number(sale.netAmount) : 0;
+    const cashCollected = sale ? Number(sale.paidAmount) : 0;
+    return {
+      saleReturnId: saleReturn.id,
+      returnNo: saleReturn.returnNo,
+      createdAt: saleReturn.createdAt,
+      customerId: saleReturn.customerId,
+      invoiceNo: sale?.invoiceNo,
+      saleId: sale?.id,
+      returnCredit,
+      newSaleNet,
+      cashCollected,
+      difference: Number((newSaleNet - returnCredit - cashCollected).toFixed(2)),
+      supplierCreditNo: supplierCredit?.returnNo,
+      supplierCredit: supplierCredit ? Number(supplierCredit.totalAmount) : 0,
+      // An exchange is reversed when BOTH sides are — a half-reversed exchange
+      // can only exist mid-failure, and reporting it as reversed would hide
+      // the live leg.
+      reversedAt:
+        saleReturn.reversedAt && sale?.reversedAt ? saleReturn.reversedAt : null,
+      reversalReason: saleReturn.reversalReason ?? null,
+    };
+  }
+
   private async bindNewSaleSerials(
     manager: EntityManager,
     sale: Sale,

@@ -290,8 +290,15 @@ export class CashRegisterService {
         where: { entryDate: day },
         order: { createdAt: 'ASC' },
       }),
-      this.sales.find({ where: { createdAt: Between(start, end) } }),
-      this.purchases.find({ where: { createdAt: Between(start, end) } }),
+      // Reversed vouchers are excluded here for the same reason they are in the
+      // ledgers: a reversed cash sale's money went back out, so counting it as
+      // cash IN would overstate what the till should hold.
+      this.sales.find({
+        where: { createdAt: Between(start, end), reversedAt: IsNull() },
+      }),
+      this.purchases.find({
+        where: { createdAt: Between(start, end), reversedAt: IsNull() },
+      }),
       this.payments.find({ where: { createdAt: Between(start, end) } }),
       this.fundTransfers.findInvolvingAccounts(cashIdsArr, start, end),
       this.employeeTxns.find({ where: { transactionDate: day } }),

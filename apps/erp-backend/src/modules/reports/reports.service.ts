@@ -240,7 +240,11 @@ export class ReportsService {
     const opening = Number(customer.openingBalance ?? 0);
     const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
     const [sales, returns, customerPayments] = await Promise.all([
-      this.sales.find({ where: { customerId, ...dateClause } }),
+      // reversedAt IS NULL on the sales too: a reversed sale posted a balancing
+      // journal entry and gave the goods back, so it must stop being a debit
+      // here. Without this, reversing an unpaid credit sale left the customer
+      // still apparently owing for it.
+      this.sales.find({ where: { customerId, reversedAt: IsNull(), ...dateClause } }),
       // reversedAt IS NULL: a return that was itself booked in error has been
       // walked back (stock re-issued, serials back to SOLD), so it must not
       // keep crediting the customer here.
@@ -403,7 +407,9 @@ export class ReportsService {
           .select('s.customer_id', 'cid')
           .addSelect('COALESCE(SUM(s.net_amount), 0)', 'net')
           .addSelect('COALESCE(SUM(s.paid_amount), 0)', 'paid')
-          .where('s.customer_id IS NOT NULL'),
+          .where('s.customer_id IS NOT NULL')
+          // See customerLedger() — a reversed sale is not a receivable.
+          .andWhere('s.reversed_at IS NULL'),
         's.created_at',
       )
         .groupBy('s.customer_id')
@@ -492,7 +498,9 @@ export class ReportsService {
     const opening = Number(supplier.openingBalance ?? 0);
     const dateClause = asOf ? { createdAt: LessThanOrEqual(asOf) } : {};
     const [purchases, returns, payments] = await Promise.all([
-      this.purchases.find({ where: { supplierId, ...dateClause } }),
+      this.purchases.find({
+        where: { supplierId, reversedAt: IsNull(), ...dateClause },
+      }),
       this.purchaseReturns.find({
         where: { supplierId, reversedAt: IsNull(), ...dateClause },
       }),
@@ -618,7 +626,9 @@ export class ReportsService {
           .select('p.supplier_id', 'sid')
           .addSelect('COALESCE(SUM(p.net_amount), 0)', 'net')
           .addSelect('COALESCE(SUM(p.paid_amount), 0)', 'paid')
-          .where('p.supplier_id IS NOT NULL'),
+          .where('p.supplier_id IS NOT NULL')
+          // A reversed bill is not a payable — see supplierLedger().
+          .andWhere('p.reversed_at IS NULL'),
         'p.created_at',
       )
         .groupBy('p.supplier_id')

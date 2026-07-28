@@ -91,7 +91,7 @@ describe('ReturnsService — reversal', () => {
     // stock to draw from.
     await stock.recordMovement({
       itemId, storeId, type: 'IN', quantity: 10,
-      referenceType: 'OPENING', referenceId: item.id,
+      referenceType: 'ADJUSTMENT', referenceId: item.id,
     });
   });
 

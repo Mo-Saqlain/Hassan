@@ -62,6 +62,7 @@ describe('ExchangeService', () => {
   let sales: SalesService;
   let items: ItemsService;
   let stock: StockService;
+  let returns: ReturnsService;
   let ds: DataSource;
 
   let oldItemId: string; // the item being returned
@@ -101,6 +102,7 @@ describe('ExchangeService', () => {
     sales = module.get(SalesService);
     items = module.get(ItemsService);
     stock = module.get(StockService);
+    returns = module.get(ReturnsService);
     ds = module.get(DataSource);
 
     const oldItem = await items.create({
@@ -237,6 +239,93 @@ describe('ExchangeService', () => {
       .getRepository(ItemSerial)
       .findOne({ where: { serial: 'SN-OLD-1' } });
     expect(serial?.status).toBe('WRITE_OFF');
+  });
+
+  it('reverses a whole exchange — both legs, stock, and the customer balance', async () => {
+    const res = await exchange.create({
+      customerId,
+      returnDisposition: 'RESTOCK',
+      returnLines: [{ itemId: oldItemId, quantity: 1, unitPrice: 500 }],
+      saleLines: [{ itemId: newItemId, quantity: 1, unitPrice: 700 }],
+      paymentAmount: 200,
+      paymentAccountId: accountId,
+    });
+    expect(await onHand(oldItemId)).toBe(10);
+    expect(await onHand(newItemId)).toBe(9);
+
+    const reversed = await exchange.reverse(res.saleReturn.id, {
+      reason: 'customer changed their mind',
+    });
+
+    // Both sides of the swap are back where they started.
+    expect(await onHand(oldItemId)).toBe(9);
+    expect(await onHand(newItemId)).toBe(10);
+    expect(reversed.reversedAt).toBeTruthy();
+    // Back to square one. The reversed sale drops out of A/R with BOTH its
+    // debit and the 200 cash it carried, and the give-back's store credit goes
+    // with it — so the customer neither owes nor is owed. That assumes the 200
+    // difference was handed back over the counter, which is the same premise
+    // every reversed cash sale rests on.
+    expect(await custBalance()).toBeCloseTo(0, 2);
+  });
+
+  it('reverses the supplier warranty-credit leg too', async () => {
+    const supBefore = (await reports.supplierLedger(supplierId)).closingBalance;
+    const res = await exchange.create({
+      customerId,
+      returnDisposition: 'CLAIMED_TO_COMPANY',
+      returnLines: [{ itemId: oldItemId, quantity: 1, unitPrice: 500 }],
+      supplierCredit: { supplierId, amount: 300 },
+      saleLines: [{ itemId: newItemId, quantity: 1, unitPrice: 700 }],
+      paymentAmount: 200,
+      paymentAccountId: accountId,
+    });
+    // The credit leg is findable by link, not by parsing its reason text.
+    expect(res.purchaseReturn?.linkedSaleReturnId).toBe(res.saleReturn.id);
+
+    await exchange.reverse(res.saleReturn.id, { reason: 'claim rejected' });
+
+    // Supplier is back to where they were — the credit no longer stands.
+    const supAfter = (await reports.supplierLedger(supplierId)).closingBalance;
+    expect(supAfter).toBeCloseTo(supBefore, 2);
+  });
+
+  it('refuses to reverse a plain return through the exchange endpoint', async () => {
+    const plain = await returns.createSaleReturn({
+      customerId,
+      lines: [{ itemId: oldItemId, quantity: 1, unitPrice: 500 }],
+    });
+    await expect(
+      exchange.reverse(plain.id, { reason: 'nope' }),
+    ).rejects.toThrow(/not an exchange/);
+  });
+
+  it('lists exchanges with both legs composed, and marks reversed ones', async () => {
+    const res = await exchange.create({
+      customerId,
+      returnDisposition: 'RESTOCK',
+      returnLines: [{ itemId: oldItemId, quantity: 1, unitPrice: 500 }],
+      saleLines: [{ itemId: newItemId, quantity: 1, unitPrice: 700 }],
+      paymentAmount: 200,
+      paymentAccountId: accountId,
+    });
+    // A plain return must not show up as an exchange.
+    await returns.createSaleReturn({
+      customerId,
+      lines: [{ itemId: oldItemId, quantity: 1, unitPrice: 500 }],
+    });
+
+    const before = await exchange.list();
+    expect(before).toHaveLength(1);
+    expect(before[0].returnNo).toBe(res.saleReturn.returnNo);
+    expect(before[0].invoiceNo).toBe(res.sale.invoiceNo);
+    expect(before[0].returnCredit).toBe(500);
+    expect(before[0].cashCollected).toBe(200);
+    expect(before[0].reversedAt).toBeNull();
+
+    await exchange.reverse(res.saleReturn.id, { reason: 'undo' });
+    const after = await exchange.list();
+    expect(after[0].reversedAt).toBeTruthy();
   });
 
   it('rejects a supplier credit when the goods were not claimed to the company', async () => {

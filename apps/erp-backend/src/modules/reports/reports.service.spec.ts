@@ -257,6 +257,36 @@ describe('ReportsService', () => {
     expect((await reports.allCustomerBalances())[0].balance).toBe(1200);
   });
 
+  it('reversing an unpaid sale clears the customer A/R it created', async () => {
+    // Baseline 1500 is the unpaid second sale. Reversing it must remove the
+    // debt: the goods came back, the journal was balanced out, and the customer
+    // owes nothing for a sale that no longer stands.
+    const unpaid = (await ds.getRepository(Sale).find({ order: { createdAt: 'DESC' } }))
+      .find((s) => Number(s.dueAmount) > 0)!;
+
+    await sales.reverse(unpaid.id, { reason: 'keyed against the wrong customer' });
+
+    const ledger = await reports.customerLedger(customerId);
+    expect(ledger.closingBalance).toBe(0);
+    expect((await reports.allCustomerBalances())[0].balance).toBe(0);
+  });
+
+  it('reversing a purchase clears the supplier A/P it created', async () => {
+    // A second bill, none of it sold on — the fixture's first bill can't be
+    // reversed because 8 of its 20 units have already left, and the
+    // negative-stock guard correctly refuses that.
+    const dup = await purchases.create({
+      supplierId,
+      lines: [{ itemId, quantity: 5, unitPrice: 300 }],
+    });
+    expect((await reports.supplierLedger(supplierId)).closingBalance).toBe(7500);
+
+    await purchases.reverse(dup.id, { reason: 'duplicate bill' });
+
+    expect((await reports.supplierLedger(supplierId)).closingBalance).toBe(6000);
+    expect((await reports.allSupplierBalances())[0].balance).toBe(6000);
+  });
+
   it('a REVERSED sale return leaves A/R untouched (ledger and balances)', async () => {
     await seedReturn({ total: 500, reversed: true });
     // Baseline A/R is 1500. A live store-credit return would drop it to 1000;

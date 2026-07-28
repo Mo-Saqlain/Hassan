@@ -257,12 +257,24 @@ export class ReturnsService {
     id: string,
     opts: { reason: string; userId?: string },
   ): Promise<SaleReturn> {
+    return this.dataSource.transaction((manager) =>
+      this.reverseSaleReturnInTransaction(manager, id, opts),
+    );
+  }
+
+  /** Body of the above, scoped to a caller's EntityManager so an exchange
+   *  reversal can unwind all its legs atomically. */
+  async reverseSaleReturnInTransaction(
+    manager: EntityManager,
+    id: string,
+    opts: { reason: string; userId?: string },
+  ): Promise<SaleReturn> {
     if (!opts.reason || opts.reason.trim().length === 0) {
       throw new BadRequestException('Reversal requires a reason.');
     }
     const reason = opts.reason.trim();
 
-    return this.dataSource.transaction(async (manager) => {
+    return (async () => {
       const repo = manager.getRepository(SaleReturn);
       const ret = await repo.findOne({ where: { id }, relations: ['lines'] });
       if (!ret) throw new NotFoundException(`Sale return ${id} not found`);
@@ -340,7 +352,7 @@ export class ReturnsService {
       );
 
       return saved;
-    });
+    })();
   }
 
   /**
@@ -354,12 +366,23 @@ export class ReturnsService {
     id: string,
     opts: { reason: string; userId?: string },
   ): Promise<PurchaseReturn> {
+    return this.dataSource.transaction((manager) =>
+      this.reversePurchaseReturnInTransaction(manager, id, opts),
+    );
+  }
+
+  /** Body of the above, scoped to a caller's EntityManager. */
+  async reversePurchaseReturnInTransaction(
+    manager: EntityManager,
+    id: string,
+    opts: { reason: string; userId?: string },
+  ): Promise<PurchaseReturn> {
     if (!opts.reason || opts.reason.trim().length === 0) {
       throw new BadRequestException('Reversal requires a reason.');
     }
     const reason = opts.reason.trim();
 
-    return this.dataSource.transaction(async (manager) => {
+    return (async () => {
       const repo = manager.getRepository(PurchaseReturn);
       const ret = await repo.findOne({ where: { id }, relations: ['lines'] });
       if (!ret) throw new NotFoundException(`Purchase return ${id} not found`);
@@ -398,7 +421,7 @@ export class ReturnsService {
       );
 
       return saved;
-    });
+    })();
   }
 
   private async nextReturnNo(

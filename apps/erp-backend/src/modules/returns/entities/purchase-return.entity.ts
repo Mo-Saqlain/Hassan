@@ -18,6 +18,7 @@ import { PurchaseReturnItem } from './purchase-return-item.entity';
 @Index(['purchaseId'])
 @Index(['createdAt'])
 @Index(['reversedAt'])
+@Index(['linkedSaleReturnId'])
 export class PurchaseReturn extends BaseEntity {
   @Column({ name: 'return_no' })
   returnNo: string;
@@ -62,6 +63,18 @@ export class PurchaseReturn extends BaseEntity {
 
   @Column({ nullable: true })
   reason?: string;
+
+  /**
+   * When this return is the supplier-warranty-credit leg of an exchange, the
+   * give-back sale return it belongs to.
+   *
+   * Previously the two were associated only by a sentence in `reason`, which
+   * meant nothing could find the leg programmatically — so reversing an exchange
+   * would have left the supplier credit standing. A real link makes the exchange
+   * addressable as one transaction.
+   */
+  @Column({ name: 'linked_sale_return_id', nullable: true })
+  linkedSaleReturnId?: string;
 
   /**
    * Set when the return itself was booked in error and walked back. Kept on the

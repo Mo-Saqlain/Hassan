@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { StockTransfersService } from './stock-transfers.service';
 import { CreateStockTransferDto } from './dto/create-stock-transfer.dto';
+import { ReverseStockTransferDto } from './dto/reverse-stock-transfer.dto';
 
 @Controller('stock-transfers')
 export class StockTransfersController {
@@ -27,5 +28,15 @@ export class StockTransfersController {
 
   @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);
+  }
+
+  /** Undo a transfer sent to the wrong store. Keeps the row, books the mirror
+   *  movements. */
+  @Post(':id/reverse')
+  reverse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseStockTransferDto,
+  ) {
+    return this.service.reverse(id, dto);
   }
 }

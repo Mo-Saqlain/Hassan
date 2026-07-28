@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import { useUnsavedChangesPrompt } from '../hooks/useUnsavedChangesPrompt';
 import ExportButtons from '../components/ExportButtons';
+import ReverseAction from '../components/ReverseAction';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -224,6 +225,7 @@ export default function StockTransfers() {
                 <th>To</th>
                 <th className="num">Items</th>
                 <th>Notes</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -235,6 +237,14 @@ export default function StockTransfers() {
                   <td>{t.toStore?.name ?? '—'}</td>
                   <td className="num">{(t.lines ?? []).length}</td>
                   <td className="muted" style={{ fontSize: 12 }}>{t.notes ?? '—'}</td>
+                  <td>
+                    <ReverseAction
+                      endpoint="/stock-transfers"
+                      row={t}
+                      label={`transfer ${t.transferNo}`}
+                      onDone={reload}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -155,7 +155,11 @@ left join (
 --           + SUM(payments OUT.amount)                -- loans/advances to customer
 -- store_credit nets out any cash refunded on a return (that cash left via the
 -- till/cash book, so it must NOT also reduce A/R). loan-OUT payments increase
--- what the customer owes. (No reversed_at filter — matches the desktop report.)
+-- what the customer owes. Reversed sales and reversed returns are both excluded
+-- (reversed_at is null) — a reversed voucher posted a balancing journal entry and
+-- gave the goods back, so it is not a receivable. The desktop report agrees; it
+-- used to count reversed sales here, which left a reversed credit sale showing as
+-- still owed.
 create or replace view mobile_customer_balance as
 select
   c.id                                              as customer_id,
@@ -174,7 +178,9 @@ left join (
   select customer_id,
          sum(net_amount)  as net,
          sum(paid_amount) as paid
-  from sales where customer_id is not null
+  from sales
+  where customer_id is not null
+    and reversed_at is null
   group by customer_id
 ) s on s.customer_id = c.id
 left join (
@@ -218,7 +224,9 @@ left join (
   select supplier_id,
          sum(net_amount)  as net,
          sum(paid_amount) as paid
-  from purchases where supplier_id is not null
+  from purchases
+  where supplier_id is not null
+    and reversed_at is null
   group by supplier_id
 ) p on p.supplier_id = su.id
 left join (

@@ -86,6 +86,69 @@ export class StockTransfersService {
     });
   }
 
+  /**
+   * Walk back a transfer sent to the wrong store (or entered twice) by booking
+   * the mirror movements: OUT of the destination, IN to the source. No cost side
+   * — a transfer moves stock between stores at unchanged cost, so `costedQty`
+   * and `avgCost` were never touched going forward and need no recost coming
+   * back.
+   *
+   * Idempotent on `reversedAt`. Refused when the destination no longer holds the
+   * units (they were sold or transferred onward): `StockService` raises its
+   * negative-stock guard and the whole transaction rolls back, because the
+   * physical stock has to be sorted out before the paperwork can be.
+   */
+  async reverse(
+    id: string,
+    opts: { reason: string; userId?: string },
+  ): Promise<StockTransfer> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('Reversal requires a reason.');
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(StockTransfer);
+      const transfer = await repo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!transfer) throw new NotFoundException(`Stock transfer ${id} not found`);
+      if (transfer.reversedAt) return transfer; // idempotent
+
+      for (const ln of transfer.lines) {
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: transfer.toStoreId,
+            type: 'OUT',
+            quantity: ln.quantity,
+            referenceType: 'ADJUSTMENT',
+            referenceId: transfer.id,
+            note: `Reversal of ${transfer.transferNo}: ${reason}`,
+          },
+          manager,
+        );
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: transfer.fromStoreId,
+            type: 'IN',
+            quantity: ln.quantity,
+            referenceType: 'ADJUSTMENT',
+            referenceId: transfer.id,
+            note: `Reversal of ${transfer.transferNo}: ${reason}`,
+          },
+          manager,
+        );
+      }
+
+      transfer.reversedAt = new Date();
+      transfer.reversalReason = reason;
+      return repo.save(transfer);
+    });
+  }
+
   private async nextTransferNo(
     repo: Repository<StockTransfer>,
   ): Promise<string> {

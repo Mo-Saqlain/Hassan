@@ -15,7 +15,12 @@ export type StockReferenceType =
   // ledger can show "Sale reversal — INV-000123" rather than a bare
   // SALE/PURCHASE that doesn't match any sale/purchase row.
   | 'SALE_REVERSAL'
-  | 'PURCHASE_REVERSAL';
+  | 'PURCHASE_REVERSAL'
+  // Same idea for returns booked in error and walked back via
+  // `POST /{sale,purchase}-returns/:id/reverse`: a SALE_RETURN_REVERSAL is an
+  // OUT (the goods never actually came back), a PURCHASE_RETURN_REVERSAL an IN.
+  | 'SALE_RETURN_REVERSAL'
+  | 'PURCHASE_RETURN_REVERSAL';
 
 @Entity('stock_movements')
 @Index(['itemId'])
