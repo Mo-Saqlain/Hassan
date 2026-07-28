@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { inMemoryTypeOrm } from '../../testing/test-db';
+import { RecostService } from '../costing/recost.service';
 
 import { Item } from '../items/entities/item.entity';
 import { Brand } from '../brands/entities/brand.entity';
@@ -88,7 +89,7 @@ describe('ReportsService', () => {
         ReportsService, ItemsService, StockService, OutboxService,
         SalesService, PurchasesService, IncentivesService, PaymentsService,
         FundTransfersService, EmployeeIncentivesService, SequenceService,
-        AccountsService, JournalService, PeriodsService, ItemSerialsService,
+        AccountsService, JournalService, PeriodsService, ItemSerialsService, RecostService,
       ],
     }).compile();
     await module.init();

@@ -75,6 +75,8 @@ export class ItemsService {
         categoryIds,
         purchasePrice: num(raw.purchasePrice),
         salePrice: num(raw.salePrice),
+        openingAvgCost: num(raw.openingAvgCost),
+        openingCostedQty: num(raw.openingCostedQty),
         unit: str(raw.unit),
         minStockLevel: num(raw.minStockLevel),
         isActive: bool(raw.isActive),

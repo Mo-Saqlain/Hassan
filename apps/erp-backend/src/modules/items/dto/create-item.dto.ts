@@ -69,6 +69,22 @@ export class CreateItemDto {
   @IsOptional()
   salePrice?: number;
 
+  /**
+   * Opening cost basis for stock carried in from previous software or an
+   * opening stocktake. Set these (not avgCost/costedQty) when migrating —
+   * `RecostService` starts its replay here, so anything written straight into
+   * avgCost/costedQty is lost the first time the item recosts.
+   */
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  openingAvgCost?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  openingCostedQty?: number;
+
   @IsString()
   @IsOptional()
   unit?: string;

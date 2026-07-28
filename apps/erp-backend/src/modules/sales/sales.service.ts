@@ -15,6 +15,7 @@ import { Payment } from '../payments/entities/payment.entity';
 import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
+import { RecostService } from '../costing/recost.service';
 
 @Injectable()
 export class SalesService {
@@ -28,6 +29,7 @@ export class SalesService {
     private readonly journals: JournalService,
     private readonly accounts: AccountsService,
     private readonly itemSerials: ItemSerialsService,
+    private readonly recost: RecostService,
   ) {}
 
   /**
@@ -801,7 +803,18 @@ export class SalesService {
       sale.reversedAt = new Date();
       sale.reversedBy = opts.userId;
       sale.reversalReason = opts.reason;
-      return saleRepo.save(sale);
+      const saved = await saleRepo.save(sale);
+
+      // Re-derive cost from the surviving documents. A sale doesn't move
+      // avgCost, so this is mostly about costedQty — but going through the same
+      // replay as every other correction means there is one definition of the
+      // cost basis rather than one per unwind path.
+      await this.recost.recomputeItems(
+        sale.lines.map((l) => l.itemId),
+        { manager },
+      );
+
+      return saved;
     });
   }
 

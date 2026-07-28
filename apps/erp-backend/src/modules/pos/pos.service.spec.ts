@@ -3,6 +3,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { inMemoryTypeOrm } from '../../testing/test-db';
+import { RecostService } from '../costing/recost.service';
+import { Purchase } from '../purchases/entities/purchase.entity';
+import { PurchaseItem } from '../purchases/entities/purchase-item.entity';
+import { SaleReturn } from '../returns/entities/sale-return.entity';
+import { SaleReturnItem } from '../returns/entities/sale-return-item.entity';
+import { PurchaseReturn } from '../returns/entities/purchase-return.entity';
+import { PurchaseReturnItem } from '../returns/entities/purchase-return-item.entity';
 import { Item } from '../items/entities/item.entity';
 import { Brand } from '../brands/entities/brand.entity';
 import { Category } from '../categories/entities/category.entity';
@@ -49,6 +56,7 @@ describe('PosService', () => {
             StockMovement, Sale, SaleItem,
             PosSession, PosCartItem, SyncQueueEntry, Sequence, Payment,
             JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
+            Purchase, PurchaseItem, SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
           ]),
         ),
         TypeOrmModule.forFeature([
@@ -60,7 +68,7 @@ describe('PosService', () => {
       providers: [
         PosService, ItemsService, SalesService,
         StockService, OutboxService, SequenceService,
-        AccountsService, JournalService, PeriodsService, ItemSerialsService,
+        AccountsService, JournalService, PeriodsService, ItemSerialsService, RecostService,
       ],
     }).compile();
     await module.init();

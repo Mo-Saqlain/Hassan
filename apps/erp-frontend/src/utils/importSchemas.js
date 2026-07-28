@@ -63,6 +63,18 @@ export const IMPORT_SCHEMAS = {
       { key: 'categories', required: false, example: 'Refrigerators; Inverter', hint: 'category NAMES, separated by ;' },
       { key: 'purchasePrice', required: false, example: '45000', hint: 'number ≥ 0' },
       { key: 'salePrice', required: false, example: '52000', hint: 'number ≥ 0' },
+      {
+        key: 'openingAvgCost',
+        required: false,
+        example: '44000',
+        hint: 'cost of stock carried in from old software — number ≥ 0',
+      },
+      {
+        key: 'openingCostedQty',
+        required: false,
+        example: '3',
+        hint: 'units carried in at that cost — whole number ≥ 0',
+      },
       { key: 'unit', required: false, example: 'pcs' },
       { key: 'minStockLevel', required: false, example: '2', hint: 'whole number ≥ 0' },
       { key: 'tracksSerials', required: false, example: 'true', hint: 'true / false' },

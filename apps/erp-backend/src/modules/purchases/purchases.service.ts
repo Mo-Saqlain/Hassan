@@ -19,6 +19,7 @@ import { SequenceService } from '../sequences/sequence.service';
 import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
+import { RecostService } from '../costing/recost.service';
 
 @Injectable()
 export class PurchasesService {
@@ -32,6 +33,7 @@ export class PurchasesService {
     private readonly journals: JournalService,
     private readonly accounts: AccountsService,
     private readonly itemSerials: ItemSerialsService,
+    private readonly recost: RecostService,
   ) {}
 
   async create(
@@ -406,10 +408,6 @@ export class PurchasesService {
           },
           manager,
         );
-        // Decrement costedQty. avgCost is left in place — we can't reliably
-        // un-roll a weighted average without remembering the prior state,
-        // and the next purchase will recompute it correctly from the new
-        // (lower) qty anyway.
         const it = await itemRepo.findOne({ where: { id: ln.itemId } });
         if (it) {
           it.costedQty = Math.max(0, Number(it.costedQty) - Number(ln.quantity));
@@ -420,7 +418,21 @@ export class PurchasesService {
       p.reversedAt = new Date();
       p.reversedBy = opts.userId;
       p.reversalReason = opts.reason;
-      return purchaseRepo.save(p);
+      const saved = await purchaseRepo.save(p);
+
+      // Now that this bill no longer counts, re-derive the weighted average
+      // from the surviving documents. This is the fix for what used to be an
+      // accepted inaccuracy: a running average cannot be un-rolled, so
+      // reversing a mis-priced bill left avgCost overstated until enough later
+      // purchases diluted it. The replay makes cost a pure function of the
+      // documents that survive, which is also what makes editing them safe.
+      // Same transaction — a failed reversal cannot leave a half-recosted item.
+      await this.recost.recomputeItems(
+        p.lines.map((l) => l.itemId),
+        { manager },
+      );
+
+      return saved;
     });
   }
 }

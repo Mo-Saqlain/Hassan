@@ -16,6 +16,7 @@ import { Item } from '../items/entities/item.entity';
 import { StockService } from '../stock/stock.service';
 import { SequenceService } from '../sequences/sequence.service';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
+import { RecostService } from '../costing/recost.service';
 
 @Injectable()
 export class ReturnsService {
@@ -28,6 +29,7 @@ export class ReturnsService {
     private readonly dataSource: DataSource,
     private readonly sequences: SequenceService,
     private readonly itemSerials: ItemSerialsService,
+    private readonly recost: RecostService,
   ) {}
 
   async createSaleReturn(dto: CreateSaleReturnDto): Promise<SaleReturn> {
@@ -330,7 +332,14 @@ export class ReturnsService {
 
       ret.reversedAt = new Date();
       ret.reversalReason = reason;
-      return repo.save(ret);
+      const saved = await repo.save(ret);
+
+      await this.recost.recomputeItems(
+        ret.lines.map((l) => l.itemId),
+        { manager },
+      );
+
+      return saved;
     });
   }
 
@@ -381,7 +390,14 @@ export class ReturnsService {
 
       ret.reversedAt = new Date();
       ret.reversalReason = reason;
-      return repo.save(ret);
+      const saved = await repo.save(ret);
+
+      await this.recost.recomputeItems(
+        ret.lines.map((l) => l.itemId),
+        { manager },
+      );
+
+      return saved;
     });
   }
 

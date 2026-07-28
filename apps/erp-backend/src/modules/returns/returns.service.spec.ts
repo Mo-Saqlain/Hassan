@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { inMemoryTypeOrm } from '../../testing/test-db';
+import { RecostService } from '../costing/recost.service';
 import { Item } from '../items/entities/item.entity';
 import { Brand } from '../brands/entities/brand.entity';
 import { Category } from '../categories/entities/category.entity';
@@ -58,7 +59,7 @@ describe('ReturnsService — reversal', () => {
         ]),
       ],
       providers: [
-        ReturnsService, StockService, SequenceService, ItemSerialsService,
+        ReturnsService, StockService, SequenceService, ItemSerialsService, RecostService,
       ],
     }).compile();
     await module.init();
@@ -73,9 +74,14 @@ describe('ReturnsService — reversal', () => {
       .save(ds.getRepository(Store).create({ name: 'Main' }));
     storeId = store.id;
 
+    // Opening stock, i.e. 10 units carried in at cost 1000 with no purchase
+    // document behind them. It goes in the opening fields, not straight into
+    // avgCost/costedQty, because reversal recosts and a recost replays from the
+    // opening basis — see Item.openingAvgCost.
     const item = await ds.getRepository(Item).save(
       ds.getRepository(Item).create({
         name: 'Fan', sku: 'FAN-1', purchasePrice: 1000, salePrice: 1500,
+        openingCostedQty: 10, openingAvgCost: 1000,
         costedQty: 10, avgCost: 1000,
       }),
     );

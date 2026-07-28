@@ -93,6 +93,30 @@ export class Item extends BaseEntity {
   costedQty: number;
 
   /**
+   * Cost basis carried in from BEFORE this system held the item's documents —
+   * a migration from previous software, or an opening stocktake. Same idea as
+   * `Customer.openingBalance` / `Account.openingBalance`, applied to cost.
+   *
+   * `RecostService` derives `avgCost` / `costedQty` by replaying purchases,
+   * sales and returns, and it starts that replay from this pair. Without it,
+   * cost seeded directly (no purchase document to replay) would be wiped the
+   * first time anything recosted — so an imported opening stock MUST land here,
+   * not in `avgCost` / `costedQty` directly.
+   *
+   * Left at 0 for items whose entire history was entered as purchases.
+   */
+  @Column('decimal', {
+    precision: 14,
+    scale: 2,
+    name: 'opening_avg_cost',
+    default: 0,
+  })
+  openingAvgCost: number;
+
+  @Column({ type: 'integer', name: 'opening_costed_qty', default: 0 })
+  openingCostedQty: number;
+
+  /**
    * Quantity reserved against pending deliveries / sales orders. The Stock
    * summary surfaces `available = costedQty - reservedQty` so the cashier
    * can't accidentally sell stock that's been promised to a different
