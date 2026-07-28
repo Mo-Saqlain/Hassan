@@ -121,6 +121,24 @@ export class Sale extends BaseEntity {
    * REVERSED chip and is netted out by the reports. The balancing journal
    * entry is linked via `journal_entries.reverses_journal_entry_id`.
    */
+  /**
+   * Edit trail. The invoice keeps its number and its row when corrected — the
+   * shop expects to fix a mis-keyed sale, not to file an amendment — so these
+   * are how you tell that what you're looking at isn't what was first entered.
+   *
+   * The full before/after is in `audit_logs` (AuditSubscriber records every
+   * update); these three exist so the voucher itself can say "revised twice,
+   * last on the 4th, because the price was keyed wrong" without a join.
+   */
+  @Column({ name: 'edit_count', type: 'integer', default: 0 })
+  editCount: number;
+
+  @Column({ name: 'last_edited_at', type: Date, nullable: true })
+  lastEditedAt?: Date;
+
+  @Column({ name: 'last_edit_reason', nullable: true })
+  lastEditReason?: string;
+
   @Column({ name: 'reversed_at', type: Date, nullable: true })
   reversedAt?: Date;
 

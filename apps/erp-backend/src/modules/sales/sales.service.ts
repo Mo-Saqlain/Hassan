@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Sale, SalePaymentCommitment } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -16,6 +16,10 @@ import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
 import { RecostService } from '../costing/recost.service';
+import { PeriodsService } from '../periods/periods.service';
+import { SaleReturn } from '../returns/entities/sale-return.entity';
+import { ServiceTicket } from '../service-tickets/entities/service-ticket.entity';
+import { Delivery } from '../deliveries/entities/delivery.entity';
 
 @Injectable()
 export class SalesService {
@@ -30,6 +34,7 @@ export class SalesService {
     private readonly accounts: AccountsService,
     private readonly itemSerials: ItemSerialsService,
     private readonly recost: RecostService,
+    private readonly periods: PeriodsService,
   ) {}
 
   /**
@@ -96,7 +101,7 @@ export class SalesService {
   async createInTransaction(
     manager: EntityManager,
     dto: CreateSaleDto,
-    opts?: { skipCreditGate?: boolean },
+    opts?: { skipCreditGate?: boolean; replacing?: Sale },
   ): Promise<Sale> {
       const itemRepo = manager.getRepository(Item);
       const saleRepo = manager.getRepository(Sale);
@@ -150,7 +155,12 @@ export class SalesService {
       const paidAmount = dto.paidAmount ?? netAmount;
       const dueAmount = Number((netAmount - paidAmount).toFixed(2));
 
-      const invoiceNo = dto.invoiceNo ?? (await this.nextInvoiceNo(saleRepo));
+      // An edit re-applies onto the SAME row, so it keeps the original number
+      // rather than burning a new one from the sequence.
+      const invoiceNo =
+        opts?.replacing?.invoiceNo ??
+        dto.invoiceNo ??
+        (await this.nextInvoiceNo(saleRepo));
 
       // Sales paid in cash/card/bank credit a specific account (cash drawer,
       // bank wallet, etc.). CREDIT-method sales must not pin an account —
@@ -199,7 +209,7 @@ export class SalesService {
         ? buildCommitments(dueAmount, dto)
         : undefined;
 
-      const sale = saleRepo.create({
+      const fields = {
         invoiceNo,
         customerId: dto.customerId,
         storeId: dto.storeId,
@@ -214,7 +224,33 @@ export class SalesService {
         paymentCommitments,
         amountPaidSettled: paidAmount,
         lines,
-      });
+      };
+
+      // Editing re-applies onto the original row: same id, same invoice number,
+      // same created_at. The old lines are dropped first — they were already
+      // unwound by the caller (stock put back, journal reversed, serials
+      // unbound), so what remains is to replace them.
+      let sale: Sale;
+      if (opts?.replacing) {
+        await manager.getRepository(SaleItem).delete({ saleId: opts.replacing.id });
+        // Object.assign, not repo.merge: merge folds the incoming `lines` into
+        // the entity's existing array, so the old line objects survive in memory
+        // and the cascade re-inserts them — producing a sale with both the old
+        // and the corrected lines, and a duplicate stock movement to match.
+        // Assigning replaces the array outright.
+        sale = Object.assign(opts.replacing, fields);
+        sale.lines = lines;
+        // Drop the eagerly-loaded relation objects. They still point at the
+        // ORIGINAL customer/store/account, and TypeORM lets a loaded relation
+        // win over the raw FK column — so re-pointing customerId while a stale
+        // `customer` object hangs off the entity writes NULL instead. Clearing
+        // them makes the FKs above authoritative.
+        sale.customer = undefined;
+        sale.store = undefined;
+        sale.account = undefined;
+      } else {
+        sale = saleRepo.create(fields);
+      }
       const persisted = await saleRepo.save(sale);
 
       // Freeze the line-level warranty window now that we have the real sale
@@ -736,6 +772,191 @@ export class SalesService {
    * The original row is NOT deleted — it stays visible with the REVERSED chip.
    * Idempotent: re-calling on the same sale just returns the existing reversal.
    */
+  /**
+   * Correct a sale that was entered wrongly — any field, any line — keeping the
+   * same invoice number and the same row.
+   *
+   * Mechanism: unwind everything the original posted (journal entry reversed,
+   * stock movements mirrored back, serials unbound, costedQty restored), then
+   * re-apply the corrected version through the ordinary create path onto that
+   * same row. Nothing is destructively rewritten: the stock ledger and the
+   * journal both keep the original, its unwind, and the correction, so the
+   * history reads as what happened. Every figure the shop looks at is computed
+   * from documents, so ledgers and balances follow immediately; the cost basis
+   * is re-derived at the end.
+   *
+   * Refused rather than half-done when something downstream would be left
+   * dangling — see the guards below, each of which names its blocker.
+   */
+  async edit(
+    id: string,
+    dto: CreateSaleDto,
+    opts: { reason: string; userId?: string },
+  ): Promise<Sale> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('An edit needs a reason.');
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const saleRepo = manager.getRepository(Sale);
+      const original = await saleRepo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!original) throw new NotFoundException(`Sale ${id} not found`);
+
+      await this.assertEditable(manager, original);
+
+      // 1. Unwind. Same steps as a reversal, minus the reversedAt flag: this
+      //    invoice is being corrected, not voided.
+      await this.unwindSaleEffects(manager, original, `Edit: ${reason}`);
+
+      // 2. Re-apply the corrected sale onto the same row.
+      const edited = await this.createInTransaction(manager, dto, {
+        replacing: original,
+        // The residual is re-checked against the customer's limit by the create
+        // path, which is what we want — an edit that pushes them over the limit
+        // should be refused just like a new sale would be.
+      });
+
+      edited.editCount = Number(original.editCount ?? 0) + 1;
+      edited.lastEditedAt = new Date();
+      edited.lastEditReason = reason;
+      const saved = await saleRepo.save(edited);
+
+      // 3. Recost every item involved — the ones that left the sale as well as
+      //    the ones that joined it.
+      const touched = [
+        ...original.lines.map((l) => l.itemId),
+        ...dto.lines.map((l) => l.itemId),
+      ];
+      await this.recost.recomputeItems(touched, { manager });
+
+      // Enqueued inside the transaction so a failed edit can't leave the cloud
+      // an event for a correction that didn't happen. Only when a cloud is
+      // configured, matching create().
+      if (process.env.CLOUD_SYNC_URL) {
+        await this.outbox.enqueue(
+          'SALE_UPDATED',
+          { ...dto, invoiceNo: saved.invoiceNo, editReason: reason },
+          manager,
+        );
+      }
+
+      return saved;
+    });
+  }
+
+  /**
+   * Blockers for editing a posted sale. Each one exists because the alternative
+   * is a document that disagrees with something pointing at it.
+   */
+  private async assertEditable(manager: EntityManager, sale: Sale) {
+    if (sale.reversedAt) {
+      throw new BadRequestException(
+        `Sale ${sale.invoiceNo} is reversed. A reversed voucher is finished — enter a new sale instead of editing this one.`,
+      );
+    }
+
+    // Hard-closed periods are closed for a reason: their numbers have been
+    // reported. Corrections belong in an open period.
+    await this.periods.assertOpen(new Date(sale.createdAt));
+
+    // A return against this sale was priced off its lines; changing them under
+    // the return would leave the credit referring to quantities that no longer
+    // exist.
+    const returnCount = await manager.getRepository(SaleReturn).count({
+      where: { saleId: sale.id, reversedAt: IsNull() },
+    });
+    if (returnCount > 0) {
+      throw new BadRequestException(
+        `Sale ${sale.invoiceNo} has ${returnCount} return(s) booked against it. Reverse the return(s) first, then edit the sale.`,
+      );
+    }
+
+    // Service tickets point at a specific sale LINE. Replacing the lines would
+    // orphan the ticket's link to what was sold.
+    const lineIds = sale.lines.map((l) => l.id);
+    if (lineIds.length > 0) {
+      const ticketCount = await manager
+        .getRepository(ServiceTicket)
+        .count({ where: { saleItemId: In(lineIds) } });
+      if (ticketCount > 0) {
+        throw new BadRequestException(
+          `Sale ${sale.invoiceNo} has ${ticketCount} service ticket(s) linked to its lines. Unlink or close them before editing.`,
+        );
+      }
+    }
+
+    // A delivery holds a reservation derived from this sale's lines, so editing
+    // them would leave Item.reservedQty describing goods that aren't on the
+    // invoice any more.
+    const deliveryCount = await manager.getRepository(Delivery).count({
+      where: { saleId: sale.id },
+    });
+    if (deliveryCount > 0) {
+      throw new BadRequestException(
+        `Sale ${sale.invoiceNo} has ${deliveryCount} delivery record(s). Delete or complete them before editing the sale.`,
+      );
+    }
+
+    // Money collected after the fact against a commitment schedule was applied
+    // to THIS residual; changing the total could make the settled amount exceed
+    // what is now owed.
+    if (Number(sale.amountPaidSettled ?? 0) > Number(sale.paidAmount ?? 0) + 0.005) {
+      throw new BadRequestException(
+        `Sale ${sale.invoiceNo} has instalments settled against it. Reverse those receipts first, then edit the sale.`,
+      );
+    }
+  }
+
+  /**
+   * The undo half shared by reversal and editing: balance out the journal, mirror
+   * the stock back, hand the serials back, restore the costed quantity.
+   */
+  private async unwindSaleEffects(
+    manager: EntityManager,
+    sale: Sale,
+    note: string,
+  ) {
+    const originalEntry = await this.journals.findBySource('SALE', sale.invoiceNo);
+    if (originalEntry) {
+      await this.journals.reverse(
+        originalEntry.id,
+        {
+          entryDate: new Date(),
+          description: `Reversal of sale ${sale.invoiceNo}`,
+          reason: note,
+        },
+        manager,
+      );
+    }
+
+    const itemRepo = manager.getRepository(Item);
+    for (const ln of sale.lines) {
+      await this.stockService.recordMovement(
+        {
+          itemId: ln.itemId,
+          storeId: sale.storeId,
+          type: 'IN',
+          quantity: ln.quantity,
+          referenceType: 'SALE_REVERSAL',
+          referenceId: sale.id,
+          note: `${note} (${sale.invoiceNo})`,
+        },
+        manager,
+      );
+      const it = await itemRepo.findOne({ where: { id: ln.itemId } });
+      if (it) {
+        it.costedQty = Number(it.costedQty) + Number(ln.quantity);
+        await itemRepo.save(it);
+      }
+    }
+
+    await this.itemSerials.unbindFromInvoice(sale.invoiceNo, manager);
+  }
+
   async reverse(
     id: string,
     opts: { userId?: string; reason: string },

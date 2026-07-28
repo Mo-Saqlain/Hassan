@@ -35,6 +35,10 @@ import { PeriodsService } from '../periods/periods.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { ItemSerial } from '../item-serials/entities/item-serial.entity';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
+// Read by the edit guards: a sale with a delivery or a service ticket attached
+// can't have its lines replaced from under them.
+import { Delivery } from '../deliveries/entities/delivery.entity';
+import { ServiceTicket } from '../service-tickets/entities/service-ticket.entity';
 
 describe('SalesService', () => {
   let service: SalesService;
@@ -52,6 +56,7 @@ describe('SalesService', () => {
             StockMovement, Sale, SaleItem, SyncQueueEntry, Sequence, Payment,
             JournalEntry, JournalLine, AccountingPeriod, ItemSerial,
             Purchase, PurchaseItem, SaleReturn, SaleReturnItem, PurchaseReturn, PurchaseReturnItem,
+            Delivery, ServiceTicket,
           ]),
         ),
         TypeOrmModule.forFeature([
@@ -808,6 +813,196 @@ describe('SalesService', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].itemId).toBe(warrantyItemId);
       expect(rows[0].invoiceNo).toBe(sale.invoiceNo);
+    });
+  });
+
+  // ─── editing ──────────────────────────────────────────────────────────────
+
+  describe('edit', () => {
+    it('corrects quantity and price, keeping the invoice number and row', async () => {
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 3, unitPrice: 500 }],
+        paymentMethod: 'CASH',
+      });
+      expect(await stock.getOnHand(itemId)).toBe(7);
+
+      const edited = await service.edit(
+        sale.id,
+        { lines: [{ itemId, quantity: 2, unitPrice: 450 }], paymentMethod: 'CASH' },
+        { reason: 'price agreed was 450 for 2, not 500 for 3' },
+      );
+
+      // Same document, corrected content.
+      expect(edited.id).toBe(sale.id);
+      expect(edited.invoiceNo).toBe(sale.invoiceNo);
+      expect(Number(edited.netAmount)).toBe(900);
+      expect(edited.lines).toHaveLength(1);
+      expect(Number(edited.lines[0].quantity)).toBe(2);
+      // Stock reflects 2 sold, not 3 — the original OUT was mirrored back.
+      expect(await stock.getOnHand(itemId)).toBe(8);
+      // And it says it was edited.
+      expect(edited.editCount).toBe(1);
+      expect(edited.lastEditReason).toContain('450');
+      expect(edited.lastEditedAt).toBeTruthy();
+    });
+
+    it('leaves the stock ledger auditable — original, unwind, correction', async () => {
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 3, unitPrice: 500 }],
+      });
+      await service.edit(
+        sale.id,
+        { lines: [{ itemId, quantity: 1, unitPrice: 500 }] },
+        { reason: 'only one went out' },
+      );
+
+      const moves = await ds.getRepository(StockMovement).find({
+        where: { referenceId: sale.id },
+        order: { createdAt: 'ASC' },
+      });
+      // OUT 3 (original), IN 3 (unwind), OUT 1 (correction) — nothing deleted.
+      expect(moves.map((m) => `${m.type}${m.quantity}`)).toEqual([
+        'OUT3',
+        'IN3',
+        'OUT1',
+      ]);
+    });
+
+    it('can change the customer and the payment terms', async () => {
+      const c1 = await ds.getRepository(Customer).save(
+        ds.getRepository(Customer).create({
+          name: 'Right customer', creditEnabled: true, creditLimit: 100000,
+        }),
+      );
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+        paymentMethod: 'CASH',
+      });
+
+      const edited = await service.edit(
+        sale.id,
+        {
+          customerId: c1.id,
+          lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+          paymentMethod: 'CREDIT',
+          paidAmount: 0,
+        },
+        { reason: 'was a credit sale to the wrong walk-in' },
+      );
+
+      expect(edited.customerId).toBe(c1.id);
+      expect(edited.paymentMethod).toBe('CREDIT');
+      expect(Number(edited.dueAmount)).toBe(500);
+      // CREDIT sales must not pin an account, same rule as on create.
+      expect(edited.accountId).toBeFalsy();
+    });
+
+    it('recosts, so the costed pool reflects the corrected sale', async () => {
+      // Give the item an opening cost basis — this fixture seeds stock with a
+      // raw movement rather than a purchase, so without an opening basis there
+      // is no cost history to replay and everything derives to zero.
+      const repo = ds.getRepository(Item);
+      const it = await repo.findOneByOrFail({ id: itemId });
+      it.openingCostedQty = 10;
+      it.openingAvgCost = 300;
+      await repo.save(it);
+
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 4, unitPrice: 500 }],
+      });
+
+      await service.edit(
+        sale.id,
+        { lines: [{ itemId, quantity: 1, unitPrice: 500 }] },
+        { reason: 'three were never collected' },
+      );
+
+      // Derived from what survives: 10 carried in, 1 sold on the corrected
+      // invoice. The withdrawn 3 units are back in the pool.
+      expect(Number((await repo.findOneByOrFail({ id: itemId })).costedQty)).toBe(9);
+    });
+
+    it('requires a reason and refuses to edit a reversed sale', async () => {
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 1, unitPrice: 500 }],
+      });
+      await expect(
+        service.edit(sale.id, { lines: [{ itemId, quantity: 1, unitPrice: 400 }] }, { reason: '  ' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      await service.reverse(sale.id, { reason: 'voided' });
+      await expect(
+        service.edit(
+          sale.id,
+          { lines: [{ itemId, quantity: 1, unitPrice: 400 }] },
+          { reason: 'too late' },
+        ),
+      ).rejects.toThrow(/reversed/i);
+    });
+
+    it('refuses while a return, delivery or service ticket depends on it', async () => {
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 2, unitPrice: 500 }],
+      });
+      const newLines = [{ itemId, quantity: 1, unitPrice: 500 }];
+
+      // A return priced off these lines.
+      const sr = await ds.getRepository(SaleReturn).save(
+        ds.getRepository(SaleReturn).create({
+          returnNo: 'SR-DEP-1', saleId: sale.id, totalAmount: 500, lines: [],
+        }),
+      );
+      await expect(
+        service.edit(sale.id, { lines: newLines }, { reason: 'x' }),
+      ).rejects.toThrow(/return/i);
+      await ds.getRepository(SaleReturn).remove(sr);
+
+      // A delivery holding a reservation derived from these lines.
+      const dl = await ds.getRepository(Delivery).save(
+        ds.getRepository(Delivery).create({
+          deliveryNo: 'DLV-DEP-1', saleId: sale.id, status: 'PENDING',
+        }),
+      );
+      await expect(
+        service.edit(sale.id, { lines: newLines }, { reason: 'x' }),
+      ).rejects.toThrow(/delivery/i);
+      await ds.getRepository(Delivery).remove(dl);
+
+      // A service ticket pointing at one of the lines.
+      const fresh = await service.findOne(sale.id);
+      await ds.getRepository(ServiceTicket).save(
+        ds.getRepository(ServiceTicket).create({
+          ticketNo: 'SVC-DEP-1',
+          complaint: 'rattles',
+          saleItemId: fresh.lines[0].id,
+          status: 'RECEIVED',
+          receivedAt: new Date().toISOString().slice(0, 10),
+        }),
+      );
+      await expect(
+        service.edit(sale.id, { lines: newLines }, { reason: 'x' }),
+      ).rejects.toThrow(/service ticket/i);
+    });
+
+    it('rolls the whole edit back when the corrected version is invalid', async () => {
+      const sale = await service.create({
+        lines: [{ itemId, quantity: 2, unitPrice: 500 }],
+      });
+
+      // 8 on hand + 2 coming back on the unwind = 10; asking for 50 can't work.
+      await expect(
+        service.edit(
+          sale.id,
+          { lines: [{ itemId, quantity: 50, unitPrice: 500 }] },
+          { reason: 'fat finger' },
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      // Untouched: still the original sale, still 8 on hand, no edit recorded.
+      const after = await service.findOne(sale.id);
+      expect(Number(after.lines[0].quantity)).toBe(2);
+      expect(after.editCount).toBe(0);
+      expect(await stock.getOnHand(itemId)).toBe(8);
     });
   });
 });

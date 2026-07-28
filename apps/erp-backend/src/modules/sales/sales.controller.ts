@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -11,6 +12,7 @@ import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { CreateSaleVoucherDto } from './dto/create-sale-voucher.dto';
 import { ReverseSaleDto } from './dto/reverse-sale.dto';
+import { EditSaleDto } from './dto/edit-sale.dto';
 import { SettleCommitmentDto } from './dto/settle-commitment.dto';
 
 @Controller('sales')
@@ -99,6 +101,19 @@ export class SalesController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);
+  }
+
+  /**
+   * Correct a posted sale in place — same invoice number, same row. Body is a
+   * full sale (the corrected version), plus `reason`.
+   */
+  @Patch(':id')
+  edit(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EditSaleDto,
+  ) {
+    const { reason, userId, ...sale } = dto;
+    return this.service.edit(id, sale, { reason, userId });
   }
 
   @Post(':id/reverse')

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import {
   SyncQueueEntry,
@@ -14,9 +14,23 @@ export class OutboxService {
     private readonly repo: Repository<SyncQueueEntry>,
   ) {}
 
-  enqueue(type: string, payload: Record<string, unknown>) {
-    return this.repo.save(
-      this.repo.create({
+  /**
+   * Queue an event for the next manual push.
+   *
+   * Pass `manager` to enlist in the caller's transaction — without it the event
+   * is written on its own connection, so a transaction that later rolls back
+   * leaves a queued event describing something that never happened. Callers
+   * that enqueue *after* their transaction commits (the plain create paths) can
+   * omit it.
+   */
+  enqueue(
+    type: string,
+    payload: Record<string, unknown>,
+    manager?: EntityManager,
+  ) {
+    const repo = manager ? manager.getRepository(SyncQueueEntry) : this.repo;
+    return repo.save(
+      repo.create({
         id: randomUUID(),
         type,
         payload: JSON.stringify(payload),

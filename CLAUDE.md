@@ -221,7 +221,7 @@ Don't add a `@Cron` back unless the product direction explicitly changes — the
 
 ## Testing
 
-Backend has **207 Jest tests across 18 spec files** (`src/**/*.spec.ts`) covering the high-value services:
+Backend has **214 Jest tests across 18 spec files** (`src/**/*.spec.ts`) covering the high-value services:
 
 ```
 cd apps/erp-backend && npm test               # full suite (~14s)
@@ -242,6 +242,7 @@ Spec files: `app.controller`, `cash-register/cash-register.service`, `categories
 | Add a transactional flow | Backend module + a dedicated frontend page wired as a tab inside the relevant hub (Sales, Purchase, Employee, etc.). |
 | Add a sync event type | Add to `SyncService.handleEvent` switch (cloud side) and call `outbox.enqueue()` at the local origin. |
 | Add a new report | Add a method on `ReportsService`, a route in `ReportsController`, then consume it in `Financials.js` (new tab) or a new page. |
+| Edit a posted voucher | `PATCH /api/sales/:id` with the full corrected sale + `reason`. `SalesService.edit` unwinds (journal reversed, stock mirrored back, serials unbound) then re-applies through `createInTransaction(.., { replacing })` onto the SAME row — same invoice number, same id — and recosts. Guards refuse when a return, delivery, service ticket or settled instalment points at it; a hard-closed period blocks it. Only sales so far; purchases/payments/transfers/returns follow the same shape. |
 | Correct a cost basis | Cost is derived — call `RecostService.recomputeItem(itemId, { manager })` (or `POST /api/costing/recompute`, superuser) rather than writing `avgCost` by hand. Any service that changes a cost-affecting document must recost the items it touched, inside the same transaction. |
 | Post to the ledger | Call `JournalService.post(input, manager)` with the operation's `EntityManager` so the journal joins the same transaction. Resolve system accounts via `AccountsService.findSystem`. Post to leaf accounts, never control nodes. |
 | Allocate a voucher number | `SequenceService.next(prefix, () => repo.count())`. Don't hand-roll `count + 1`. |
