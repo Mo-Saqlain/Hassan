@@ -359,6 +359,26 @@ describe('ReturnsService — reversal', () => {
     expect(await costedQty()).toBe(10);
   });
 
+  it('edits a purchase return in place, correcting the stock that left', async () => {
+    const r = await service.createPurchaseReturn({
+      storeId,
+      lines: [{ itemId, quantity: 4, unitPrice: 1000 }],
+    });
+    expect(await stock.getOnHand(itemId)).toBe(6);
+
+    const edited = await service.editPurchaseReturn(
+      r.id,
+      { storeId, lines: [{ itemId, quantity: 1, unitPrice: 1000 }] },
+      { reason: 'only one went back to the supplier' },
+    );
+
+    expect(edited.id).toBe(r.id);
+    expect(edited.returnNo).toBe(r.returnNo);
+    expect(Number(edited.totalAmount)).toBe(1000);
+    expect(await stock.getOnHand(itemId)).toBe(9); // 4 back in, 1 out again
+    expect(edited.editCount).toBe(1);
+  });
+
   it('purchase-return reversal is idempotent', async () => {
     const r = await service.createPurchaseReturn({
       storeId,

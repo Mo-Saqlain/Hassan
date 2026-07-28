@@ -12,6 +12,7 @@ import { CreateSaleReturnDto } from './dto/create-sale-return.dto';
 import { CreatePurchaseReturnDto } from './dto/create-purchase-return.dto';
 import { ReverseReturnDto } from './dto/reverse-return.dto';
 import { EditSaleReturnDto } from './dto/edit-sale-return.dto';
+import { EditPurchaseReturnDto } from './dto/edit-purchase-return.dto';
 
 @Controller()
 export class ReturnsController {
@@ -66,7 +67,16 @@ export class ReturnsController {
     return this.service.findPurchaseReturn(id);
   }
 
-  /** Undo a purchase return booked in error. Keeps the row, sets `reversedAt`. */
+  /** Correct a purchase return in place — same return number, same row. */
+  @Patch('purchase-returns/:id')
+  editPurchaseReturn(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EditPurchaseReturnDto,
+  ) {
+    const { editReason, userId, ...ret } = dto;
+    return this.service.editPurchaseReturn(id, ret, { reason: editReason, userId });
+  }
+
   @Post('purchase-returns/:id/reverse')
   reversePurchaseReturn(
     @Param('id', ParseUUIDPipe) id: string,

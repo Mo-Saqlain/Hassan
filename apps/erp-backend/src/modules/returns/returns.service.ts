@@ -191,6 +191,7 @@ export class ReturnsService {
   async createPurchaseReturnInTransaction(
     manager: EntityManager,
     dto: CreatePurchaseReturnDto,
+    opts?: { replacing?: PurchaseReturn },
   ): Promise<PurchaseReturn> {
     const itemRepo = manager.getRepository(Item);
     const repo = manager.getRepository(PurchaseReturn);
@@ -214,19 +215,36 @@ export class ReturnsService {
       );
     }
 
-    const returnNo = dto.returnNo ?? (await this.nextReturnNo(repo, 'PR'));
-    const saved = await repo.save(
-      repo.create({
-        returnNo,
-        purchaseId: dto.purchaseId,
-        supplierId: dto.supplierId,
-        storeId: dto.storeId,
-        totalAmount,
-        disposition,
-        reason: dto.reason,
-        lines,
-      }),
-    );
+    const returnNo =
+      opts?.replacing?.returnNo ??
+      dto.returnNo ??
+      (await this.nextReturnNo(repo, 'PR'));
+
+    const fields = {
+      returnNo,
+      purchaseId: dto.purchaseId,
+      supplierId: dto.supplierId,
+      storeId: dto.storeId,
+      totalAmount,
+      disposition,
+      reason: dto.reason,
+      lines,
+    };
+
+    let row: PurchaseReturn;
+    if (opts?.replacing) {
+      await manager
+        .getRepository(PurchaseReturnItem)
+        .delete({ purchaseReturnId: opts.replacing.id });
+      row = Object.assign(opts.replacing, fields);
+      row.lines = lines;
+      row.supplier = undefined;
+      row.store = undefined;
+      row.purchase = undefined;
+    } else {
+      row = repo.create(fields);
+    }
+    const saved = await repo.save(row);
 
     // Physical leg — skipped for a pure WARRANTY_CREDIT (no goods leave us).
     if (moveStock) {
@@ -506,6 +524,91 @@ export class ReturnsService {
         } catch {
           // Best-effort, same as the forward path.
         }
+      }
+    }
+  }
+
+  /**
+   * Correct a purchase return in place — same return number, same row. Mirror of
+   * the sale-return case: a STOCK return sent goods out, so the unwind brings
+   * them back before the corrected version sends the right quantity out again; a
+   * WARRANTY_CREDIT return moved nothing, so only the figures change.
+   */
+  async editPurchaseReturn(
+    id: string,
+    dto: CreatePurchaseReturnDto,
+    opts: { reason: string; userId?: string },
+  ): Promise<PurchaseReturn> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('An edit needs a reason.');
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(PurchaseReturn);
+      const original = await repo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!original) {
+        throw new NotFoundException(`Purchase return ${id} not found`);
+      }
+      if (original.reversedAt) {
+        throw new BadRequestException(
+          `Return ${original.returnNo} is reversed. Enter a new return instead of editing this one.`,
+        );
+      }
+      if (original.linkedSaleReturnId) {
+        throw new BadRequestException(
+          `Return ${original.returnNo} is the supplier-credit leg of an exchange. Reverse the exchange and re-enter it rather than editing this leg.`,
+        );
+      }
+
+      const oldItemIds = original.lines.map((l) => l.itemId);
+      await this.unwindPurchaseReturn(manager, original, `Edit: ${reason}`);
+
+      const edited = await this.createPurchaseReturnInTransaction(manager, dto, {
+        replacing: original,
+      });
+      edited.editCount = Number(original.editCount ?? 0) + 1;
+      edited.lastEditedAt = new Date();
+      edited.lastEditReason = reason;
+      const saved = await repo.save(edited);
+
+      await this.recost.recomputeItems(
+        [...oldItemIds, ...dto.lines.map((l) => l.itemId)],
+        { manager },
+      );
+
+      return saved;
+    });
+  }
+
+  /** Undo half shared by reversing and editing a purchase return. */
+  private async unwindPurchaseReturn(
+    manager: EntityManager,
+    ret: PurchaseReturn,
+    note: string,
+  ) {
+    if (ret.disposition !== 'STOCK') return;
+    const itemRepo = manager.getRepository(Item);
+    for (const ln of ret.lines) {
+      await this.stockService.recordMovement(
+        {
+          itemId: ln.itemId,
+          storeId: ret.storeId,
+          type: 'IN',
+          quantity: ln.quantity,
+          referenceType: 'PURCHASE_RETURN_REVERSAL',
+          referenceId: ret.id,
+          note: `${note} (${ret.returnNo})`,
+        },
+        manager,
+      );
+      const it = await itemRepo.findOne({ where: { id: ln.itemId } });
+      if (it) {
+        it.costedQty = Number(it.costedQty) + Number(ln.quantity);
+        await itemRepo.save(it);
       }
     }
   }
