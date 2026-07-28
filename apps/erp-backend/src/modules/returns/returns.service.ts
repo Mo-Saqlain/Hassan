@@ -53,6 +53,7 @@ export class ReturnsService {
   async createSaleReturnInTransaction(
     manager: EntityManager,
     dto: CreateSaleReturnDto,
+    opts?: { replacing?: SaleReturn },
   ): Promise<SaleReturn> {
     const itemRepo = manager.getRepository(Item);
     const repo = manager.getRepository(SaleReturn);
@@ -80,27 +81,49 @@ export class ReturnsService {
       );
     }
 
-    const returnNo = dto.returnNo ?? (await this.nextReturnNo(repo, 'SR'));
+    // An edit re-applies onto the same row, keeping the number the customer's
+    // copy shows.
+    const returnNo =
+      opts?.replacing?.returnNo ??
+      dto.returnNo ??
+      (await this.nextReturnNo(repo, 'SR'));
     // If a refund account is given, record the cash actually handed back —
     // defaulting to the full return value when no explicit amount is passed.
     const refundAmount = dto.refundAccountId
       ? Number((dto.refundAmount ?? totalAmount).toFixed(2))
       : undefined;
-    const saved = await repo.save(
-      repo.create({
-        returnNo,
-        saleId: dto.saleId,
-        customerId: dto.customerId,
-        storeId: dto.storeId,
-        totalAmount,
-        disposition,
-        replacementSaleId: dto.replacementSaleId,
-        refundAccountId: dto.refundAccountId,
-        refundAmount,
-        reason: dto.reason,
-        lines,
-      }),
-    );
+    const fields = {
+      returnNo,
+      saleId: dto.saleId,
+      customerId: dto.customerId,
+      storeId: dto.storeId,
+      totalAmount,
+      disposition,
+      replacementSaleId: dto.replacementSaleId,
+      refundAccountId: dto.refundAccountId,
+      refundAmount,
+      reason: dto.reason,
+      lines,
+    };
+
+    let row: SaleReturn;
+    if (opts?.replacing) {
+      await manager
+        .getRepository(SaleReturnItem)
+        .delete({ saleReturnId: opts.replacing.id });
+      // Object.assign + explicit lines + cleared eager relations — see the
+      // matching note in SalesService.createInTransaction for why merge() and a
+      // stale relation object each break this.
+      row = Object.assign(opts.replacing, fields);
+      row.lines = lines;
+      row.customer = undefined;
+      row.store = undefined;
+      row.sale = undefined;
+      row.refundAccount = undefined;
+    } else {
+      row = repo.create(fields);
+    }
+    const saved = await repo.save(row);
 
     // Physical leg — only when the goods actually come back to our shelf.
     // A CLAIMED_TO_COMPANY unit never re-enters stock, so we book nothing here.
@@ -297,50 +320,12 @@ export class ReturnsService {
         }
       }
 
-      // Physical leg — only RESTOCK ever moved stock, so only RESTOCK unwinds.
-      // The OUT can legitimately fail: if the returned unit has already been
-      // re-sold, on-hand won't cover it. StockService raises the negative-stock
-      // guard, which is the right answer — the operator must sort the physical
-      // stock out before the paperwork can be corrected.
-      if (ret.disposition === 'RESTOCK') {
-        const itemRepo = manager.getRepository(Item);
-        for (const ln of ret.lines) {
-          await this.stockService.recordMovement(
-            {
-              itemId: ln.itemId,
-              storeId: ret.storeId,
-              type: 'OUT',
-              quantity: ln.quantity,
-              referenceType: 'SALE_RETURN_REVERSAL',
-              referenceId: ret.id,
-              note: `Reversal of ${ret.returnNo}: ${reason}`,
-            },
-            manager,
-          );
-          const it = await itemRepo.findOne({ where: { id: ln.itemId } });
-          if (it) {
-            it.costedQty = Math.max(
-              0,
-              Number(it.costedQty) - Number(ln.quantity),
-            );
-            await itemRepo.save(it);
-          }
-        }
-      }
-
-      // Serial lifecycle — back to SOLD. Best-effort for the same reason the
-      // forward path is: the physical outcome stands whether or not every
-      // serial resolves, and a unit handled again since the return (now
-      // IN_STOCK or DAMAGED) is refused rather than silently rewritten.
-      for (const ln of ret.lines) {
-        for (const s of ln.serials ?? []) {
-          try {
-            await this.itemSerials.restoreToSold(s, manager);
-          } catch {
-            // Tolerated — see above.
-          }
-        }
-      }
+      // Physical + serial unwind, shared with editing. The stock OUT can
+      // legitimately fail: if the returned unit has already been re-sold,
+      // on-hand won't cover it and StockService raises the negative-stock guard
+      // — the right answer, since the physical stock has to be sorted out before
+      // the paperwork can be.
+      await this.unwindSaleReturn(manager, ret, `Reversal: ${reason}`);
 
       ret.reversedAt = new Date();
       ret.reversalReason = reason;
@@ -422,6 +407,107 @@ export class ReturnsService {
 
       return saved;
     })();
+  }
+
+  /**
+   * Correct a sale return in place — same return number, same row. Unwinds the
+   * original (stock re-issued if it restocked, serials back to SOLD) and
+   * re-applies the corrected return through the same create path, then recosts.
+   *
+   * Refused for the give-back leg of an exchange: those two documents were
+   * priced against each other, so correcting one alone would leave the pair
+   * inconsistent. Reverse the exchange and re-enter it instead.
+   */
+  async editSaleReturn(
+    id: string,
+    dto: CreateSaleReturnDto,
+    opts: { reason: string; userId?: string },
+  ): Promise<SaleReturn> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('An edit needs a reason.');
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(SaleReturn);
+      const original = await repo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!original) throw new NotFoundException(`Sale return ${id} not found`);
+      if (original.reversedAt) {
+        throw new BadRequestException(
+          `Return ${original.returnNo} is reversed. Enter a new return instead of editing this one.`,
+        );
+      }
+      if (original.replacementSaleId) {
+        throw new BadRequestException(
+          `Return ${original.returnNo} is the give-back leg of an exchange. Reverse the exchange and re-enter it rather than editing this leg.`,
+        );
+      }
+
+      const oldItemIds = original.lines.map((l) => l.itemId);
+      await this.unwindSaleReturn(manager, original, `Edit: ${reason}`);
+
+      const edited = await this.createSaleReturnInTransaction(manager, dto, {
+        replacing: original,
+      });
+      edited.editCount = Number(original.editCount ?? 0) + 1;
+      edited.lastEditedAt = new Date();
+      edited.lastEditReason = reason;
+      const saved = await repo.save(edited);
+
+      await this.recost.recomputeItems(
+        [...oldItemIds, ...dto.lines.map((l) => l.itemId)],
+        { manager },
+      );
+
+      return saved;
+    });
+  }
+
+  /**
+   * The undo half shared by reversing and editing a sale return: put the goods
+   * back where they were and hand the serials back to their previous state.
+   * Does NOT touch `reversedAt` — reversal owns that flag.
+   */
+  private async unwindSaleReturn(
+    manager: EntityManager,
+    ret: SaleReturn,
+    note: string,
+  ) {
+    if (ret.disposition === 'RESTOCK') {
+      const itemRepo = manager.getRepository(Item);
+      for (const ln of ret.lines) {
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: ret.storeId,
+            type: 'OUT',
+            quantity: ln.quantity,
+            referenceType: 'SALE_RETURN_REVERSAL',
+            referenceId: ret.id,
+            note: `${note} (${ret.returnNo})`,
+          },
+          manager,
+        );
+        const it = await itemRepo.findOne({ where: { id: ln.itemId } });
+        if (it) {
+          it.costedQty = Math.max(0, Number(it.costedQty) - Number(ln.quantity));
+          await itemRepo.save(it);
+        }
+      }
+    }
+
+    for (const ln of ret.lines) {
+      for (const s of ln.serials ?? []) {
+        try {
+          await this.itemSerials.restoreToSold(s, manager);
+        } catch {
+          // Best-effort, same as the forward path.
+        }
+      }
+    }
   }
 
   private async nextReturnNo(

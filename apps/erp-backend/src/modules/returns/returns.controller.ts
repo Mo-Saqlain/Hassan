@@ -4,12 +4,14 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
 } from '@nestjs/common';
 import { ReturnsService } from './returns.service';
 import { CreateSaleReturnDto } from './dto/create-sale-return.dto';
 import { CreatePurchaseReturnDto } from './dto/create-purchase-return.dto';
 import { ReverseReturnDto } from './dto/reverse-return.dto';
+import { EditSaleReturnDto } from './dto/edit-sale-return.dto';
 
 @Controller()
 export class ReturnsController {
@@ -28,6 +30,16 @@ export class ReturnsController {
   @Get('sale-returns/:id')
   getSaleReturn(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findSaleReturn(id);
+  }
+
+  /** Correct a sale return in place — same return number, same row. */
+  @Patch('sale-returns/:id')
+  editSaleReturn(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EditSaleReturnDto,
+  ) {
+    const { editReason, userId, ...ret } = dto;
+    return this.service.editSaleReturn(id, ret, { reason: editReason, userId });
   }
 
   /** Undo a sale return booked in error. Keeps the row, sets `reversedAt`. */

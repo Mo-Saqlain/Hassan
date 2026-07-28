@@ -87,6 +87,125 @@ export class StockTransfersService {
   }
 
   /**
+   * Correct a transfer in place — same transfer number, same row. A transfer is
+   * pure stock movement, so the edit mirrors the original pair back (OUT of the
+   * old destination, IN to the old source) and books the corrected pair. No
+   * journal and no cost side: stock moves between stores at unchanged cost.
+   *
+   * Refused if the old destination no longer holds the units, same as reversal.
+   */
+  async edit(
+    id: string,
+    dto: CreateStockTransferDto,
+    opts: { reason: string; userId?: string },
+  ): Promise<StockTransfer> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('An edit needs a reason.');
+    }
+    if (dto.fromStoreId === dto.toStoreId) {
+      throw new BadRequestException(
+        'fromStoreId and toStoreId must differ — pick two different stores',
+      );
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(StockTransfer);
+      const original = await repo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!original) throw new NotFoundException(`Stock transfer ${id} not found`);
+      if (original.reversedAt) {
+        throw new BadRequestException(
+          `Transfer ${original.transferNo} is reversed. Enter a new transfer instead of editing this one.`,
+        );
+      }
+
+      // Mirror the original movements back.
+      for (const ln of original.lines) {
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: original.toStoreId,
+            type: 'OUT',
+            quantity: ln.quantity,
+            referenceType: 'ADJUSTMENT',
+            referenceId: original.id,
+            note: `Edit of ${original.transferNo}: ${reason}`,
+          },
+          manager,
+        );
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: original.fromStoreId,
+            type: 'IN',
+            quantity: ln.quantity,
+            referenceType: 'ADJUSTMENT',
+            referenceId: original.id,
+            note: `Edit of ${original.transferNo}: ${reason}`,
+          },
+          manager,
+        );
+      }
+
+      await manager
+        .getRepository(StockTransferItem)
+        .delete({ stockTransferId: original.id });
+
+      const lines = dto.lines.map((ln) =>
+        manager.create(StockTransferItem, {
+          itemId: ln.itemId,
+          quantity: ln.quantity,
+        }),
+      );
+      Object.assign(original, {
+        fromStoreId: dto.fromStoreId,
+        toStoreId: dto.toStoreId,
+        transferDate: dto.transferDate ?? original.transferDate,
+        notes: dto.notes,
+        lines,
+      });
+      original.fromStore = undefined as unknown as StockTransfer['fromStore'];
+      original.toStore = undefined as unknown as StockTransfer['toStore'];
+      original.editCount = Number(original.editCount ?? 0) + 1;
+      original.lastEditedAt = new Date();
+      original.lastEditReason = reason;
+      const saved = await repo.save(original);
+
+      for (const ln of saved.lines) {
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: saved.fromStoreId,
+            type: 'OUT',
+            quantity: ln.quantity,
+            referenceType: 'ADJUSTMENT',
+            referenceId: saved.id,
+            note: `Transfer out → ${saved.transferNo}`,
+          },
+          manager,
+        );
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: saved.toStoreId,
+            type: 'IN',
+            quantity: ln.quantity,
+            referenceType: 'ADJUSTMENT',
+            referenceId: saved.id,
+            note: `Transfer in ← ${saved.transferNo}`,
+          },
+          manager,
+        );
+      }
+
+      return saved;
+    });
+  }
+
+  /**
    * Walk back a transfer sent to the wrong store (or entered twice) by booking
    * the mirror movements: OUT of the destination, IN to the source. No cost side
    * — a transfer moves stock between stores at unchanged cost, so `costedQty`

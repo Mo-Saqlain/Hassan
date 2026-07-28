@@ -245,6 +245,87 @@ describe('ReturnsService — reversal', () => {
     expect((await service.findSaleReturn(r.id)).reversedAt).toBeFalsy();
   });
 
+  // ── editing ───────────────────────────────────────────────────────────────
+
+  it('edits a sale return in place, keeping its number and fixing the stock', async () => {
+    const r = await service.createSaleReturn({
+      storeId,
+      lines: [{ itemId, quantity: 3, unitPrice: 1500 }],
+    });
+    expect(await stock.getOnHand(itemId)).toBe(13);
+
+    const edited = await service.editSaleReturn(
+      r.id,
+      { storeId, lines: [{ itemId, quantity: 1, unitPrice: 1500 }] },
+      { reason: 'only one came back' },
+    );
+
+    expect(edited.id).toBe(r.id);
+    expect(edited.returnNo).toBe(r.returnNo);
+    expect(Number(edited.totalAmount)).toBe(1500);
+    expect(edited.lines).toHaveLength(1);
+    // 3 went back out on the unwind, 1 came in on the correction.
+    expect(await stock.getOnHand(itemId)).toBe(11);
+    expect(edited.editCount).toBe(1);
+    expect(edited.lastEditReason).toBe('only one came back');
+  });
+
+  it('can turn a restock into a company claim, releasing the stock again', async () => {
+    const r = await service.createSaleReturn({
+      storeId,
+      lines: [{ itemId, quantity: 2, unitPrice: 1500 }],
+    });
+    expect(await stock.getOnHand(itemId)).toBe(12);
+
+    const edited = await service.editSaleReturn(
+      r.id,
+      {
+        storeId,
+        disposition: 'CLAIMED_TO_COMPANY',
+        lines: [{ itemId, quantity: 2, unitPrice: 1500 }],
+      },
+      { reason: 'went to the company, never hit our shelf' },
+    );
+
+    expect(edited.disposition).toBe('CLAIMED_TO_COMPANY');
+    // The restock is undone and no new IN is booked.
+    expect(await stock.getOnHand(itemId)).toBe(10);
+  });
+
+  it('refuses to edit a reversed return or an exchange give-back', async () => {
+    const r = await service.createSaleReturn({
+      storeId,
+      lines: [{ itemId, quantity: 1, unitPrice: 1500 }],
+    });
+    await service.reverseSaleReturn(r.id, { reason: 'voided' });
+    await expect(
+      service.editSaleReturn(
+        r.id,
+        { storeId, lines: [{ itemId, quantity: 1, unitPrice: 1400 }] },
+        { reason: 'too late' },
+      ),
+    ).rejects.toThrow(/reversed/i);
+
+    const sale = await ds.getRepository(Sale).save(
+      ds.getRepository(Sale).create({
+        invoiceNo: 'INV-EX-1', totalAmount: 1500, netAmount: 1500,
+        paidAmount: 1500, dueAmount: 0, paymentMethod: 'CASH',
+      }),
+    );
+    const leg = await service.createSaleReturn({
+      storeId,
+      replacementSaleId: sale.id,
+      lines: [{ itemId, quantity: 1, unitPrice: 1500 }],
+    });
+    await expect(
+      service.editSaleReturn(
+        leg.id,
+        { storeId, lines: [{ itemId, quantity: 1, unitPrice: 1400 }] },
+        { reason: 'nope' },
+      ),
+    ).rejects.toThrow(/exchange/i);
+  });
+
   // ── purchase returns ──────────────────────────────────────────────────────
 
   it('reversing a STOCK purchase return brings the goods back and restores costedQty', async () => {

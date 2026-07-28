@@ -5,16 +5,25 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import { FundTransfersService } from './fund-transfers.service';
 import { CreateFundTransferDto } from './dto/create-fund-transfer.dto';
 import { ReverseFundTransferDto } from './dto/reverse-fund-transfer.dto';
+import { EditFundTransferDto } from './dto/edit-fund-transfer.dto';
 
 @Controller('fund-transfers')
 export class FundTransfersController {
   constructor(private readonly service: FundTransfersService) {}
+
+  /** Correct a posted transfer in place — same number, same row. */
+  @Patch(':id')
+  edit(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EditFundTransferDto) {
+    const { reason, userId, ...transfer } = dto;
+    return this.service.edit(id, transfer, { reason, userId });
+  }
 
   @Post()
   create(@Body() dto: CreateFundTransferDto) {

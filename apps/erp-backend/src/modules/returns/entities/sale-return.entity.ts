@@ -104,6 +104,16 @@ export class SaleReturn extends BaseEntity {
   @Column({ nullable: true })
   reason?: string;
 
+  /** Edit trail — see Sale.editCount for the convention. */
+  @Column({ name: 'edit_count', type: 'integer', default: 0 })
+  editCount: number;
+
+  @Column({ name: 'last_edited_at', type: Date, nullable: true })
+  lastEditedAt?: Date;
+
+  @Column({ name: 'last_edit_reason', nullable: true })
+  lastEditReason?: string;
+
   /**
    * Set when the return itself was booked in error and walked back. A reversed
    * return is kept on the record (never deleted) but must be treated as if it

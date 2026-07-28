@@ -95,6 +95,90 @@ export class FundTransfersService {
    * marking the row. No stock impact. Idempotent: re-call returns the same
    * row. Requires a non-empty reason.
    */
+  /**
+   * Correct a transfer in place — same transfer number, same row. Like payments,
+   * a transfer is pure double entry with no stock and no lines, so the edit is:
+   * balance out the old entry, rewrite the row, post the corrected entry.
+   */
+  async edit(
+    id: string,
+    dto: CreateFundTransferDto,
+    opts: { reason: string; userId?: string },
+  ): Promise<FundTransfer> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('An edit needs a reason.');
+    }
+    if (dto.fromAccountId === dto.toAccountId) {
+      throw new BadRequestException(
+        'Source and destination accounts must differ',
+      );
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(FundTransfer);
+      const original = await repo.findOne({ where: { id } });
+      if (!original) throw new NotFoundException(`Fund transfer ${id} not found`);
+      if (original.reversedAt) {
+        throw new BadRequestException(
+          `Transfer ${original.transferNo} is reversed. Enter a new transfer instead of editing this one.`,
+        );
+      }
+
+      const entry = await this.journals.findActiveBySource(
+        'FUND_TRANSFER',
+        original.transferNo,
+        manager,
+      );
+      if (entry) {
+        await this.journals.reverse(
+          entry.id,
+          {
+            entryDate: new Date(),
+            description: `Reversal of fund transfer ${original.transferNo}`,
+            reason: `Edit: ${reason}`,
+          },
+          manager,
+        );
+      }
+
+      const transferNo = original.transferNo;
+      Object.assign(original, dto, { transferNo });
+      // Re-pointed account FKs must win over the stale eager relations.
+      original.fromAccount = undefined as unknown as FundTransfer['fromAccount'];
+      original.toAccount = undefined as unknown as FundTransfer['toAccount'];
+      original.editCount = Number(original.editCount ?? 0) + 1;
+      original.lastEditedAt = new Date();
+      original.lastEditReason = reason;
+      const saved = await repo.save(original);
+
+      const amount = Number(saved.amount);
+      await this.journals.post(
+        {
+          entryDate: saved.createdAt,
+          sourceModule: 'FUND_TRANSFER',
+          sourceRef: transferNo,
+          description: `Fund transfer ${transferNo}`,
+          lines: [
+            {
+              accountId: saved.toAccountId,
+              debit: amount,
+              narration: `${transferNo} into destination`,
+            },
+            {
+              accountId: saved.fromAccountId,
+              credit: amount,
+              narration: `${transferNo} out of source`,
+            },
+          ],
+        },
+        manager,
+      );
+
+      return saved;
+    });
+  }
+
   async reverse(
     id: string,
     opts: { userId?: string; reason: string },

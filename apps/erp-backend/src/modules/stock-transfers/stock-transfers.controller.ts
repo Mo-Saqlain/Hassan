@@ -4,12 +4,14 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import { StockTransfersService } from './stock-transfers.service';
 import { CreateStockTransferDto } from './dto/create-stock-transfer.dto';
 import { ReverseStockTransferDto } from './dto/reverse-stock-transfer.dto';
+import { EditStockTransferDto } from './dto/edit-stock-transfer.dto';
 
 @Controller('stock-transfers')
 export class StockTransfersController {
@@ -24,6 +26,13 @@ export class StockTransfersController {
     @Query('toStoreId') toStoreId?: string,
   ) {
     return this.service.findAll(fromStoreId, toStoreId);
+  }
+
+  /** Correct a posted transfer in place — same number, same row. */
+  @Patch(':id')
+  edit(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EditStockTransferDto) {
+    const { reason, userId, ...transfer } = dto;
+    return this.service.edit(id, transfer, { reason, userId });
   }
 
   @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) {

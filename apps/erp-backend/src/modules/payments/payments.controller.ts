@@ -4,12 +4,14 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { ReversePaymentDto } from './dto/reverse-payment.dto';
+import { EditPaymentDto } from './dto/edit-payment.dto';
 
 @Controller('payments')
 export class PaymentsController {
@@ -23,6 +25,13 @@ export class PaymentsController {
   @Get()
   findAll(@Query('direction') direction?: 'IN' | 'OUT') {
     return this.service.findAll(direction);
+  }
+
+  /** Correct a posted voucher in place — same voucher number, same row. */
+  @Patch(':id')
+  edit(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EditPaymentDto) {
+    const { reason, userId, ...payment } = dto;
+    return this.service.edit(id, payment, { reason, userId });
   }
 
   @Get(':id')

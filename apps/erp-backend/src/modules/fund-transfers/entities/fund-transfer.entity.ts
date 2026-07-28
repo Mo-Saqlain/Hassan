@@ -41,6 +41,16 @@ export class FundTransfer extends BaseEntity {
   notes?: string;
 
   /** Reversal metadata — see Sale.reversedAt for the convention. */
+  /** Edit trail — see Sale.editCount for the convention. */
+  @Column({ name: 'edit_count', type: 'integer', default: 0 })
+  editCount: number;
+
+  @Column({ name: 'last_edited_at', type: Date, nullable: true })
+  lastEditedAt?: Date;
+
+  @Column({ name: 'last_edit_reason', nullable: true })
+  lastEditReason?: string;
+
   @Column({ name: 'reversed_at', type: Date, nullable: true })
   reversedAt?: Date;
 
