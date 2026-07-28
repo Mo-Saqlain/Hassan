@@ -327,6 +327,40 @@ export class ItemSerialsService implements OnModuleInit {
   }
 
   /**
+   * Undo a purchase's serial intake, for when the bill is corrected or reversed.
+   *
+   * Only units still sitting in stock can be withdrawn: once a serial has been
+   * sold, booked, returned or written off, deleting it would erase the history
+   * of a physical unit that exists in the world. Those cases are refused by name
+   * so the operator knows which serial is in the way.
+   *
+   * Returns how many rows were removed.
+   */
+  async unregisterByBill(
+    purchaseBillNo: string,
+    manager?: EntityManager,
+  ): Promise<number> {
+    const repo = manager ? manager.getRepository(ItemSerial) : this.repo;
+    const rows = await repo.find({ where: { purchaseBillNo } });
+    if (rows.length === 0) return 0;
+
+    const engaged = rows.filter((r) => r.status !== 'IN_STOCK');
+    if (engaged.length > 0) {
+      const sample = engaged
+        .slice(0, 3)
+        .map((r) => `${r.serial} (${r.status})`)
+        .join(', ');
+      throw new BadRequestException(
+        `Bill ${purchaseBillNo} has ${engaged.length} serial(s) that are no longer in stock: ${sample}. ` +
+          `Deal with those units first — a serial that has been sold or written off cannot be withdrawn.`,
+      );
+    }
+
+    await repo.remove(rows);
+    return rows.length;
+  }
+
+  /**
    * Return-reversal flow: the return itself was a mistake, so the unit goes
    * back to being sold — undoing either `markReturned` (RETURNED → SOLD) or
    * `markWrittenOff` (WRITE_OFF → SOLD, the company-claim case). The sale

@@ -920,7 +920,7 @@ export class SalesService {
     sale: Sale,
     note: string,
   ) {
-    const originalEntry = await this.journals.findBySource('SALE', sale.invoiceNo);
+    const originalEntry = await this.journals.findActiveBySource('SALE', sale.invoiceNo, manager);
     if (originalEntry) {
       await this.journals.reverse(
         originalEntry.id,
@@ -994,7 +994,7 @@ export class SalesService {
       }
 
       // Find the original journal entry and post a balancing reversal.
-      const originalEntry = await this.journals.findBySource('SALE', sale.invoiceNo);
+      const originalEntry = await this.journals.findActiveBySource('SALE', sale.invoiceNo, manager);
       if (originalEntry) {
         await this.journals.reverse(
           originalEntry.id,

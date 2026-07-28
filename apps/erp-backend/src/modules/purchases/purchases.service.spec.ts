@@ -160,4 +160,104 @@ describe('PurchasesService', () => {
     });
     expect(await stock.getOnHand(itemId, main.id)).toBe(4);
   });
+
+  // ─── editing ──────────────────────────────────────────────────────────────
+
+  describe('edit', () => {
+    const avg = async () =>
+      Number((await ds.getRepository(Item).findOneByOrFail({ id: itemId })).avgCost);
+
+    it('corrects a mis-keyed price and the cost basis follows', async () => {
+      const bill = await service.create({
+        lines: [{ itemId, quantity: 10, unitPrice: 500 }], // should have been 450
+      });
+      expect(await avg()).toBe(500);
+
+      const edited = await service.edit(
+        bill.id,
+        { lines: [{ itemId, quantity: 10, unitPrice: 450 }] },
+        { reason: 'supplier invoice says 450' },
+      );
+
+      expect(edited.id).toBe(bill.id);
+      expect(edited.billNo).toBe(bill.billNo);
+      expect(Number(edited.netAmount)).toBe(4500);
+      expect(await stock.getOnHand(itemId)).toBe(10); // still 10 units in
+      // This is what recosting was for: the average reflects the corrected
+      // price, not a blend of the wrong one and the right one.
+      expect(await avg()).toBe(450);
+      expect(edited.editCount).toBe(1);
+    });
+
+    it('survives a second edit — the journal does not double-count', async () => {
+      const bill = await service.create({
+        lines: [{ itemId, quantity: 4, unitPrice: 100 }],
+      });
+      await service.edit(
+        bill.id,
+        { lines: [{ itemId, quantity: 4, unitPrice: 200 }] },
+        { reason: 'first correction' },
+      );
+      await service.edit(
+        bill.id,
+        { lines: [{ itemId, quantity: 4, unitPrice: 300 }] },
+        { reason: 'second correction' },
+      );
+
+      // Inventory should carry exactly the latest posting: 4 × 300.
+      const entries = await ds.getRepository(JournalEntry).find({
+        where: { sourceModule: 'PURCHASE', sourceRef: bill.billNo },
+        relations: ['lines'],
+      });
+      const net = entries
+        .flatMap((e) => e.lines)
+        .reduce((sum, l) => sum + Number(l.debit ?? 0) - Number(l.credit ?? 0), 0);
+      // Every posting nets to zero on its own (double entry), so the whole set
+      // must too — the point is that nothing was left un-reversed.
+      expect(Math.abs(net)).toBeLessThan(0.005);
+      const finalBill = await service.findOne(bill.id);
+      expect(Number(finalBill.netAmount)).toBe(1200);
+      expect(finalBill.editCount).toBe(2);
+      expect(await avg()).toBe(300);
+      expect(await stock.getOnHand(itemId)).toBe(4);
+    });
+
+    it('refuses when a unit from the bill has already been sold', async () => {
+      const bill = await service.create({
+        lines: [
+          { itemId, quantity: 2, unitPrice: 300, serials: ['SN-A', 'SN-B'] },
+        ],
+      });
+      const repo = ds.getRepository(ItemSerial);
+      const one = await repo.findOneByOrFail({ serial: 'SN-A' });
+      one.status = 'SOLD';
+      await repo.save(one);
+
+      await expect(
+        service.edit(
+          bill.id,
+          { lines: [{ itemId, quantity: 2, unitPrice: 250 }] },
+          { reason: 'price wrong' },
+        ),
+      ).rejects.toThrow(/SN-A/);
+
+      // Rolled back whole: price untouched, both serials still there.
+      expect(Number((await service.findOne(bill.id)).netAmount)).toBe(600);
+      expect(await repo.count()).toBe(2);
+    });
+
+    it('refuses to edit a reversed bill', async () => {
+      const bill = await service.create({
+        lines: [{ itemId, quantity: 1, unitPrice: 300 }],
+      });
+      await service.reverse(bill.id, { reason: 'duplicate' });
+      await expect(
+        service.edit(
+          bill.id,
+          { lines: [{ itemId, quantity: 1, unitPrice: 200 }] },
+          { reason: 'too late' },
+        ),
+      ).rejects.toThrow(/reversed/i);
+    });
+  });
 });

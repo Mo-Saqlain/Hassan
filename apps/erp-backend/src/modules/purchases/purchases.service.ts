@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { Purchase } from './entities/purchase.entity';
 import { PurchaseItem } from './entities/purchase-item.entity';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
@@ -20,6 +20,7 @@ import { JournalService } from '../journals/journal.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { ItemSerialsService } from '../item-serials/item-serials.service';
 import { RecostService } from '../costing/recost.service';
+import { PurchaseReturn } from '../returns/entities/purchase-return.entity';
 
 @Injectable()
 export class PurchasesService {
@@ -40,7 +41,33 @@ export class PurchasesService {
     dto: CreatePurchaseDto,
     opts?: { skipOutbox?: boolean },
   ): Promise<Purchase> {
-    const saved = await this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction((manager) =>
+      this.createInTransaction(manager, dto),
+    );
+
+    if (!opts?.skipOutbox && process.env.CLOUD_SYNC_URL) {
+      await this.outbox.enqueue('PURCHASE_CREATED', {
+        ...dto,
+        billNo: saved.billNo,
+      });
+    }
+
+    return saved;
+  }
+
+  /**
+   * Purchase-creation body scoped to a caller's EntityManager, so an edit can
+   * re-apply a corrected bill through exactly the same code that posts a new
+   * one. Emits no outbox event — the caller owns that.
+   *
+   * With `opts.replacing` it writes onto that existing row: same bill number,
+   * same id. The caller must already have unwound the original's effects.
+   */
+  async createInTransaction(
+    manager: EntityManager,
+    dto: CreatePurchaseDto,
+    opts?: { replacing?: Purchase },
+  ): Promise<Purchase> {
       const itemRepo = manager.getRepository(Item);
       const purchaseRepo = manager.getRepository(Purchase);
 
@@ -74,9 +101,13 @@ export class PurchasesService {
       const paidAmount = dto.paidAmount ?? 0;
       const dueAmount = Number((netAmount - paidAmount).toFixed(2));
 
-      const billNo = dto.billNo ?? (await this.nextBillNo(purchaseRepo));
+      // An edit keeps the original bill number rather than burning a new one.
+      const billNo =
+        opts?.replacing?.billNo ??
+        dto.billNo ??
+        (await this.nextBillNo(purchaseRepo));
 
-      const purchase = purchaseRepo.create({
+      const fields = {
         billNo,
         supplierId: dto.supplierId,
         storeId: dto.storeId,
@@ -88,7 +119,23 @@ export class PurchasesService {
         paymentMethod: dto.paymentMethod ?? 'CASH',
         notes: dto.notes,
         lines,
-      });
+      };
+
+      let purchase: Purchase;
+      if (opts?.replacing) {
+        await manager
+          .getRepository(PurchaseItem)
+          .delete({ purchaseId: opts.replacing.id });
+        // Object.assign + explicit lines, and clear the eager relations: a
+        // loaded relation object beats the FK column on save, so a stale
+        // `supplier` would undo a re-pointed supplierId. Same trap as sales.
+        purchase = Object.assign(opts.replacing, fields);
+        purchase.lines = lines;
+        purchase.supplier = undefined;
+        purchase.store = undefined;
+      } else {
+        purchase = purchaseRepo.create(fields);
+      }
       const persisted = await purchaseRepo.save(purchase);
 
       for (let i = 0; i < persisted.lines.length; i += 1) {
@@ -202,16 +249,6 @@ export class PurchasesService {
       );
 
       return persisted;
-    });
-
-    if (!opts?.skipOutbox && process.env.CLOUD_SYNC_URL) {
-      await this.outbox.enqueue('PURCHASE_CREATED', {
-        ...dto,
-        billNo: saved.billNo,
-      });
-    }
-
-    return saved;
   }
 
   /**
@@ -365,6 +402,114 @@ export class PurchasesService {
    * stock OUT movements, and marks the original row. The original purchase
    * stays visible with the REVERSED chip. Idempotent.
    */
+  /**
+   * Correct a posted bill in place — same bill number, same row. Unwinds what it
+   * posted (journal reversed, the stock IN mirrored back OUT, serial intake
+   * withdrawn), re-applies the corrected bill through the create path, then
+   * recosts so the weighted average reflects the corrected price.
+   *
+   * This is the case recosting was built for: editing an old bill's price used
+   * to be impossible to do correctly, because a running average can't be
+   * un-rolled.
+   */
+  async edit(
+    id: string,
+    dto: CreatePurchaseDto,
+    opts: { reason: string; userId?: string },
+  ): Promise<Purchase> {
+    if (!opts.reason || opts.reason.trim().length === 0) {
+      throw new BadRequestException('An edit needs a reason.');
+    }
+    const reason = opts.reason.trim();
+
+    return this.dataSource.transaction(async (manager) => {
+      const purchaseRepo = manager.getRepository(Purchase);
+      const original = await purchaseRepo.findOne({
+        where: { id },
+        relations: ['lines'],
+      });
+      if (!original) throw new NotFoundException(`Purchase ${id} not found`);
+
+      if (original.reversedAt) {
+        throw new BadRequestException(
+          `Bill ${original.billNo} is reversed. Enter a new bill instead of editing this one.`,
+        );
+      }
+
+      // A purchase return was priced off these lines.
+      const returns = await manager.getRepository(PurchaseReturn).count({
+        where: { purchaseId: original.id, reversedAt: IsNull() },
+      });
+      if (returns > 0) {
+        throw new BadRequestException(
+          `Bill ${original.billNo} has ${returns} return(s) against it. Reverse those first, then edit the bill.`,
+        );
+      }
+
+      // Unwind: journal, stock, serial intake.
+      const entry = await this.journals.findActiveBySource(
+        'PURCHASE',
+        original.billNo,
+        manager,
+      );
+      if (entry) {
+        await this.journals.reverse(
+          entry.id,
+          {
+            entryDate: new Date(),
+            description: `Reversal of purchase ${original.billNo}`,
+            reason: `Edit: ${reason}`,
+          },
+          manager,
+        );
+      }
+      for (const ln of original.lines) {
+        await this.stockService.recordMovement(
+          {
+            itemId: ln.itemId,
+            storeId: ln.storeId ?? original.storeId,
+            type: 'OUT',
+            quantity: ln.quantity,
+            referenceType: 'PURCHASE_REVERSAL',
+            referenceId: original.id,
+            note: `Edit of ${original.billNo}: ${reason}`,
+          },
+          manager,
+        );
+      }
+      // Refuses if any unit from this bill has already been sold — see
+      // ItemSerialsService.unregisterByBill.
+      await this.itemSerials.unregisterByBill(original.billNo, manager);
+
+      const edited = await this.createInTransaction(manager, dto, {
+        replacing: original,
+      });
+
+      edited.editCount = Number(original.editCount ?? 0) + 1;
+      edited.lastEditedAt = new Date();
+      edited.lastEditReason = reason;
+      const saved = await purchaseRepo.save(edited);
+
+      await this.recost.recomputeItems(
+        [
+          ...original.lines.map((l) => l.itemId),
+          ...dto.lines.map((l) => l.itemId),
+        ],
+        { manager },
+      );
+
+      if (process.env.CLOUD_SYNC_URL) {
+        await this.outbox.enqueue(
+          'PURCHASE_UPDATED',
+          { ...dto, billNo: saved.billNo, editReason: reason },
+          manager,
+        );
+      }
+
+      return saved;
+    });
+  }
+
   async reverse(
     id: string,
     opts: { userId?: string; reason: string },
@@ -381,7 +526,7 @@ export class PurchasesService {
       if (!p) throw new NotFoundException(`Purchase ${id} not found`);
       if (p.reversedAt) return p;
 
-      const originalEntry = await this.journals.findBySource('PURCHASE', p.billNo);
+      const originalEntry = await this.journals.findActiveBySource('PURCHASE', p.billNo, manager);
       if (originalEntry) {
         await this.journals.reverse(
           originalEntry.id,

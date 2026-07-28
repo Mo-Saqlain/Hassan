@@ -108,7 +108,7 @@ export class FundTransfersService {
       if (!t) throw new NotFoundException(`Fund transfer ${id} not found`);
       if (t.reversedAt) return t;
 
-      const originalEntry = await this.journals.findBySource('FUND_TRANSFER', t.transferNo);
+      const originalEntry = await this.journals.findActiveBySource('FUND_TRANSFER', t.transferNo, manager);
       if (originalEntry) {
         await this.journals.reverse(
           originalEntry.id,

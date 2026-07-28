@@ -164,7 +164,7 @@ export class PaymentsService {
       if (p.reversedAt) return p;
 
       const sourceModule = p.direction === 'IN' ? 'RECEIPT' : 'PAYMENT';
-      const originalEntry = await this.journals.findBySource(sourceModule, p.voucherNo);
+      const originalEntry = await this.journals.findActiveBySource(sourceModule, p.voucherNo, manager);
       if (originalEntry) {
         await this.journals.reverse(
           originalEntry.id,

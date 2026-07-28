@@ -192,4 +192,42 @@ export class JournalService {
       relations: ['lines'],
     });
   }
+
+  /**
+   * The entry that currently REPRESENTS a document — i.e. the newest one for
+   * that source which is neither a reversal itself nor already reversed.
+   *
+   * `findBySource` is not good enough once a document can be edited. Editing
+   * leaves three entries behind the same source ref (the original, its reversal,
+   * and the corrected posting), and `findBySource` returns whichever the driver
+   * hands back first — typically the original. A second edit, or a reversal
+   * after an edit, would then "reverse" an entry that was already reversed
+   * (a no-op, since reverse() is idempotent per source entry) and leave the
+   * live posting standing, double-counting the document in the ledger.
+   *
+   * A reversed entry is identified by another entry pointing at it through
+   * `reversesJournalEntryId`; there is no flag on the entry itself.
+   */
+  async findActiveBySource(
+    sourceModule: JournalSourceModule,
+    sourceRef: string,
+    manager?: EntityManager,
+  ): Promise<JournalEntry | null> {
+    const repo = manager
+      ? manager.getRepository(JournalEntry)
+      : this.entries;
+    const all = await repo.find({
+      where: { sourceModule, sourceRef },
+      relations: ['lines'],
+      order: { createdAt: 'ASC' },
+    });
+    if (all.length === 0) return null;
+    const reversedIds = new Set(
+      all.map((e) => e.reversesJournalEntryId).filter(Boolean) as string[],
+    );
+    const live = all.filter(
+      (e) => !e.reversesJournalEntryId && !reversedIds.has(e.id),
+    );
+    return live.length > 0 ? live[live.length - 1] : null;
+  }
 }
