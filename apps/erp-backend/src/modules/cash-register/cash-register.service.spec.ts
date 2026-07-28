@@ -140,6 +140,36 @@ describe('CashRegisterService — till captures all cash movements', () => {
     expect(book.closing).toBe(500);
   });
 
+  it('re-derives a closed session variance and flags it as stale after an edit', async () => {
+    await service.openSession({ sessionDate: day, actualOpening: 0 });
+    // Day stands at 1000 in − 500 out = 500. Cashier counts 480: 20 short.
+    const closed = await service.closeSession(day, { actualClosing: 480 });
+    expect(Number(closed.expectedClosing)).toBe(500);
+    expect(Number(closed.closingDifference)).toBe(-20);
+
+    const before: any = await service.getSession(day);
+    expect(before.varianceStale).toBe(false);
+    expect(before.closingDifference).toBe(-20);
+
+    // A voucher from that day is corrected afterwards: the cash sale was
+    // actually 900, not 1000.
+    await ds.getRepository(Sale).update(
+      { invoiceNo: 'INV-1' },
+      { totalAmount: 900, netAmount: 900, paidAmount: 900 },
+    );
+
+    const after: any = await service.getSession(day);
+    // Expected cash follows the corrected day (900 − 500 = 400), so the count
+    // of 480 is now a 80 SURPLUS rather than a 20 shortfall...
+    expect(after.expectedClosing).toBe(400);
+    expect(after.closingDifference).toBe(80);
+    // ...and the figures the cashier actually reconciled against survive as
+    // evidence, with the disagreement flagged rather than hidden.
+    expect(after.expectedClosingAtClose).toBe(500);
+    expect(after.closingDifferenceAtClose).toBe(-20);
+    expect(after.varianceStale).toBe(true);
+  });
+
   it("carries the till outflows into the next day's expected opening", async () => {
     // sessionStatus for tomorrow computes expectedOpening = cash on hand as of
     // today, which must already reflect the salary + refund outflows.

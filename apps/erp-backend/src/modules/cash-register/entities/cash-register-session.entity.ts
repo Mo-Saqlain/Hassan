@@ -42,6 +42,15 @@ export class CashRegisterSession extends BaseEntity {
   })
   openingDifference: number;
 
+  /**
+   * What the system expected in the till at the moment the cashier closed —
+   * a SNAPSHOT, not the authority. Expected cash is a function of the day's
+   * till movements, and correcting a voucher from that day legitimately changes
+   * it, so reads go through `CashRegisterService.withLiveVariance`, which
+   * re-derives the figure and surfaces this stored one as
+   * `expectedClosingAtClose` (plus `varianceStale` when the two disagree).
+   * Kept because "what the cashier reconciled against" is evidence.
+   */
   @Column('decimal', {
     precision: 14,
     scale: 2,
@@ -71,6 +80,7 @@ export class CashRegisterSession extends BaseEntity {
   })
   closingDenominations?: Record<string, number>;
 
+  /** Variance as computed at close time. Snapshot — see `expectedClosing`. */
   @Column('decimal', {
     precision: 14,
     scale: 2,

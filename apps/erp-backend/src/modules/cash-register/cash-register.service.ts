@@ -159,8 +159,46 @@ export class CashRegisterService {
     return this.sessions.save(session);
   }
 
-  getSession(sessionDate: string) {
-    return this.sessions.findOne({ where: { sessionDate } });
+  async getSession(sessionDate: string) {
+    const session = await this.sessions.findOne({ where: { sessionDate } });
+    return session ? this.withLiveVariance(session) : session;
+  }
+
+  /**
+   * Re-derive a closed session's expected cash and variance instead of trusting
+   * the numbers stored at close time.
+   *
+   * The count itself (`actualClosing`, the denomination breakdown) is a fact
+   * that only the cashier can supply, so it stays stored. "Expected" is not a
+   * fact — it's a function of that day's till movements, and those can legally
+   * change afterwards when a voucher from that day is corrected. Serving the
+   * stored figure then leaves history contradicting itself: the day's cash book
+   * says one thing and the reconciliation another.
+   *
+   * Both are returned. `expectedClosingAtClose` / `closingDifferenceAtClose` are
+   * what the cashier actually reconciled against — evidence, and worth keeping —
+   * while `expectedClosing` / `closingDifference` reflect the day as it now
+   * stands. `varianceStale` is true when they disagree, which is the signal that
+   * something in that day was edited after the till was closed.
+   */
+  async withLiveVariance(session: CashRegisterSession) {
+    if (session.actualClosing == null) return session;
+
+    const expected = round(await this.expectedClosingFor(session.sessionDate));
+    const atClose =
+      session.expectedClosing == null ? null : Number(session.expectedClosing);
+    const difference = round(Number(session.actualClosing) - expected);
+
+    return Object.assign(session, {
+      expectedClosing: expected,
+      closingDifference: difference,
+      expectedClosingAtClose: atClose,
+      closingDifferenceAtClose:
+        session.closingDifference == null
+          ? null
+          : Number(session.closingDifference),
+      varianceStale: atClose != null && round(atClose) !== expected,
+    });
   }
 
   /**
@@ -173,7 +211,7 @@ export class CashRegisterService {
     const expectedOpening = await this.cashOnHandAsOf(prevDay(day));
     return {
       date: day,
-      session,
+      session: session ? await this.withLiveVariance(session) : session,
       expectedOpening: round(expectedOpening),
     };
   }
@@ -589,8 +627,11 @@ export class CashRegisterService {
   /**
    * Expected closing cash for a session: opening (actual) + same-day IN - OUT.
    * Reuses dailyBook's running balance logic indirectly via direct sums.
+   *
+   * Public because it's the live figure `withLiveVariance` serves on read, not
+   * just an input to `closeSession`.
    */
-  private async expectedClosingFor(sessionDate: string): Promise<number> {
+  async expectedClosingFor(sessionDate: string): Promise<number> {
     const book = await this.dailyBook(sessionDate);
     return book.opening + book.totals.in - book.totals.out;
   }
