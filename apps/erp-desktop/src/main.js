@@ -391,8 +391,14 @@ function waitForBackend(timeoutMs = 300_000) {
           retry();
         },
       );
-      req.on('error', retry);
-      req.on('timeout', retry);
+      req.on('error', () => {
+        req.destroy();
+        retry();
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        retry();
+      });
       req.end();
     }
     function retry() {

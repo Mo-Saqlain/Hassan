@@ -198,8 +198,16 @@ export default function Connection() {
           <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <span className="chip">{status.pending ?? 0} pending</span>
             <span className="chip">{status.failed ?? 0} failed</span>
-            <span className={`chip ${status.cloudConfigured ? 'chip-success' : ''}`}>
-              {status.cloudConfigured ? 'Cloud push configured' : 'Cloud push not configured'}
+            <span
+              className={`chip ${
+                connected || status.cloudConfigured ? 'chip-success' : ''
+              }`}
+            >
+              {connected && conn?.target?.includes('Supabase')
+                ? '⚡ Live Supabase Direct Sync'
+                : status.cloudConfigured
+                  ? 'Cloud push configured'
+                  : 'Cloud push not configured'}
             </span>
           </div>
         )}
@@ -221,9 +229,11 @@ export default function Connection() {
         )}
 
         <p className="muted" style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>
-          {status?.cloudConfigured
-            ? 'Pushes everything queued in the local outbox to the cloud now. Syncing only happens when you click this (or the topbar button) — there is no background timer.'
-            : 'This install writes directly to its database, so every change is saved live — there is no separate sync queue. The cloud-push queue is only used by offline desktop installs that run on local SQLite and push to a central cloud receiver.'}
+          {connected && conn?.target?.includes('Supabase')
+            ? 'Connected directly to Supabase cloud database. All sales, customers, vouchers, and transactions are saved live in real-time — no outbox queue required!'
+            : status?.cloudConfigured
+              ? 'Pushes everything queued in the local outbox to the cloud now. Syncing only happens when you click this (or the topbar button) — there is no background timer.'
+              : 'This install writes directly to its local database. To enable live cloud sync, configure databaseUrl in config.json or set CLOUD_SYNC_URL on your offline node.'}
         </p>
       </div>
     </>
