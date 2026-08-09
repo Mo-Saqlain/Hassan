@@ -91,6 +91,7 @@ export default function SalesVoucher() {
   // and each commitment becomes a row the dashboard can chase.
   const [useSchedule, setUseSchedule] = useState(false);
   const [commitments, setCommitments] = useState([blankCommitment()]);
+  const [isBooked, setIsBooked] = useState(false);
 
   // Inline customer create — owner often signs up a new walk-in mid-bill,
   // and bouncing out to the Customers tab loses the in-progress voucher.
@@ -494,15 +495,19 @@ export default function SalesVoucher() {
         customerId: customerId || undefined,
         discount: Number(discount) || 0,
         notes: notes.trim() || undefined,
-        lines: lines.map((l) => {
-          const parsed = parseSerials(l.serials);
-          return {
+        isBooked,
+        expectedPaymentDate:
+          useSchedule && residual > 0 && commitments[0]?.dueDate
+            ? commitments[0].dueDate
+            : undefined,
+        lines: lines
+          .filter((l) => l.itemId && Number(l.quantity) > 0)
+          .map((l) => ({
             itemId: l.itemId,
             quantity: Number(l.quantity),
             unitPrice: Number(l.unitPrice),
-            ...(parsed.length > 0 ? { serials: parsed } : {}),
-          };
-        }),
+            serials: parseSerials(l.serials),
+          })),
         splits: splits
           .filter((sp) => Number(sp.amount || 0) > 0)
           .map((sp) => {
@@ -540,9 +545,11 @@ export default function SalesVoucher() {
       const invoiceNo = r.data?.sale?.invoiceNo;
       reset();
       if (saleId) {
-        // Open the printable invoice straight away. The shop owner's
-        // expectation from the wireframe was: Submit → bill prints.
-        window.open(`#/print/sale/${saleId}`, '_blank');
+        if (isBooked) {
+          window.open(`#/print/booking-receipt/${saleId}`, '_blank');
+        } else {
+          window.open(`#/print/sale/${saleId}`, '_blank');
+        }
       }
       // Drop the cashier on Sales history so they see the row they just
       // wrote — with the new invoice highlighted by the URL fragment.
@@ -732,6 +739,29 @@ export default function SalesVoucher() {
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Reference / remarks (optional)"
             />
+          </div>
+          <div style={{ gridColumn: 'span 2' }}>
+            <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>Fulfillment Option</label>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'center', background: '#f8fafc', padding: '8px 14px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+              <label style={{ cursor: 'pointer', fontWeight: !isBooked ? 600 : 400, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="radio"
+                  name="fulfillment"
+                  checked={!isBooked}
+                  onChange={() => setIsBooked(false)}
+                />
+                <span>📦 <strong>Delivered Immediately</strong> (Handed to customer at counter)</span>
+              </label>
+              <label style={{ cursor: 'pointer', fontWeight: isBooked ? 600 : 400, color: isBooked ? '#c2410c' : undefined, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="radio"
+                  name="fulfillment"
+                  checked={isBooked}
+                  onChange={() => setIsBooked(true)}
+                />
+                <span>⏳ <strong>Book for Later Pickup</strong> (Hold serial in warehouse)</span>
+              </label>
+            </div>
           </div>
         </div>
       </section>

@@ -766,7 +766,10 @@ export class SalesService {
       //    physical status stays IN_STOCK on the floor). Done after the
       //    splits land so the branch sees the final dueAmount, not the
       //    pre-split residual that always equals netTotal.
-      const isBooking = Number(sale.dueAmount ?? 0) > 0.005;
+      const isBooking =
+        dto.isBooked !== undefined
+          ? dto.isBooked
+          : Number(sale.dueAmount ?? 0) > 0.005;
       // Resolved here (rather than reusing the caller's pre-flight cache) so the
       // body stands on its own — both create and edit enter through it.
       const itemMap = new Map(

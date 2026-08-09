@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -108,6 +109,10 @@ export class CreateSaleVoucherDto {
   @IsDateString()
   @IsOptional()
   expectedPaymentDate?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isBooked?: boolean;
 
   @IsArray()
   @IsOptional()

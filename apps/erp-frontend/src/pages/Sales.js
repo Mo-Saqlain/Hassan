@@ -1,7 +1,36 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { api } from '../api/client';
 import { useResource } from '../hooks/useResource';
 import ReverseAction from '../components/ReverseAction';
+
+function ReleaseBookingButton({ saleId, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const release = async () => {
+    if (!window.confirm('Release booking for this sale? Held serials will be returned to floor.')) return;
+    setBusy(true);
+    try {
+      await api.post(`/sales/${saleId}/release-booking`);
+      alert('Booking released!');
+      onDone();
+    } catch (e) {
+      alert(e.uiMessage ?? 'Failed to release booking');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      className="btn btn-sm"
+      onClick={release}
+      disabled={busy}
+      title="Cancel booking hold and release serials to floor"
+      style={{ color: 'var(--warning, #c2410c)' }}
+    >
+      {busy ? 'Releasing…' : 'Release Hold'}
+    </button>
+  );
+}
 
 export default function Sales() {
   const { data: sales, loading, error, reload } = useResource('/sales');
@@ -150,6 +179,9 @@ export default function Sales() {
                         >
                           Box Tag
                         </a>
+                        {!s.reversedAt && (
+                          <ReleaseBookingButton saleId={s.id} onDone={reload} />
+                        )}
                       </>
                     )}
                     <ReverseAction
