@@ -69,6 +69,8 @@ PORT=3001        # default
 SQLITE_PATH=     # path to SQLite file when DATABASE_URL is unset; Electron forces <userData>/erp.sqlite
 BACKUP_DIR=      # daily backups land here; Electron forces <userData>/backups
 DB_MIGRATE_ON_BOOT=  # 'true' → run pending TypeORM migrations before opening the port (Electron sets this); dev leaves unset → falls back to synchronize
+SHOWROOM_PREFIX= # optional — node sequence prefix (e.g. SR1); scopes voucher numbers (SR1-INV-000001) to avoid multi-node sync collisions
+SHOWROOM_ID=     # optional — node identifier tagged on outbox payloads & sync audit records
 ```
 
 Cloud-receiver-only env (the node that hosts `POST /sync/push`):

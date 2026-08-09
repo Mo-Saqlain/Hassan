@@ -66,6 +66,21 @@ describe('SequenceService', () => {
     expect(values[19]).toBe('PO-000020');
   });
 
+  it('prefixes with SHOWROOM_PREFIX when set in process.env', async () => {
+    const originalEnv = process.env.SHOWROOM_PREFIX;
+    try {
+      process.env.SHOWROOM_PREFIX = 'SR1';
+      const v = await service.next('INV');
+      expect(v).toBe('SR1-INV-000001');
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.SHOWROOM_PREFIX;
+      } else {
+        process.env.SHOWROOM_PREFIX = originalEnv;
+      }
+    }
+  });
+
   // Concurrent-allocation safety (Promise.all of N calls) is only
   // exercisable on Postgres because better-sqlite3 is single-writer per
   // connection and rejects nested transactions with

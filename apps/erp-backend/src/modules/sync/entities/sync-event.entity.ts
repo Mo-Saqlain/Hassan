@@ -26,6 +26,9 @@ export class SyncEvent {
   @Column({ name: 'result_id', nullable: true })
   resultId?: string;
 
+  @Column({ name: 'showroom_id', nullable: true })
+  showroomId?: string;
+
   @CreateDateColumn({ name: 'received_at' })
   receivedAt: Date;
 }

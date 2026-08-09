@@ -10,8 +10,28 @@ export class SequenceService {
   ) {}
 
   /**
+   * Resolves the effective sequence prefix, incorporating any node/showroom scope
+   * configured via environment variables (`SHOWROOM_PREFIX`, `SHOWROOM_ID`, or `NODE_PREFIX`).
+   * For example, with `SHOWROOM_PREFIX=SR1` and `prefix='INV'`, returns `'SR1-INV'`.
+   */
+  getEffectivePrefix(prefix: string): string {
+    const nodePrefix =
+      process.env.SHOWROOM_PREFIX ||
+      process.env.SHOWROOM_ID ||
+      process.env.NODE_PREFIX;
+
+    if (nodePrefix && nodePrefix.trim() !== '') {
+      const cleanNodePrefix = nodePrefix.trim();
+      if (!prefix.startsWith(`${cleanNodePrefix}-`)) {
+        return `${cleanNodePrefix}-${prefix}`;
+      }
+    }
+    return prefix;
+  }
+
+  /**
    * Atomically allocates and returns the next formatted voucher number for
-   * a given prefix (e.g. `INV-000124`).
+   * a given prefix (e.g. `INV-000124` or `SR1-INV-000124`).
    *
    * Concurrency:
    *   - Postgres: TypeORM's `pessimistic_write` lock translates to
@@ -26,9 +46,11 @@ export class SequenceService {
    * is given, the sequence starts at 1.
    */
   async next(
-    prefix: string,
+    rawPrefix: string,
     seedFromMax?: () => Promise<number>,
   ): Promise<string> {
+    const prefix = this.getEffectivePrefix(rawPrefix);
+
     // better-sqlite3 has no row locks (it's single-writer at the connection
     // level, so the enclosing transaction already serialises every increment
     // for this prefix). Postgres needs SELECT … FOR UPDATE to block other

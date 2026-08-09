@@ -29,11 +29,21 @@ export class OutboxService {
     manager?: EntityManager,
   ) {
     const repo = manager ? manager.getRepository(SyncQueueEntry) : this.repo;
+    const showroomId =
+      process.env.SHOWROOM_ID ||
+      process.env.SHOWROOM_PREFIX ||
+      process.env.SHOP_ID;
+
+    const enrichedPayload =
+      showroomId && !payload.showroomId && !payload.showroom_id
+        ? { ...payload, showroomId }
+        : payload;
+
     return repo.save(
       repo.create({
         id: randomUUID(),
         type,
-        payload: JSON.stringify(payload),
+        payload: JSON.stringify(enrichedPayload),
         status: 'PENDING' as SyncQueueStatus,
         attempts: 0,
       }),

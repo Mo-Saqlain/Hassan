@@ -260,23 +260,39 @@ export class SyncService {
         default:
           throw new Error(`Unknown sync event type: ${event.type}`);
       }
+      const payloadObj = event.payload as any;
+      const showroomId =
+        payloadObj?.showroomId ||
+        payloadObj?.showroom_id ||
+        payloadObj?.data?.showroomId ||
+        payloadObj?.data?.showroom_id;
+
       await this.events.save({
         id: event.id,
         type: event.type,
         payload: JSON.stringify(event.payload),
         status: 'PROCESSED' as SyncEventStatus,
         resultId,
+        showroomId,
       });
       return { id: event.id, status: 'PROCESSED', resultId };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`Sync event ${event.id} failed: ${error}`);
+      const payloadObj = event.payload as any;
+      const showroomId =
+        payloadObj?.showroomId ||
+        payloadObj?.showroom_id ||
+        payloadObj?.data?.showroomId ||
+        payloadObj?.data?.showroom_id;
+
       await this.events.save({
         id: event.id,
         type: event.type,
         payload: JSON.stringify(event.payload),
         status: 'FAILED' as SyncEventStatus,
         error,
+        showroomId,
       });
       return { id: event.id, status: 'FAILED', error };
     }
