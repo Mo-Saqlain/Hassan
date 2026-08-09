@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import axios from 'axios';
@@ -34,7 +35,7 @@ export interface SyncRunSummary {
 }
 
 @Injectable()
-export class SyncService {
+export class SyncService implements OnModuleInit {
   private readonly logger = new Logger(SyncService.name);
   private isPushing = false;
 
@@ -46,6 +47,34 @@ export class SyncService {
     private readonly purchasesService: PurchasesService,
     private readonly dataSource: DataSource,
   ) {}
+
+  onModuleInit() {
+    if (process.env.CLOUD_SYNC_URL) {
+      this.logger.log(
+        `Continuous auto-sync daemon initialized for ${process.env.CLOUD_SYNC_URL} (flushing outbox every 30s).`,
+      );
+    }
+  }
+
+  @Interval(30000)
+  async handleAutoSyncInterval() {
+    if (
+      !process.env.CLOUD_SYNC_URL ||
+      !process.env.SHOP_ID ||
+      !process.env.SHOP_SYNC_SECRET
+    ) {
+      return;
+    }
+    try {
+      const count = await this.outbox.countPending();
+      if (count > 0) {
+        this.logger.log(`Auto-sync flushing ${count} pending outbox event(s)...`);
+        await this.pushPending();
+      }
+    } catch (e) {
+      // Quiet background exception log if internet is temporarily offline
+    }
+  }
 
   /**
    * Apply a mirrored row. Upsert by primary key, so re-pushing is harmless and a
