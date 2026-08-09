@@ -102,7 +102,23 @@ export default function LedgerView({ title, party, ledger }) {
                     {new Date(e.date).toLocaleDateString()}
                   </td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    {e.ref}
+                    {e.ref}{' '}
+                    {e.refId && e.refId !== '—' && (
+                      <button
+                        className="btn btn-sm btn-icon"
+                        style={{ padding: '1px 6px', fontSize: 11, marginLeft: 4 }}
+                        title="Print Voucher Receipt"
+                        onClick={() => {
+                          const route =
+                            e.ref?.startsWith('RCT') || e.ref?.startsWith('PMT') || e.ref?.startsWith('EXPV') || e.type === 'RECEIPT' || e.type === 'PAYMENT'
+                              ? `#/print/payment/${e.refId}`
+                              : `#/print/sale/${e.refId}`;
+                          window.open(route, '_blank');
+                        }}
+                      >
+                        🖨
+                      </button>
+                    )}
                   </td>
                   <td>
                     <span className="chip">{e.type}</span>

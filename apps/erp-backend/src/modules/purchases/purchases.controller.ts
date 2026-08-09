@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -64,5 +65,13 @@ export class PurchasesController {
     @Body() dto: ReversePurchaseDto,
   ) {
     return this.service.reverse(id, dto);
+  }
+
+  @Delete(':id')
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('reason') reason?: string,
+  ) {
+    return this.service.reverse(id, { reason: reason || 'Deleted by user' });
   }
 }

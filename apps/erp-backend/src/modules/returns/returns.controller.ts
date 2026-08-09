@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ReturnsService } from './returns.service';
 import { CreateSaleReturnDto } from './dto/create-sale-return.dto';
@@ -52,6 +54,14 @@ export class ReturnsController {
     return this.service.reverseSaleReturn(id, dto);
   }
 
+  @Delete('sale-returns/:id')
+  removeSaleReturn(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('reason') reason?: string,
+  ) {
+    return this.service.reverseSaleReturn(id, { reason: reason || 'Deleted by user' });
+  }
+
   @Post('purchase-returns')
   createPurchaseReturn(@Body() dto: CreatePurchaseReturnDto) {
     return this.service.createPurchaseReturn(dto);
@@ -83,5 +93,13 @@ export class ReturnsController {
     @Body() dto: ReverseReturnDto,
   ) {
     return this.service.reversePurchaseReturn(id, dto);
+  }
+
+  @Delete('purchase-returns/:id')
+  removePurchaseReturn(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('reason') reason?: string,
+  ) {
+    return this.service.reversePurchaseReturn(id, { reason: reason || 'Deleted by user' });
   }
 }

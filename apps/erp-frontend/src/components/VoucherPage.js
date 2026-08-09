@@ -96,13 +96,18 @@ export default function VoucherPage({ direction }) {
       notes: form.notes || undefined,
     };
     try {
+      let pId = editing?.id;
       if (editing) {
         await api.patch(`/payments/${editing.id}`, { ...payload, reason });
       } else {
-        await api.post('/payments', payload);
+        const res = await api.post('/payments', payload);
+        pId = res.data?.id;
       }
       cancelForm();
       reload();
+      if (pId) {
+        window.open(`#/print/payment/${pId}`, '_blank');
+      }
     } catch (err) {
       setSubmitError(err.uiMessage ?? 'Save failed');
     }
@@ -295,6 +300,14 @@ export default function VoucherPage({ direction }) {
                   {/* A settlement receipt belongs to a sale's instalment
                       schedule — the API refuses to edit it here, so don't
                       offer the button. */}
+                  <a
+                    className="btn btn-sm"
+                    href={`#/print/payment/${v.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Print
+                  </a>{' '}
                   {!v.reversedAt && v.referenceType !== 'SALE_COMMITMENT' && (
                     <>
                       <button

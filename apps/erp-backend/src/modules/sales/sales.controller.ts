@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -173,5 +174,13 @@ export class SalesController {
     @Body() body: { reason?: string },
   ) {
     return this.service.releaseBooking(id, { reason: body?.reason });
+  }
+
+  @Delete(':id')
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('reason') reason?: string,
+  ) {
+    return this.service.reverse(id, { reason: reason || 'Deleted by user' });
   }
 }
