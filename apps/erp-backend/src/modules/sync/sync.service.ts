@@ -58,6 +58,7 @@ export class SyncService implements OnModuleInit {
 
   @Interval(30000)
   async handleAutoSyncInterval() {
+    if (process.env.NODE_ENV === 'test') return;
     if (
       !process.env.CLOUD_SYNC_URL ||
       !process.env.SHOP_ID ||
