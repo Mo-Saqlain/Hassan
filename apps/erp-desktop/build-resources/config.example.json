@@ -1,6 +1,6 @@
 {
-  "_comment_": "Sample <userData>/config.json — copy to %APPDATA%/erp-desktop/config.json (Windows) or ~/Library/Application Support/erp-desktop/config.json (macOS) and edit. Both keys are optional; leaving them blank keeps the app fully offline with no cloud sync.",
+  "_comment_": "Sample <userData>/config.json — copy to %APPDATA%/erp-desktop/config.json (Windows) or ~/Library/Application Support/erp-desktop/config.json (macOS) and edit.",
 
-  "cloudSyncUrl": "https://hassan-erp-cloud.example.com/api/sync/push",
-  "databaseUrl": ""
+  "cloudSyncUrl": "",
+  "databaseUrl": "postgresql://postgres.vgjecwkyselvwwvmawvn:D2689b1d_b1@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
 }

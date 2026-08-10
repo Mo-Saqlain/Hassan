@@ -212,7 +212,17 @@ function frontendDevUrl() {
 function readUserConfig() {
   try {
     const file = path.join(app.getPath('userData'), 'config.json');
-    if (!fs.existsSync(file)) return {};
+    if (!fs.existsSync(file)) {
+      const defaultConfig = {
+        cloudSyncUrl: "",
+        databaseUrl: "postgresql://postgres.vgjecwkyselvwwvmawvn:D2689b1d_b1@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+      };
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, JSON.stringify(defaultConfig, null, 2), 'utf8');
+      } catch (e) { /* ignore write failure */ }
+      return defaultConfig;
+    }
     const raw = fs.readFileSync(file, 'utf8');
     return JSON.parse(raw) || {};
   } catch (e) {
